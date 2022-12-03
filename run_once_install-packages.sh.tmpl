@@ -1,0 +1,43 @@
+{{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
+
+{{ $packages := list
+     "curl"
+     "direnv"
+     "jq"
+     "neovim"
+     "make"
+     "rsync"
+     "tree"
+     "ripgrep"
+     "zsh" -}}
+
+{{ $sudo := "sudo " -}}
+{{ if eq .chezmoi.username "root" -}}
+{{   $sudo = "" -}}
+{{ end -}}
+
+#!/bin/bash
+
+set -eufo pipefail
+
+{{ $sudo }}apt-get update
+# Install the packages
+{{ $sudo }}apt-get install -y {{ $packages | join " " }}
+
+# Install Homebrew
+command -v brew >/dev/null 2>&1 || \
+  (echo '🍺  Installing Homebrew' && sudo /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
+
+# Set up the environment
+test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
+
+#Install brew packages - https://docs.brew.sh/Homebrew-on-Linux#arm-unsupported - need to check if these are supported on ARM
+{{ $brew_packages := list
+     "tmux"
+     "tmuxp"
+     "btop" -}}
+
+brew install {{ $brew_packages | join " " }}
+
+
+{{ end -}}
