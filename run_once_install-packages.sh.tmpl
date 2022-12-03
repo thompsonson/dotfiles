@@ -18,15 +18,15 @@
 
 #!/bin/bash
 
-set -eufo pipefail
-
 {{ $sudo }}apt-get update
 # Install the packages
 {{ $sudo }}apt-get install -y {{ $packages | join " " }}
 
+{{ if eq .chezmoi.arch "amd64" -}}
+
 # Install Homebrew
 command -v brew >/dev/null 2>&1 || \
-  (echo '🍺  Installing Homebrew' && sudo /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
+  (echo '🍺  Installing Homebrew' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
 
 # Set up the environment
 test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
@@ -39,5 +39,11 @@ test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
 
 brew install {{ $brew_packages | join " " }}
 
+{{ end -}}
+
+# Install Oh My Zsh - only checks for the script, which doesn't work with .chexmoiexternal approach... can both be used?
+if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
+  (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
+fi
 
 {{ end -}}
