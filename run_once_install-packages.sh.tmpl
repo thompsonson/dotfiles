@@ -9,6 +9,7 @@
      "rsync"
      "tree"
      "ripgrep"
+     "fzf"
      "zsh" -}}
 
 {{ $sudo := "sudo " -}}
@@ -44,6 +45,34 @@ brew install {{ $brew_packages | join " " }}
 # Install Oh My Zsh - only checks for the script, which doesn't work with .chexmoiexternal approach... can both be used?
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
+fi
+
+# Install nerd fonts
+NERD='\U1f913'
+if [ ! -f ~/.local/share/fonts/'Droid Sans Mono for Powerline Nerd Font Complete.otf' ]; then
+  mkdir -p ~/.local/share/fonts
+  cd ~/.local/share/fonts  
+  (echo -e "${NERD} Installing Nerd Fonts" && sh -c "$(curl -fLo 'Droid Sans Mono for Powerline Nerd Font Complete.otf' https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/DroidSansMono/complete/Droid%20Sans%20Mono%20Nerd%20Font%20Complete.otf)")
+fi
+# Install Meslo Nerd Font
+for tff in "MesloLGS NF Regular.ttf" "MesloLGS NF Bold.ttf" "MesloLGS NF Italic.ttf" "MesloLGS NF Bold Italic.ttf" 
+do
+  cd ~/.local/share/fonts
+  font_filename=$(echo $tff|sed -e 's/ //g')
+  font_urlencoded=$(echo $tff|sed -e 's/ /%20/g')
+  if [ ! -f $font_filename ]; then
+    echo curl -fLo $font_filename https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded
+    (echo -e "${NERD} Installing font ${tff} for PowerLevel10k" && sh -c "$(curl -fLo $font_filename https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded)")
+  fi
+done
+# Refresh the font cache
+fc-cache -f -v ~/.local/share/fonts
+
+# Install antigen
+MASK='\U1f637'
+if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
+  mkdir -p ~/.zsh/antigen
+  (echo -e "${MASK} Installing Antigen plugin Manager" && sh -c "$(curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)")
 fi
 
 {{ end -}}
