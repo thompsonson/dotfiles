@@ -4,13 +4,16 @@
      "curl"
      "direnv"
      "jq"
-     "neovim"
      "make"
      "rsync"
      "tree"
      "ripgrep"
      "fzf"
-     "zsh" -}}
+     "zsh"
+     "fish" 
+     "python3"    
+     "python3-pip"
+     "fontconfig" -}}
 
 {{ $sudo := "sudo " -}}
 {{ if eq .chezmoi.username "root" -}}
@@ -23,6 +26,19 @@
 # Install the packages
 {{ $sudo }}apt-get install -y {{ $packages | join " " }}
 
+# Install pipx
+if ! command -v pipx >/dev/null 2>&1; then
+  echo 'Installing pipx'
+  python3 -m pip install --user pipx
+  python3 -m pipx ensurepath
+fi
+
+# Install Poetry
+if ! command -v poetry >/dev/null 2>&1; then
+  echo 'Installing Poetry'
+  curl -sSL https://install.python-poetry.org | python3 -
+fi
+
 {{ if eq .chezmoi.arch "amd64" -}}
 
 # Install Homebrew
@@ -32,19 +48,29 @@ command -v brew >/dev/null 2>&1 || \
 # Set up the environment
 test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
 
-#Install brew packages - https://docs.brew.sh/Homebrew-on-Linux#arm-unsupported - need to check if these are supported on ARM
-{{ $brew_packages := list
-     "tmux"
-     "tmuxp"
-     "btop" -}}
+# Check if chezmoi is installed and install if not
+if ! command -v chezmoi >/dev/null 2>&1; then
+  echo 'Installing chezmoi'
+  brew install chezmoi
+else
+  echo 'Chezmoi is already installed'
+fi
 
-brew install {{ $brew_packages | join " " }}
+#Install brew packages - https://docs.brew.sh/Homebrew-on-Linux#arm-unsupported - need to check if these are supported on ARM
+
+brew install btop
+brew install tldr 
 
 {{ end -}}
 
 # Install Oh My Zsh - only checks for the script, which doesn't work with .chexmoiexternal approach... can both be used?
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
+fi
+
+# Install Fisher (Fish shell plugin manager)
+if command -v fish >/dev/null 2>&1; then
+  fish -c 'if not type fisher > /dev/null 2>&1; curl -sL https://git.io/fisher | source && fisher install jorgebucaran/fisher; end'
 fi
 
 # Install nerd fonts
