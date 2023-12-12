@@ -136,4 +136,11 @@ if ! command -v serverless >/dev/null 2>&1; then
   npm install -g serverless
 fi
 
+# Run the Fish script if Fish shell is available
+if command -v fish >/dev/null 2>&1; then
+   grep -qxF 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' ~/.config/fish/config.fish || echo 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' >> ~/.config/fish/config.fish
+else
+   echo "Fish shell not found. Please run 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' manually in Fish shell."
+fi
+
 {{ end -}}
