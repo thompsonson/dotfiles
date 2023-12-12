@@ -101,4 +101,39 @@ if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
   (echo -e "${MASK} Installing Antigen plugin Manager" && sh -c "$(curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)")
 fi
 
+# Install AWS CLI
+if ! command -v aws >/dev/null 2>&1; then
+  echo 'Installing AWS CLI'
+  python3 -m pip install awscli
+fi
+
+# Install nvm (Node Version Manager)
+if [ ! -d "$HOME/.nvm" ]; then
+  echo 'Installing nvm (Node Version Manager)'
+  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
+  export NVM_DIR="$HOME/.nvm"
+  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
+fi
+
+# Load nvm into the current session
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+
+# Install Node.js using nvm
+# You can specify a Node.js version here, e.g., '14.17.0'. Leave it as 'node' to install the latest version
+NODE_VERSION=${NODE_VERSION:-'node'}
+if ! command -v node >/dev/null 2>&1; then
+  echo "Installing Node.js version $NODE_VERSION"
+  nvm install $NODE_VERSION
+  nvm use $NODE_VERSION
+  nvm alias default $NODE_VERSION
+fi
+
+# Install Serverless Framework
+if ! command -v serverless >/dev/null 2>&1; then
+  echo 'Installing Serverless Framework'
+  npm install -g serverless
+fi
+
 {{ end -}}
