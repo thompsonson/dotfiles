@@ -10,7 +10,6 @@
      "ripgrep"
      "fzf"
      "zsh"
-     "fish" 
      "python3"    
      "python3-pip"
      "fontconfig" -}}
@@ -68,11 +67,6 @@ if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
 fi
 
-# Install Fisher (Fish shell plugin manager)
-if command -v fish >/dev/null 2>&1; then
-  fish -c 'if not type fisher > /dev/null 2>&1; curl -sL https://git.io/fisher | source && fisher install jorgebucaran/fisher; end'
-fi
-
 # Install nerd fonts
 NERD='\U1f913'
 if [ ! -f ~/.local/share/fonts/'Droid Sans Mono for Powerline Nerd Font Complete.otf' ]; then
@@ -99,48 +93,6 @@ MASK='\U1f637'
 if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
   mkdir -p ~/.zsh/antigen
   (echo -e "${MASK} Installing Antigen plugin Manager" && sh -c "$(curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)")
-fi
-
-# Install AWS CLI
-if ! command -v aws >/dev/null 2>&1; then
-  echo 'Installing AWS CLI'
-  python3 -m pip install awscli
-fi
-
-# Install nvm (Node Version Manager)
-if [ ! -d "$HOME/.nvm" ]; then
-  echo 'Installing nvm (Node Version Manager)'
-  curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/master/install.sh | bash
-  export NVM_DIR="$HOME/.nvm"
-  [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-  [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
-fi
-
-# Load nvm into the current session
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-# Install Node.js using nvm
-# You can specify a Node.js version here, e.g., '14.17.0'. Leave it as 'node' to install the latest version
-NODE_VERSION=${NODE_VERSION:-'node'}
-if ! command -v node >/dev/null 2>&1; then
-  echo "Installing Node.js version $NODE_VERSION"
-  nvm install $NODE_VERSION
-  nvm use $NODE_VERSION
-  nvm alias default $NODE_VERSION
-fi
-
-# Install Serverless Framework
-if ! command -v serverless >/dev/null 2>&1; then
-  echo 'Installing Serverless Framework'
-  npm install -g serverless
-fi
-
-# Run the Fish script if Fish shell is available
-if command -v fish >/dev/null 2>&1; then
-   grep -qxF 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' ~/.config/fish/config.fish || echo 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' >> ~/.config/fish/config.fish
-else
-   echo "Fish shell not found. Please run 'set -Ua fish_user_paths /home/linuxbrew/.linuxbrew/bin' manually in Fish shell."
 fi
 
 {{ end -}}
