@@ -1,45 +1,64 @@
-{{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
-
-{{ $packages := list
+{{ $commonPackages := list
      "curl"
-     "direnv"
+     "direnv" 
      "jq"
      "make"
      "rsync"
      "tree"
      "ripgrep"
      "fzf"
-     "zsh"
-     "python3"    
-     "python3-pip"
-     "fontconfig" -}}
+     "zsh" -}}
 
+{{ $brewPackages := list
+     "btop"
+     "tldr"
+     "uv"
+     "sqlite" -}}
+
+{{ $modernCli := list
+     "bat"
+     "eza" 
+     "fd"
+     "git-delta"
+     "ncdu"
+     "httpie"
+     "tmux" -}}
+
+{{ $nerdFonts := list
+     "MesloLGS NF Regular.ttf"
+     "MesloLGS NF Bold.ttf" 
+     "MesloLGS NF Italic.ttf"
+     "MesloLGS NF Bold Italic.ttf" -}}
+
+#!/bin/bash
+
+{{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
+echo '🐧 Installing Linux packages'
+
+{{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" -}}
+{{ $allLinuxPackages := concat $commonPackages $linuxSpecific -}}
 {{ $sudo := "sudo " -}}
 {{ if eq .chezmoi.username "root" -}}
 {{   $sudo = "" -}}
 {{ end -}}
 
-#!/bin/bash
-
 {{ $sudo }}apt-get update
-# Install the packages
-{{ $sudo }}apt-get install -y {{ $packages | join " " }}
+# Install common + Linux-specific packages
+{{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
 
-# Install pipx
+# Start and enable Docker
+{{ $sudo }}systemctl start docker
+{{ $sudo }}systemctl enable docker
+{{ $sudo }}usermod -aG docker {{ .chezmoi.username }}
+
+# Install pipx (Linux method)
 if ! command -v pipx >/dev/null 2>&1; then
   echo 'Installing pipx'
   python3 -m pip install --user pipx
   python3 -m pipx ensurepath
 fi
 
-# Install Poetry
-if ! command -v poetry >/dev/null 2>&1; then
-  echo 'Installing Poetry'
-  curl -sSL https://install.python-poetry.org | python3 -
-fi
-
 {{ if eq .chezmoi.arch "amd64" -}}
-
 # Install Homebrew
 command -v brew >/dev/null 2>&1 || \
   (echo '🍺  Installing Homebrew' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
@@ -47,52 +66,385 @@ command -v brew >/dev/null 2>&1 || \
 # Set up the environment
 test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
 
-# Check if chezmoi is installed and install if not
-if ! command -v chezmoi >/dev/null 2>&1; then
-  echo 'Installing chezmoi'
-  brew install chezmoi
-else
-  echo 'Chezmoi is already installed'
-fi
-
-#Install brew packages - https://docs.brew.sh/Homebrew-on-Linux#arm-unsupported - need to check if these are supported on ARM
-
-brew install btop
-brew install tldr 
-
+# Install additional brew packages (including modern CLI tools)
+{{ $allBrewPackages := concat $brewPackages $modernCli -}}
+brew install {{ $allBrewPackages | join " " }}
+{{ else -}}
+# Install modern CLI tools via apt for non-amd64 architectures
+{{ $sudo }}apt-get install -y bat fd-find ncdu tmux
+# Note: eza, delta, httpie may need alternative installation methods on ARM
 {{ end -}}
 
-# Install Oh My Zsh - only checks for the script, which doesn't work with .chexmoiexternal approach... can both be used?
+# Install fonts (Linux)
+echo 'Installing fonts for Linux'
+NERD='\U1f913'
+FONT_DIR="$HOME/.local/share/fonts"
+mkdir -p "$FONT_DIR"
+
+# Install Droid Sans Mono Nerd Font
+if [ ! -f "$FONT_DIR/DroidSansMForPowerline.otf" ]; then
+  echo -e "${NERD} Installing Droid Sans Mono Nerd Font"
+  curl -fLo "$FONT_DIR/DroidSansMForPowerline.otf" https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/DroidSansMono/DroidSansMono.otf || echo "Failed to download Droid Sans font"
+fi
+
+# Install Meslo Nerd Fonts
+{{ range $font := $nerdFonts -}}
+font_filename=$(echo "{{ $font }}" | sed -e 's/ //g')
+font_urlencoded=$(echo "{{ $font }}" | sed -e 's/ /%20/g')
+if [ ! -f "$FONT_DIR/$font_filename" ]; then
+  (echo -e "${NERD} Installing font {{ $font }} for PowerLevel10k" && curl -fLo "$FONT_DIR/$font_filename" "https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded")
+fi
+{{ end -}}
+
+# Refresh font cache (Linux only)
+fc-cache -f -v "$FONT_DIR"
+{{ end -}}
+
+{{ if eq .chezmoi.os "darwin" -}}
+echo '🍎 Installing macOS packages'
+
+{{ $macosSpecific := list "python" "docker" "openssh" "docker-compose" "awscli" "gpg" -}}
+{{ $allMacosPackages := concat $commonPackages $macosSpecific $brewPackages $modernCli -}}
+
+# Install Homebrew first if needed
+command -v brew >/dev/null 2>&1 || \
+  (echo '🍺  Installing Homebrew' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
+
+# Ensure Homebrew is in PATH and environment is set up
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
+
+# Function to install packages with progress
+install_with_progress() {
+  local packages=($@)
+  local total=${#packages[@]}
+  local current=0
+  local failed_packages=()
+  
+  echo "📦 Installing $total packages..."
+  
+  # Ensure brew is in PATH
+  export PATH="/usr/local/bin:$PATH"
+  
+  for package in "${packages[@]}"; do
+    current=$((current + 1))
+    echo "[$current/$total] Installing $package..."
+    
+    if brew list "$package" &>/dev/null; then
+      echo "  ✅ $package already installed"
+    else
+      echo "  🔄 Installing $package..."
+      if brew install "$package" 2>&1; then
+        echo "  ✅ $package installed successfully"
+      else
+        echo "  ❌ Failed to install $package"
+        failed_packages+=("$package")
+      fi
+    fi
+    echo ""
+  done
+  
+  if [ ${#failed_packages[@]} -gt 0 ]; then
+    echo "⚠️  Failed to install: ${failed_packages[*]}"
+    echo "You can retry these manually: brew install ${failed_packages[*]}"
+  fi
+}
+
+# Ensure Homebrew is in PATH
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+
+# Install all packages with progress indicators
+{{ $allMacosPackages := concat $commonPackages $macosSpecific $brewPackages $modernCli -}}
+install_with_progress {{ $allMacosPackages | join " " }}
+
+# Install Docker Desktop
+if ! command -v docker >/dev/null 2>&1; then
+  echo 'Installing Docker Desktop'
+  brew install --cask docker
+fi
+
+# Install pipx (macOS method)
+if ! command -v pipx >/dev/null 2>&1; then
+  echo 'Installing pipx'
+  brew install pipx
+  pipx ensurepath
+fi
+
+# Install macOS applications
+echo 'Installing macOS applications'
+
+# Install Visual Studio Code
+if ! command -v code >/dev/null 2>&1; then
+  echo 'Installing Visual Studio Code'
+  brew install --cask visual-studio-code
+fi
+
+# Install productivity apps
+echo 'Installing productivity apps'
+brew install --cask rectangle    # Window management
+brew install --cask alfred       # Spotlight replacement
+
+# Configure macOS system preferences
+echo 'Configuring macOS system preferences'
+defaults write com.apple.dock autohide -bool true
+defaults write com.apple.finder ShowPathbar -bool true
+defaults write com.apple.finder ShowStatusBar -bool true
+defaults write com.apple.finder FXDefaultSearchScope -string "SCcf"  # Search current folder by default
+defaults write com.apple.screencapture location -string "$HOME/Desktop/Screenshots"
+mkdir -p "$HOME/Desktop/Screenshots"
+
+# Install fonts (macOS)
+echo 'Installing fonts for macOS'
+NERD='\U1f913'
+FONT_DIR="$HOME/Library/Fonts"
+mkdir -p "$FONT_DIR"
+
+# Install Droid Sans Mono Nerd Font
+if [ ! -f "$FONT_DIR/Droid Sans Mono for Powerline Nerd Font Complete.otf" ]; then
+  (echo -e "${NERD} Installing Droid Sans Mono Nerd Font" && curl -fLo "$FONT_DIR/Droid Sans Mono for Powerline Nerd Font Complete.otf" https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/DroidSansMono/complete/Droid%20Sans%20Mono%20Nerd%20Font%20Complete.otf)
+fi
+
+# Install Meslo Nerd Fonts (same list as Linux)
+{{ range $font := $nerdFonts -}}
+font_filename=$(echo "{{ $font }}" | sed -e 's/ //g')
+font_urlencoded=$(echo "{{ $font }}" | sed -e 's/ /%20/g')
+if [ ! -f "$FONT_DIR/$font_filename" ]; then
+  (echo -e "${NERD} Installing font {{ $font }} for PowerLevel10k" && curl -fLo "$FONT_DIR/$font_filename" "https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded")
+fi
+{{ end -}}
+
+echo 'Fonts installed! You may need to restart your terminal and select a Nerd Font.'
+{{ end -}}
+
+# Common installations and configuration for all platforms
+echo '⚙️  Installing common tools and configuring environment'
+
+# Refresh PATH to pick up newly installed tools
+{{ if eq .chezmoi.os "darwin" -}}
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
+{{ else -}}
+if command -v brew >/dev/null 2>&1; then
+  eval "$(brew shellenv)"
+fi
+{{ end -}}
+
+# Create development directories
+echo 'Creating development directories'
+mkdir -p ~/Code ~/Projects ~/Scripts
+
+# Git configuration
+echo 'Configuring Git'
+git config --global user.name "Matthew Thompson"
+git config --global user.email "thompsonson@gmail.com"
+git config --global init.defaultBranch main
+git config --global pull.rebase true
+git config --global core.autocrlf input
+
+# Set editor based on platform
+{{ if eq .chezmoi.os "darwin" -}}
+git config --global core.editor "code --wait"
+export EDITOR="code"
+{{ else -}}
+git config --global core.editor "nano"
+export EDITOR="nano"
+{{ end -}}
+
+# Configure Git to use delta for better diffs
+if command -v delta >/dev/null 2>&1; then
+  git config --global core.pager delta
+  git config --global interactive.diffFilter "delta --color-only"
+  git config --global delta.navigate true
+  git config --global delta.light false
+  git config --global merge.conflictstyle diff3
+  git config --global diff.colorMoved default
+fi
+
+# GPG setup for signed commits (only if GPG is available)
+if command -v gpg >/dev/null 2>&1; then
+  echo 'Setting up GPG for signed commits'
+  if ! gpg --list-secret-keys --keyid-format LONG | grep -q "sec"; then
+  echo 'Generating GPG key for signed commits'
+  
+  # Create a temporary file for GPG key generation
+  GPG_CONFIG=$(mktemp)
+  cat > "$GPG_CONFIG" << EOF
+Key-Type: RSA
+Key-Length: 4096
+Name-Real: Matthew Thompson
+Name-Email: thompsonson@gmail.com
+Expire-Date: 2y
+%no-protection
+%commit
+EOF
+
+  gpg --batch --generate-key "$GPG_CONFIG"
+  rm "$GPG_CONFIG"
+  
+  # Configure git to use GPG
+  GPG_KEY=$(gpg --list-secret-keys --keyid-format LONG | grep sec | head -1 | sed 's/.*\/\([A-Z0-9]*\).*/\1/')
+  git config --global user.signingkey "$GPG_KEY"
+  git config --global commit.gpgsign true
+  
+  echo '📋 Your GPG public key (add this to GitHub/GitLab):'
+  gpg --armor --export "$GPG_KEY"
+  echo ''
+  echo '💡 Copy the key above and add it to your GitHub/GitLab GPG keys settings'
+  else
+    echo 'GPG key already exists'
+  fi
+else
+  echo 'GPG not found - skipping GPG setup. Install GPG first: brew install gpg'
+fi
+
+# SSH setup and key management
+echo 'Setting up SSH'
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+# Generate SSH key if it doesn't exist (using modern ed25519)
+if [ ! -f ~/.ssh/id_ed25519 ]; then
+  echo 'Generating new SSH key'
+  ssh-keygen -t ed25519 -C "thompsonson@gmail.com" -f ~/.ssh/id_ed25519 -N ""
+  
+  # Start ssh-agent and add key
+  eval "$(ssh-agent -s)"
+  ssh-add ~/.ssh/id_ed25519
+  
+  echo '📋 Your SSH public key (add this to GitHub/GitLab):'
+  cat ~/.ssh/id_ed25519.pub
+  echo ''
+  echo '💡 Tip: Run "pbcopy < ~/.ssh/id_ed25519.pub" (macOS) or copy the key above to your clipboard'
+else
+  echo 'SSH key already exists'
+  # Add to ssh-agent if running
+  if pgrep -x ssh-agent > /dev/null; then
+    ssh-add ~/.ssh/id_ed25519 2>/dev/null || true
+  fi
+fi
+
+# Basic SSH config
+if [ ! -f ~/.ssh/config ]; then
+  cat > ~/.ssh/config << 'EOF'
+# Default settings for all hosts
+Host *
+  AddKeysToAgent yes
+  UseKeychain yes
+  IdentityFile ~/.ssh/id_ed25519
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+
+# GitHub
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+
+# GitLab
+Host gitlab.com
+  HostName gitlab.com
+  User git
+  IdentityFile ~/.ssh/id_ed25519
+EOF
+  chmod 600 ~/.ssh/config
+fi
+
+# Configure shell aliases (works with Oh My Zsh)
+echo 'Setting up shell aliases'
+
+# Ensure Homebrew path is in shell configs
+if ! grep -q '/usr/local/bin' ~/.zshrc 2>/dev/null; then
+  echo 'export PATH="/usr/local/bin:/usr/local/sbin:$PATH"' >> ~/.zshrc
+fi
+
+cat >> ~/.zshrc << 'EOF'
+
+# Modern CLI tool aliases (better defaults)
+if command -v eza >/dev/null 2>&1; then
+  alias ls="eza --icons"
+  alias ll="eza -la --icons --header"
+  alias tree="eza --tree"
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  alias cat="bat"
+  alias less="bat"
+fi
+
+if command -v fd >/dev/null 2>&1; then
+  alias find="fd"
+fi
+
+# Development shortcuts (complement Oh My Zsh git plugin)
+alias ..="cd .."
+alias ...="cd ../.."
+alias ....="cd ../../.."
+
+# Docker shortcuts  
+alias dps="docker ps"
+alias di="docker images"
+alias dc="docker-compose"
+alias dcu="docker-compose up"
+alias dcd="docker-compose down"
+
+# System utilities
+alias h="history"
+alias top="btop"
+alias du="ncdu"
+
+EOF
+
+# Install Poetry (same method everywhere)
+if ! command -v poetry >/dev/null 2>&1; then
+  echo 'Installing Poetry'
+  curl -sSL https://install.python-poetry.org | python3 -
+fi
+
+# Install OpenHands AI CLI (common - requires uv)
+# Refresh PATH to find uv
+export PATH="/usr/local/bin:$PATH"
+hash -r  # Clear command cache
+
+if command -v uv >/dev/null 2>&1; then
+  echo 'Installing OpenHands AI CLI'
+  if ! command -v openhands >/dev/null 2>&1; then
+    uv tool install openhands-ai || echo "Failed to install OpenHands - continuing..."
+  else
+    echo 'OpenHands already installed'
+  fi
+else
+  echo 'Warning: uv not found in PATH, skipping OpenHands installation'
+  echo "PATH: $PATH"
+  echo "Available commands: $(ls /usr/local/bin/ | grep uv || echo 'no uv found')"
+fi
+
+
+# Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
 fi
 
-# Install nerd fonts
-NERD='\U1f913'
-if [ ! -f ~/.local/share/fonts/'Droid Sans Mono for Powerline Nerd Font Complete.otf' ]; then
-  mkdir -p ~/.local/share/fonts
-  cd ~/.local/share/fonts  
-  (echo -e "${NERD} Installing Nerd Fonts" && sh -c "$(curl -fLo 'Droid Sans Mono for Powerline Nerd Font Complete.otf' https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/DroidSansMono/complete/Droid%20Sans%20Mono%20Nerd%20Font%20Complete.otf)")
-fi
-# Install Meslo Nerd Font
-for tff in "MesloLGS NF Regular.ttf" "MesloLGS NF Bold.ttf" "MesloLGS NF Italic.ttf" "MesloLGS NF Bold Italic.ttf" 
-do
-  cd ~/.local/share/fonts
-  font_filename=$(echo $tff|sed -e 's/ //g')
-  font_urlencoded=$(echo $tff|sed -e 's/ /%20/g')
-  if [ ! -f $font_filename ]; then
-    echo curl -fLo $font_filename https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded
-    (echo -e "${NERD} Installing font ${tff} for PowerLevel10k" && sh -c "$(curl -fLo $font_filename https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded)")
-  fi
-done
-# Refresh the font cache
-fc-cache -f -v ~/.local/share/fonts
-
-# Install antigen
+# Install Antigen (same everywhere)
 MASK='\U1f637'
 if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
   mkdir -p ~/.zsh/antigen
-  (echo -e "${MASK} Installing Antigen plugin Manager" && sh -c "$(curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)")
+  (echo -e "${MASK} Installing Antigen plugin Manager" && curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)
 fi
 
-{{ end -}}
+echo '✅ Installation complete!'
+echo '📝 Next steps:'
+echo '   1. Restart your terminal: exec zsh'
+echo '   2. Install any failed packages manually: brew install <package-name>'
+echo '   3. Add your SSH public key to GitHub/GitLab'
+if command -v gpg >/dev/null 2>&1; then
+echo '   4. Add your GPG public key to GitHub/GitLab for verified commits'
+else
+echo '   4. Install GPG: brew install gpg, then re-run this script'
+fi
+echo '   5. Select a Nerd Font in your terminal preferences (MesloLGS NF recommended)'
+echo '   6. Start Docker Desktop from Applications'
+echo '   7. Configure Rectangle for window management'
+echo '   8. Set up Alfred as your Spotlight replacement'
+echo '   9. Test modern CLI tools: bat --version, eza --version, fd --version'
+echo ''
+echo '🎉 Your development environment is ready!'
