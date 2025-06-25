@@ -32,24 +32,103 @@
 
 #!/bin/bash
 
+# Detect WSL environment
+is_wsl() {
+  if [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
+    return 0
+  elif [ -d /mnt/c ]; then
+    return 0
+  else
+    return 1
+  fi
+}
+
 {{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
 echo '🐧 Installing Linux packages'
 
-{{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" -}}
-{{ $allLinuxPackages := concat $commonPackages $linuxSpecific -}}
+{{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" -}}
+{{ $linuxWithDocker := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" -}}
 {{ $sudo := "sudo " -}}
 {{ if eq .chezmoi.username "root" -}}
 {{   $sudo = "" -}}
 {{ end -}}
 
 {{ $sudo }}apt-get update
-# Install common + Linux-specific packages
-{{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
 
-# Start and enable Docker
-{{ $sudo }}systemctl start docker
-{{ $sudo }}systemctl enable docker
-{{ $sudo }}usermod -aG docker {{ .chezmoi.username }}
+# Choose package list based on environment
+if is_wsl; then
+  echo '🪟 Detected WSL environment - installing without Docker'
+  {{ $allLinuxPackages := concat $commonPackages $linuxSpecific -}}
+  {{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
+  
+  # WSL-specific configurations
+  echo 'Configuring WSL-specific settings'
+  
+  # Fix for WSL file permissions
+  if [ ! -f /etc/wsl.conf ]; then
+    {{ $sudo }}tee /etc/wsl.conf > /dev/null <<EOF
+[automount]
+enabled = true
+root = /mnt/
+options = "metadata,umask=22,fmask=11"
+
+[interop]
+enabled = true
+appendWindowsPath = true
+
+[user]
+default = {{ .chezmoi.username }}
+EOF
+    echo '📝 Created /etc/wsl.conf - you may need to restart WSL for changes to take effect'
+    echo '   Run "wsl --shutdown" from Windows PowerShell, then restart your WSL session'
+  fi
+  
+  # Set up Windows interop
+  if [ -d /mnt/c/Windows/System32 ]; then
+    echo 'Windows interop detected - add to PATH via chezmoi templates'
+    echo 'Suggested PATH addition: export PATH="$PATH:/mnt/c/Windows/System32"'
+  fi
+  
+  # Get Windows username (may be different from WSL username)
+  WINDOWS_USER=$(cmd.exe /c "echo %USERNAME%" 2>/dev/null | tr -d '\r\n')
+  echo "Windows username: $WINDOWS_USER, WSL username: $(whoami)"
+  
+  # Verify Windows user directory exists
+  if [ ! -d "/mnt/c/Users/$WINDOWS_USER" ]; then
+    echo "Warning: Windows user directory /mnt/c/Users/$WINDOWS_USER not found"
+    echo "Available users:" 
+    ls -la /mnt/c/Users/ 2>/dev/null || echo "Cannot access /mnt/c/Users/"
+    echo "You may need to adjust the Windows username or check WSL mount configuration"
+  fi
+  
+  # Create symbolic links to common Windows directories
+  echo 'Creating convenient Windows directory links'
+  mkdir -p ~/Windows
+  [ ! -L ~/Windows/Desktop ] && [ -d "/mnt/c/Users/$WINDOWS_USER/Desktop" ] && ln -sf "/mnt/c/Users/$WINDOWS_USER/Desktop" ~/Windows/Desktop
+  [ ! -L ~/Windows/Documents ] && [ -d "/mnt/c/Users/$WINDOWS_USER/Documents" ] && ln -sf "/mnt/c/Users/$WINDOWS_USER/Documents" ~/Windows/Documents
+  [ ! -L ~/Windows/Downloads ] && [ -d "/mnt/c/Users/$WINDOWS_USER/Downloads" ] && ln -sf "/mnt/c/Users/$WINDOWS_USER/Downloads" ~/Windows/Downloads
+  
+  # Display what was created
+  echo "Created Windows directory links:"
+  ls -la ~/Windows/ 2>/dev/null || echo "No Windows directory links created"
+
+  echo 'ℹ️  Consider adding WSL aliases to your chezmoi .zshrc template:'
+  echo '   alias explorer="explorer.exe"'
+  echo '   alias notepad="notepad.exe"'
+  echo '   alias code="code.exe"'
+  echo '   alias docker="docker.exe"'
+  echo '   alias docker-compose="docker-compose.exe"'
+
+else
+  echo '🐧 Standard Linux environment - installing with Docker'
+  {{ $allLinuxPackages := concat $commonPackages $linuxWithDocker -}}
+  {{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
+  
+  # Start and enable Docker (non-WSL only)
+  {{ $sudo }}systemctl start docker
+  {{ $sudo }}systemctl enable docker
+  {{ $sudo }}usermod -aG docker {{ .chezmoi.username }}
+fi
 
 # Install pipx (Linux method)
 if ! command -v pipx >/dev/null 2>&1; then
@@ -63,8 +142,16 @@ fi
 command -v brew >/dev/null 2>&1 || \
   (echo '🍺  Installing Homebrew' && /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)")
 
-# Set up the environment
-test -d ~/.linuxbrew && eval "$(~/.linuxbrew/bin/brew shellenv)"
+# Set up the environment for this session only
+if [ -d ~/.linuxbrew ]; then
+  eval "$(~/.linuxbrew/bin/brew shellenv)"
+elif [ -d /home/linuxbrew/.linuxbrew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+
+echo 'ℹ️  Note: Add Homebrew to your shell PATH via chezmoi templates:'
+echo '   For Linux: eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"'
+echo '   Or: eval "$(~/.linuxbrew/bin/brew shellenv)"'
 
 # Install additional brew packages (including modern CLI tools)
 {{ $allBrewPackages := concat $brewPackages $modernCli -}}
@@ -75,29 +162,44 @@ brew install {{ $allBrewPackages | join " " }}
 # Note: eza, delta, httpie may need alternative installation methods on ARM
 {{ end -}}
 
-# Install fonts (Linux)
-echo 'Installing fonts for Linux'
+# Install fonts (Linux/WSL)
+echo 'Installing fonts for Linux/WSL'
 NERD='\U1f913'
+
+if is_wsl; then
+  echo '🪟 WSL detected - installing fonts to Linux directory only'
+  echo '💡 Install fonts to Windows manually via Windows Terminal or Settings'
+fi
+
+# Use Linux font directory for both Linux and WSL
 FONT_DIR="$HOME/.local/share/fonts"
 mkdir -p "$FONT_DIR"
 
-# Install Droid Sans Mono Nerd Font
-if [ ! -f "$FONT_DIR/DroidSansMForPowerline.otf" ]; then
+# Install Droid Sans Mono Nerd Font  
+if [ ! -f "$FONT_DIR/DroidSansMNerdFont-Regular.otf" ]; then
   echo -e "${NERD} Installing Droid Sans Mono Nerd Font"
-  curl -fLo "$FONT_DIR/DroidSansMForPowerline.otf" https://github.com/ryanoasis/nerd-fonts/raw/master/patched-fonts/DroidSansMono/DroidSansMono.otf || echo "Failed to download Droid Sans font"
+  curl -fLo "$FONT_DIR/DroidSansMNerdFont-Regular.otf" "https://github.com/ryanoasis/nerd-fonts/raw/HEAD/patched-fonts/DroidSansMono/DroidSansMNerdFont-Regular.otf" || echo "Failed to download Droid Sans font"
 fi
 
-# Install Meslo Nerd Fonts
+# Install Meslo Nerd Fonts (PowerLevel10k compatible)
 {{ range $font := $nerdFonts -}}
 font_filename=$(echo "{{ $font }}" | sed -e 's/ //g')
 font_urlencoded=$(echo "{{ $font }}" | sed -e 's/ /%20/g')
 if [ ! -f "$FONT_DIR/$font_filename" ]; then
-  (echo -e "${NERD} Installing font {{ $font }} for PowerLevel10k" && curl -fLo "$FONT_DIR/$font_filename" "https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded")
+  (echo -e "${NERD} Installing font {{ $font }} for PowerLevel10k" && curl -fLo "$FONT_DIR/$font_filename" "https://github.com/romkatv/powerlevel10k-media/raw/master/$font_urlencoded") || echo "Failed to download {{ $font }}"
 fi
 {{ end -}}
 
-# Refresh font cache (Linux only)
+# Refresh font cache
 fc-cache -f -v "$FONT_DIR"
+
+if is_wsl; then
+  echo '📝 Fonts installed to Linux. For Windows Terminal, install fonts manually:'
+  echo '   • Download Nerd Fonts from: https://github.com/ryanoasis/nerd-fonts'
+  echo '   • Or use: winget install Meslo.LG.NF'
+else
+  echo 'Fonts installed! You may need to restart your terminal and select a Nerd Font.'
+fi
 {{ end -}}
 
 {{ if eq .chezmoi.os "darwin" -}}
@@ -219,13 +321,16 @@ echo 'Fonts installed! You may need to restart your terminal and select a Nerd F
 # Common installations and configuration for all platforms
 echo '⚙️  Installing common tools and configuring environment'
 
-# Refresh PATH to pick up newly installed tools
+# Refresh PATH to pick up newly installed tools for current session
 {{ if eq .chezmoi.os "darwin" -}}
 export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
 {{ else -}}
-if command -v brew >/dev/null 2>&1; then
-  eval "$(brew shellenv)"
+# Source brew environment for current session
+if [ -d ~/.linuxbrew ]; then
+  eval "$(~/.linuxbrew/bin/brew shellenv)"
+elif [ -d /home/linuxbrew/.linuxbrew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 {{ end -}}
 
@@ -241,13 +346,18 @@ git config --global init.defaultBranch main
 git config --global pull.rebase true
 git config --global core.autocrlf input
 
-# Set editor based on platform
+# Set editor based on platform and environment
 {{ if eq .chezmoi.os "darwin" -}}
 git config --global core.editor "code --wait"
 export EDITOR="code"
 {{ else -}}
-git config --global core.editor "nano"
-export EDITOR="nano"
+if is_wsl && command -v code.exe >/dev/null 2>&1; then
+  git config --global core.editor "code.exe --wait"
+  export EDITOR="code.exe"
+else
+  git config --global core.editor "nano"
+  export EDITOR="nano"
+fi
 {{ end -}}
 
 # Configure Git to use delta for better diffs
@@ -314,7 +424,13 @@ if [ ! -f ~/.ssh/id_ed25519 ]; then
   echo '📋 Your SSH public key (add this to GitHub/GitLab):'
   cat ~/.ssh/id_ed25519.pub
   echo ''
-  echo '💡 Tip: Run "pbcopy < ~/.ssh/id_ed25519.pub" (macOS) or copy the key above to your clipboard'
+  if is_wsl; then
+    echo '💡 Tip: Run "cat ~/.ssh/id_ed25519.pub | clip.exe" to copy to Windows clipboard'
+  {{ if eq .chezmoi.os "darwin" -}}
+  else
+    echo '💡 Tip: Run "pbcopy < ~/.ssh/id_ed25519.pub" to copy to clipboard'
+  {{ end -}}
+  fi
 else
   echo 'SSH key already exists'
   # Add to ssh-agent if running
@@ -349,50 +465,27 @@ EOF
   chmod 600 ~/.ssh/config
 fi
 
-# Configure shell aliases (works with Oh My Zsh)
-echo 'Setting up shell aliases'
+# Configure environment for current session only
+echo 'Setting up current session environment'
 
-# Ensure Homebrew path is in shell configs
-if ! grep -q '/usr/local/bin' ~/.zshrc 2>/dev/null; then
-  echo 'export PATH="/usr/local/bin:/usr/local/sbin:$PATH"' >> ~/.zshrc
+# Add ~/bin to current PATH and create directory
+export PATH="$HOME/bin:$PATH"
+mkdir -p ~/bin
+
+# Source brew environment for current session if available
+{{ if eq .chezmoi.os "darwin" -}}
+export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
+eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
+{{ else -}}
+if [ -d ~/.linuxbrew ]; then
+  eval "$(~/.linuxbrew/bin/brew shellenv)"
+elif [ -d /home/linuxbrew/.linuxbrew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
+{{ end -}}
 
-cat >> ~/.zshrc << 'EOF'
-
-# Modern CLI tool aliases (better defaults)
-if command -v eza >/dev/null 2>&1; then
-  alias ls="eza --icons"
-  alias ll="eza -la --icons --header"
-  alias tree="eza --tree"
-fi
-
-if command -v bat >/dev/null 2>&1; then
-  alias cat="bat"
-  alias less="bat"
-fi
-
-if command -v fd >/dev/null 2>&1; then
-  alias find="fd"
-fi
-
-# Development shortcuts (complement Oh My Zsh git plugin)
-alias ..="cd .."
-alias ...="cd ../.."
-alias ....="cd ../../.."
-
-# Docker shortcuts  
-alias dps="docker ps"
-alias di="docker images"
-alias dc="docker-compose"
-alias dcu="docker-compose up"
-alias dcd="docker-compose down"
-
-# System utilities
-alias h="history"
-alias top="btop"
-alias du="ncdu"
-
-EOF
+# Note: Shell configuration (aliases, PATH, etc.) should be managed by chezmoi templates
+echo 'ℹ️  Note: Shell configuration (.zshrc) should be managed by chezmoi templates'
 
 # Install Poetry (same method everywhere)
 if ! command -v poetry >/dev/null 2>&1; then
@@ -401,8 +494,17 @@ if ! command -v poetry >/dev/null 2>&1; then
 fi
 
 # Install OpenHands AI CLI (common - requires uv)
-# Refresh PATH to find uv
+# Ensure tools are available in current session
+{{ if eq .chezmoi.os "darwin" -}}
 export PATH="/usr/local/bin:$PATH"
+{{ else -}}
+# Source brew environment if available for current session
+if [ -d ~/.linuxbrew ]; then
+  eval "$(~/.linuxbrew/bin/brew shellenv)"
+elif [ -d /home/linuxbrew/.linuxbrew ]; then
+  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+{{ end -}}
 hash -r  # Clear command cache
 
 if command -v uv >/dev/null 2>&1; then
@@ -414,8 +516,9 @@ if command -v uv >/dev/null 2>&1; then
   fi
 else
   echo 'Warning: uv not found in PATH, skipping OpenHands installation'
-  echo "PATH: $PATH"
-  echo "Available commands: $(ls /usr/local/bin/ | grep uv || echo 'no uv found')"
+  echo "Current PATH: $PATH"
+  echo "Brew status: $(command -v brew || echo 'not found')"
+  echo "Try: brew install uv"
 fi
 
 
@@ -432,19 +535,90 @@ if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
 fi
 
 echo '✅ Installation complete!'
-echo '📝 Next steps:'
-echo '   1. Restart your terminal: exec zsh'
-echo '   2. Install any failed packages manually: brew install <package-name>'
-echo '   3. Add your SSH public key to GitHub/GitLab'
-if command -v gpg >/dev/null 2>&1; then
-echo '   4. Add your GPG public key to GitHub/GitLab for verified commits'
-else
-echo '   4. Install GPG: brew install gpg, then re-run this script'
+echo ''
+
+# Platform-specific next steps
+if is_wsl; then
+  echo '🪟 WSL-specific notes:'
+  echo '   • Fonts installed to Linux - use in WSL terminals'
+  echo '   • For Windows Terminal, install fonts manually: winget install Meslo.LG.NF'
+  echo '   • Windows directories linked in ~/Windows/ for convenience'
+  echo '   • Add WSL aliases to your chezmoi .zshrc template (see suggestions above)'
+  echo '   • Add Windows PATH to your chezmoi template if needed'
+  echo '   • Run "wsl --shutdown" from PowerShell if you need to restart WSL'
+  echo ''
 fi
-echo '   5. Select a Nerd Font in your terminal preferences (MesloLGS NF recommended)'
-echo '   6. Start Docker Desktop from Applications'
-echo '   7. Configure Rectangle for window management'
-echo '   8. Set up Alfred as your Spotlight replacement'
-echo '   9. Test modern CLI tools: bat --version, eza --version, fd --version'
+
+echo '📝 Next steps:'
+echo '   1. Update your chezmoi .zshrc template to include:'
+echo '      • Homebrew setup: eval "$(brew shellenv)"'
+echo '      • ~/bin in PATH (already in your template)'
+echo '      • Any additional aliases you want'
+echo '   2. Apply chezmoi templates: chezmoi apply'
+echo '   3. Restart your terminal: exec zsh'
+echo '   4. Install any failed packages manually: brew install <package-name>'
+echo '   5. Add your SSH public key to GitHub/GitLab'
+if command -v gpg >/dev/null 2>&1; then
+echo '   6. Add your GPG public key to GitHub/GitLab for verified commits'
+else
+echo '   6. Install GPG: brew install gpg, then re-run this script'
+fi
+echo '   7. Select a Nerd Font in your terminal preferences (MesloLGS NF recommended)'
+
+{{ if eq .chezmoi.os "darwin" -}}
+echo '   7. Start Docker Desktop from Applications'
+echo '   8. Configure Rectangle for window management'
+echo '   9. Set up Alfred as your Spotlight replacement'
+{{ else -}}
+if ! is_wsl; then
+echo '   7. Log out and back in to apply Docker group membership'
+fi
+{{ end -}}
+
+echo '   10. Test modern CLI tools: bat --version, eza --version, fd --version'
+echo ''
+
+# Troubleshooting section
+echo '🔧 Troubleshooting:'
+echo '   • If brew command not found: add brew setup to your chezmoi .zshrc template'
+echo '   • If docker completions fail: ensure docker bundle is in your antigen config'
+echo '   • Shell configuration managed by chezmoi - do not edit .zshrc directly'
+echo '   • For chezmoi: install with "sudo snap install chezmoi" or "brew install chezmoi"'
+echo '   • Run "chezmoi doctor" to check chezmoi configuration'
+echo ''
+echo '📋 Suggested additions to your chezmoi .zshrc template:'
+echo ''
+echo '# Add to the top (before antigen setup):'
+echo 'export PATH="$HOME/bin:$PATH"'
+echo ''
+{{ if ne .chezmoi.os "darwin" -}}
+echo '# Add Homebrew setup (Linux/WSL):'
+echo 'if [ -d /home/linuxbrew/.linuxbrew ]; then'
+echo '  eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"'
+echo 'elif [ -d ~/.linuxbrew ]; then'
+echo '  eval "$(~/.linuxbrew/bin/brew shellenv)"'
+echo 'fi'
+echo ''
+{{ end -}}
+if is_wsl; then
+echo '# WSL-specific aliases:'
+echo 'alias explorer="explorer.exe"'
+echo 'alias code="code.exe"'
+echo 'alias docker="docker.exe"'
+echo 'alias docker-compose="docker-compose.exe"'
+echo ''
+echo '# Windows PATH (optional):'
+echo 'export PATH="$PATH:/mnt/c/Windows/System32"'
+echo ''
+fi
+echo '# Modern CLI aliases (add after antigen apply):'
+echo 'if command -v eza >/dev/null 2>&1; then'
+echo '  alias ls="eza --icons"'
+echo '  alias ll="eza -la --icons --header"'
+echo 'fi'
+echo ''
+echo 'if command -v bat >/dev/null 2>&1; then'
+echo '  alias cat="bat"'
+echo 'fi'
 echo ''
 echo '🎉 Your development environment is ready!'

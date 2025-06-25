@@ -1,27 +1,130 @@
 # If you come from bash you might have to change your $PATH.
-export PATH=$HOME/.local/bin:$PATH
+export PATH=$HOME/.local/bin:$HOME/bin:$PATH
+
+# History configuration - ADD THIS SECTION
+HISTFILE=~/.zsh_history
+HISTSIZE=50000
+SAVEHIST=50000
+setopt EXTENDED_HISTORY          # Write the history file in the ":start:elapsed;command" format.
+setopt INC_APPEND_HISTORY        # Write to the history file immediately, not when the shell exits.
+setopt SHARE_HISTORY             # Share history between all sessions.
+setopt HIST_EXPIRE_DUPS_FIRST    # Expire duplicate entries first when trimming history.
+setopt HIST_IGNORE_DUPS          # Don't record an entry that was just recorded again.
+setopt HIST_IGNORE_ALL_DUPS      # Delete old recorded entry if new entry is a duplicate.
+setopt HIST_FIND_NO_DUPS         # Do not display a line previously found.
+setopt HIST_IGNORE_SPACE         # Don't record an entry starting with a space.
+setopt HIST_SAVE_NO_DUPS         # Don't write duplicate entries in the history file.
+setopt HIST_REDUCE_BLANKS        # Remove superfluous blanks before recording entry.
+
+# Detect platform
+IS_WSL=false
+IS_MACOS=false
+IS_LINUX=false
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
+  IS_WSL=true
+else
+  IS_LINUX=true
+fi
+
+# Homebrew setup
+if [ "$IS_MACOS" = true ]; then
+  # macOS Homebrew
+  if [ -d /opt/homebrew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+  elif [ -d /usr/local/Homebrew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+  fi
+elif [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+  # Linux/WSL Homebrew
+  if [ -d /home/linuxbrew/.linuxbrew ]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+  elif [ -d ~/.linuxbrew ]; then
+    eval "$(~/.linuxbrew/bin/brew shellenv)"
+  fi
+fi
+
+# WSL-specific setup
+if [ "$IS_WSL" = true ]; then
+  # Create missing completion directories to prevent errors
+  mkdir -p ~/.antigen/bundles/robbyrussell/oh-my-zsh/cache/completions 2>/dev/null
+  
+  # WSL-specific aliases
+  alias explorer="explorer.exe"
+  alias notepad="notepad.exe"
+fi
 
 source ~/.zsh/antigen/antigen.zsh
 
 # Load the oh-my-zsh's library.
 antigen use oh-my-zsh
 
-# Bundles from the default repo (robbyrussell's oh-my-zsh).
-antigen bundles <<EOBUNDLES
-command-not-found
-git
-docker docker-compose kubectl
-joshskidmore/zsh-fzf-history-search
-zsh-users/zsh-completions
-zsh-users/zsh-autosuggestions
-zsh-users/zsh-syntax-highlighting
-EOBUNDLES
+# Base bundles that work everywhere
+antigen bundle command-not-found
+antigen bundle git
+antigen bundle kubectl
+antigen bundle joshskidmore/zsh-fzf-history-search
+antigen bundle zsh-users/zsh-completions
+antigen bundle zsh-users/zsh-autosuggestions
+antigen bundle zsh-users/zsh-syntax-highlighting
+
+# Platform-specific bundles
+if [ "$IS_MACOS" = true ] || [ "$IS_LINUX" = true ]; then
+  # Add docker bundles for macOS and regular Linux (not WSL)
+  antigen bundle docker
+  antigen bundle docker-compose
+elif [ "$IS_WSL" = true ] && command -v docker >/dev/null 2>&1; then
+  # Add docker bundles for WSL only if Linux docker is actually installed
+  antigen bundle docker
+  antigen bundle docker-compose
+fi
 
 # Load the theme.
 antigen theme romkatv/powerlevel10k
 
 # Tell Antigen that you're done.
 antigen apply
+
+# Configure autosuggestions - ADD THIS SECTION
+ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#666666"
+ZSH_AUTOSUGGEST_STRATEGY=(history completion)
+ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+
+# Modern CLI tool aliases (add after antigen apply)
+if command -v eza >/dev/null 2>&1; then
+  alias ls="eza --icons"
+  alias ll="eza -la --icons --header"
+  alias tree="eza --tree"
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  alias cat="bat"
+  alias less="bat"
+fi
+
+if command -v fd >/dev/null 2>&1; then
+  alias find="fd"
+fi
+
+# System utilities
+alias h="history"
+if command -v btop >/dev/null 2>&1; then
+  alias top="btop"
+fi
+if command -v ncdu >/dev/null 2>&1; then
+  alias du="ncdu"
+fi
+
+# Enable better completion handling - ENHANCED VERSION
+zstyle ':completion:*:warnings' format 'No matches found'
+zstyle ':completion:*' menu select
+zstyle ':completion:*' matcher-list 'm:{a-zA-Z}={A-Za-z}'
+setopt NULL_GLOB
+setopt AUTO_MENU
+setopt COMPLETE_IN_WORD
+setopt ALWAYS_TO_END
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
