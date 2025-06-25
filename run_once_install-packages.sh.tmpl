@@ -10,6 +10,7 @@
      "zsh" -}}
 
 {{ $brewPackages := list
+     "fnm"
      "btop"
      "tldr"
      "uv"
@@ -161,6 +162,24 @@ brew install {{ $allBrewPackages | join " " }}
 {{ $sudo }}apt-get install -y bat fd-find ncdu tmux
 # Note: eza, delta, httpie may need alternative installation methods on ARM
 {{ end -}}
+
+# Set up fnm and install Node.js (after Homebrew packages are installed)
+if command -v fnm >/dev/null 2>&1; then
+  echo 'Setting up fnm and installing Node.js LTS'
+  
+  # Set up fnm environment for current session
+  eval "$(fnm env --use-on-cd)"
+  
+  # Install latest LTS Node.js
+  fnm install --lts
+  fnm use lts-latest
+  fnm default lts-latest
+  
+  echo "Node.js version: $(node --version)"
+  echo "npm version: $(npm --version)"
+else
+  echo 'fnm not found - Node.js installation skipped'
+fi
 
 # Install fonts (Linux/WSL)
 echo 'Installing fonts for Linux/WSL'

@@ -46,6 +46,11 @@ elif [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
   fi
 fi
 
+# Node.js version management with fnm
+if command -v fnm >/dev/null 2>&1; then
+  eval "$(fnm env --use-on-cd)"
+fi
+
 # WSL-specific setup
 if [ "$IS_WSL" = true ]; then
   # Create missing completion directories to prevent errors
