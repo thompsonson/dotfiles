@@ -2,7 +2,6 @@
   "recommendations": [
     // Essential productivity extensions
     "vscode-icons-team.vscode-icons",
-    "vscodevim.vim",
     "eamodio.gitlens",
     
     // Language support
