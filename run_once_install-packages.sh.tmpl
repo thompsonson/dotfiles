@@ -25,6 +25,15 @@
      "httpie"
      "tmux" -}}
 
+{{ $macosSpecific := list 
+     "python" 
+     "docker" 
+     "openssh" 
+     "docker-compose" 
+     "awscli"
+     "macdown"
+     "gpg" -}}
+
 {{ $nerdFonts := list
      "MesloLGS NF Regular.ttf"
      "MesloLGS NF Bold.ttf" 
@@ -221,10 +230,9 @@ else
 fi
 {{ end -}}
 
+
 {{ if eq .chezmoi.os "darwin" -}}
 echo '🍎 Installing macOS packages'
-
-{{ $macosSpecific := list "python" "docker" "openssh" "docker-compose" "awscli" "gpg" -}}
 {{ $allMacosPackages := concat $commonPackages $macosSpecific $brewPackages $modernCli -}}
 
 # Install Homebrew first if needed
@@ -539,7 +547,6 @@ else
   echo "Brew status: $(command -v brew || echo 'not found')"
   echo "Try: brew install uv"
 fi
-
 
 # Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
