@@ -1,0 +1,107 @@
+{
+  "recommendations": [
+    // Essential productivity extensions
+    "vscode-icons-team.vscode-icons",
+    "vscodevim.vim",
+    "eamodio.gitlens",
+    
+    // Language support
+    "ms-python.python",
+    "ms-python.black-formatter",
+    "ms-python.isort",
+    "ms-python.pylint",
+    "bradlc.vscode-tailwindcss",
+    "ms-vscode.vscode-typescript-next",
+    "ms-vscode.vscode-json",
+    "redhat.vscode-yaml",
+    "ms-vscode.vscode-html-language-features",
+    "ms-vscode.vscode-css-language-features",
+    "ms-vscode.vscode-markdown-language-features",
+    "ms-vscode.vscode-dockerfile",
+    "hashicorp.terraform",
+    "rust-lang.rust-analyzer",
+    "golang.go",
+    "ms-dotnettools.csharp",
+    "ms-vscode.powershell",
+    
+    // Git and version control
+    "eamodio.gitlens",
+    "github.vscode-pull-request-github",
+    "github.copilot",
+    "github.copilot-chat",
+    "github.vscode-github-actions",
+    
+    // Code formatting and linting
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "ms-python.flake8",
+    "ms-python.mypy-type-checker",
+    "stylelint.vscode-stylelint",
+    
+    // Docker and containers
+    "ms-azuretools.vscode-docker",
+    "ms-vscode-remote.remote-containers",
+    "ms-vscode-remote.remote-wsl",
+    "ms-vscode-remote.remote-ssh",
+    
+    // Testing
+    "ms-vscode.test-adapter-converter",
+    "ms-python.python-test-adapter",
+    "orta.vscode-jest",
+    "ms-vscode.vscode-pytest",
+    
+    // Database
+    "ms-mssql.mssql",
+    "ms-ossdata.vscode-postgresql",
+    "mtxr.sqltools",
+    "mtxr.sqltools-driver-pg",
+    "mtxr.sqltools-driver-mysql",
+    "mtxr.sqltools-driver-sqlite",
+    "qwtel.sqlite-viewer",
+    
+    // Productivity and utilities
+    "naumovs.color-highlight",
+    "ms-vscode.hexeditor",
+    "christian-kohler.path-intellisense",
+    "formulahendry.auto-rename-tag",
+    "oderwat.indent-rainbow",
+    "wayou.vscode-todo-highlight",
+    "alefragnani.bookmarks",
+    "quicktype.quicktype",
+    "rangav.vscode-thunder-client",
+    
+    // Themes and appearance
+    "zhuangtongfa.material-theme",
+    "dracula-theme.theme-dracula",
+    "ms-vscode.theme-monokai",
+    "ms-vscode.theme-solarized-dark",
+    "github.github-vscode-theme",
+    
+    // Documentation
+    "shd101wyy.markdown-preview-enhanced",
+    "bierner.markdown-mermaid",
+    "yzane.markdown-pdf",
+    "bierner.markdown-checkbox",
+    "bierner.markdown-emoji",
+    
+    // Development tools
+    "ms-vsliveshare.vsliveshare",
+    "eg2.vscode-npm-script",
+    "leizongmin.node-module-intellisense",
+    "ms-vscode.vscode-intellicode",
+    
+    // Cloud and DevOps
+    "amazonwebservices.aws-toolkit-vscode",
+    "googlecloudtools.cloudcode",
+    "ms-kubernetes-tools.vscode-kubernetes-tools",
+    "4ops.terraform",
+    "vscoss.vscode-ansible",
+    
+    // File management
+    "ms-vscode.vscode-filesize",
+    "ms-vscode.vscode-zip",
+    "redhat.vscode-xml",
+    "mechatroner.rainbow-csv",
+    "emilast.logfilehighlighter"
+  ]
+}

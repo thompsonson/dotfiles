@@ -11,6 +11,7 @@ Cross-platform dotfiles managed with [chezmoi](https://www.chezmoi.io/) for macO
 - **Package management**: Homebrew integration across platforms
 - **Docker support**: Platform-specific Docker configuration
 - **Git configuration**: GPG signing and delta diff viewer
+- **VS Code configuration**: Settings, keybindings, and extensions
 
 ## Quick Start
 
@@ -56,6 +57,10 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 ├── dot_p10k.zsh                       # Powerlevel10k theme config
 ├── dot_claude/                        # Claude Code configuration
 │   └── settings.json
+├── dot_config/Code/User/               # VS Code configuration
+│   ├── settings.json.tmpl             # VS Code settings
+│   ├── keybindings.json               # Custom keybindings
+│   └── extensions.json                # Recommended extensions
 ├── run_once_install-packages.sh.tmpl  # Package installation script
 └── run_once_after_chsh.sh.tmpl       # Shell change script
 ```
@@ -93,6 +98,15 @@ The zsh configuration includes:
 - Auto-completion enhancements
 - Modern CLI tool aliases
 - Platform-specific configurations
+
+### VS Code Configuration
+
+The VS Code setup includes:
+- **Settings**: Cross-platform editor preferences with font ligatures, formatting, and productivity features
+- **Keybindings**: Custom shortcuts for enhanced productivity
+- **Extensions**: Curated list of recommended extensions for development
+- **Database support**: SQLite viewer and SQLTools integration
+- **Language support**: Python, JavaScript, TypeScript, Rust, Go, and more
 
 ## Troubleshooting
 

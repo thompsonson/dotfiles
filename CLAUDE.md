@@ -9,6 +9,7 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Shell**: Zsh with oh-my-zsh, antigen, and powerlevel10k
 - **Package Management**: Homebrew (cross-platform)
 - **Node.js**: fnm for version management
+- **VS Code**: Settings, keybindings, and extensions configuration
 
 ## Common Commands
 
@@ -42,12 +43,17 @@ The zsh configuration uses these variables:
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
 - `dot_claude/settings.json`: Claude Code configuration
+- `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
+- `dot_config/Code/User/keybindings.json`: VS Code custom keybindings
+- `dot_config/Code/User/extensions.json`: VS Code recommended extensions
 
-## Recent Issues Fixed
+## Recent Changes
 
 1. **PATH syntax error**: Fixed semicolon separator in PATH export
 2. **Antigen cache directory**: Moved creation outside WSL-specific block
 3. **Cross-platform compatibility**: Ensured all platforms can create necessary directories
+4. **VS Code configuration**: Added comprehensive settings, keybindings, and extensions
+5. **TTY warning**: Known issue with antigen during `chezmoi apply` (cosmetic only)
 
 ## When Making Changes
 
