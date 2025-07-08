@@ -56,8 +56,6 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 ├── dot_p10k.zsh                       # Powerlevel10k theme config
 ├── dot_claude/                        # Claude Code configuration
 │   └── settings.json
-├── bin/                               # Local binaries
-│   └── chezmoi
 ├── run_once_install-packages.sh.tmpl  # Package installation script
 └── run_once_after_chsh.sh.tmpl       # Shell change script
 ```
