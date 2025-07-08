@@ -1,0 +1,184 @@
+#!/bin/bash
+
+# Install VS Code extensions based on extensions.json recommendations
+
+# Check if VS Code is installed
+if ! command -v code >/dev/null 2>&1; then
+  echo "VS Code not found. Skipping extension installation."
+  exit 0
+fi
+
+echo "🚀 Installing VS Code extensions..."
+
+# Read extensions from extensions.json and install them
+# This script reads the extensions.json file and installs all recommended extensions
+
+EXTENSIONS=(
+  # Essential productivity extensions
+  "vscode-icons-team.vscode-icons"
+  "vscodevim.vim"
+  "eamodio.gitlens"
+  
+  # Language support
+  "ms-python.python"
+  "ms-python.black-formatter"
+  "ms-python.isort"
+  "ms-python.pylint"
+  "bradlc.vscode-tailwindcss"
+  "ms-vscode.vscode-typescript-next"
+  "ms-vscode.vscode-json"
+  "redhat.vscode-yaml"
+  "ms-vscode.vscode-html-language-features"
+  "ms-vscode.vscode-css-language-features"
+  "ms-vscode.vscode-markdown-language-features"
+  "ms-vscode.vscode-dockerfile"
+  "hashicorp.terraform"
+  "rust-lang.rust-analyzer"
+  "golang.go"
+  "ms-dotnettools.csharp"
+  "ms-vscode.powershell"
+  
+  # Git and version control
+  "github.vscode-pull-request-github"
+  "github.copilot"
+  "github.copilot-chat"
+  "github.vscode-github-actions"
+  
+  # Code formatting and linting
+  "esbenp.prettier-vscode"
+  "dbaeumer.vscode-eslint"
+  "ms-python.flake8"
+  "ms-python.mypy-type-checker"
+  "stylelint.vscode-stylelint"
+  
+  # Docker and containers
+  "ms-azuretools.vscode-docker"
+  "ms-vscode-remote.remote-containers"
+  "ms-vscode-remote.remote-wsl"
+  "ms-vscode-remote.remote-ssh"
+  
+  # Testing
+  "ms-vscode.test-adapter-converter"
+  "ms-python.python-test-adapter"
+  "orta.vscode-jest"
+  "ms-vscode.vscode-pytest"
+  
+  # Database
+  "ms-mssql.mssql"
+  "ms-ossdata.vscode-postgresql"
+  "mtxr.sqltools"
+  "mtxr.sqltools-driver-pg"
+  "mtxr.sqltools-driver-mysql"
+  "mtxr.sqltools-driver-sqlite"
+  "qwtel.sqlite-viewer"
+  
+  # Productivity and utilities
+  "naumovs.color-highlight"
+  "ms-vscode.hexeditor"
+  "christian-kohler.path-intellisense"
+  "formulahendry.auto-rename-tag"
+  "oderwat.indent-rainbow"
+  "wayou.vscode-todo-highlight"
+  "alefragnani.bookmarks"
+  "quicktype.quicktype"
+  "rangav.vscode-thunder-client"
+  
+  # Themes and appearance
+  "zhuangtongfa.material-theme"
+  "dracula-theme.theme-dracula"
+  "ms-vscode.theme-monokai"
+  "ms-vscode.theme-solarized-dark"
+  "github.github-vscode-theme"
+  
+  # Documentation
+  "shd101wyy.markdown-preview-enhanced"
+  "bierner.markdown-mermaid"
+  "yzane.markdown-pdf"
+  "bierner.markdown-checkbox"
+  "bierner.markdown-emoji"
+  
+  # Development tools
+  "ms-vsliveshare.vsliveshare"
+  "eg2.vscode-npm-script"
+  "leizongmin.node-module-intellisense"
+  "ms-vscode.vscode-intellicode"
+  
+  # Cloud and DevOps
+  "amazonwebservices.aws-toolkit-vscode"
+  "googlecloudtools.cloudcode"
+  "ms-kubernetes-tools.vscode-kubernetes-tools"
+  "4ops.terraform"
+  "vscoss.vscode-ansible"
+  
+  # File management
+  "ms-vscode.vscode-filesize"
+  "ms-vscode.vscode-zip"
+  "redhat.vscode-xml"
+  "mechatroner.rainbow-csv"
+  "emilast.logfilehighlighter"
+)
+
+# Function to install extension with error handling
+install_extension() {
+  local extension="$1"
+  local current="$2"
+  local total="$3"
+  
+  echo "[$current/$total] Installing $extension..."
+  
+  # Check if extension is already installed
+  if code --list-extensions | grep -q "^$extension$"; then
+    echo "  ✅ $extension already installed"
+    return 0
+  fi
+  
+  # Install the extension
+  if code --install-extension "$extension" --force > /dev/null 2>&1; then
+    echo "  ✅ $extension installed successfully"
+    return 0
+  else
+    echo "  ❌ Failed to install $extension"
+    return 1
+  fi
+}
+
+# Install all extensions
+total=${#EXTENSIONS[@]}
+current=0
+failed_extensions=()
+
+echo "📦 Installing $total VS Code extensions..."
+echo ""
+
+for extension in "${EXTENSIONS[@]}"; do
+  current=$((current + 1))
+  
+  if ! install_extension "$extension" "$current" "$total"; then
+    failed_extensions+=("$extension")
+  fi
+  
+  # Add a small delay to avoid rate limiting
+  sleep 0.1
+done
+
+echo ""
+echo "✅ VS Code extension installation complete!"
+
+# Report results
+installed_count=$((total - ${#failed_extensions[@]}))
+echo "📊 Results: $installed_count/$total extensions installed successfully"
+
+if [ ${#failed_extensions[@]} -gt 0 ]; then
+  echo ""
+  echo "⚠️  Failed to install the following extensions:"
+  for ext in "${failed_extensions[@]}"; do
+    echo "  - $ext"
+  done
+  echo ""
+  echo "💡 You can retry these manually in VS Code or run:"
+  echo "   code --install-extension <extension-name>"
+fi
+
+echo ""
+echo "🎉 Your VS Code is now configured with recommended extensions!"
+echo "💡 Restart VS Code to ensure all extensions are properly loaded."
