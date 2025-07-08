@@ -18,9 +18,7 @@
     "ms-vscode.vscode-css-language-features",
     "ms-vscode.vscode-markdown-language-features",
     "ms-vscode.vscode-dockerfile",
-    "hashicorp.terraform",
     "rust-lang.rust-analyzer",
-    "golang.go",
     "ms-dotnettools.csharp",
     "ms-vscode.powershell",
     
@@ -91,10 +89,7 @@
     "ms-vscode.vscode-intellicode",
     
     // Cloud and DevOps
-    "amazonwebservices.aws-toolkit-vscode",
-    "googlecloudtools.cloudcode",
     "ms-kubernetes-tools.vscode-kubernetes-tools",
-    "4ops.terraform",
     "vscoss.vscode-ansible",
     
     // File management
