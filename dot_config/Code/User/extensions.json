@@ -96,6 +96,9 @@
     "ms-vscode.vscode-zip",
     "redhat.vscode-xml",
     "mechatroner.rainbow-csv",
-    "emilast.logfilehighlighter"
+    "emilast.logfilehighlighter",
+    
+    // Build tools
+    "nefrob.vscode-just-syntax"
   ]
 }

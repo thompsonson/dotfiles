@@ -101,6 +101,7 @@ ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
 if command -v eza >/dev/null 2>&1; then
   alias ls="eza --icons"
   alias ll="eza -la --icons --header"
+  alias l="eza -la --icons --header"
   alias tree="eza --tree"
 fi
 
