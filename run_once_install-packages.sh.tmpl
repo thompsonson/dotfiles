@@ -589,27 +589,9 @@ fi
 mkdir -p ~/.openhands-state
 mkdir -p ~/.config/litellm
 
-# Create LiteLLM configuration template (with environment variable placeholder)
-cat > ~/.config/litellm/config.yaml << 'EOF'
-model_list:
-  - model_name: devstral
-    litellm_params:
-      model: mistral/devstral-small-2505
-      api_key: ${MISTRAL_API_KEY}
-      api_base: https://api.mistral.ai/v1
-  - model_name: mistral-small
-    litellm_params:
-      model: mistral/mistral-small-latest
-      api_key: ${MISTRAL_API_KEY}
-      api_base: https://api.mistral.ai/v1
-
-litellm_settings:
-  drop_params: true
-  set_verbose: false
-
-general_settings:
-  master_key: local_dev_key_change_me
-EOF
+# Note: LiteLLM configuration is now managed by chezmoi templates
+# See: ~/.config/litellm/config.yaml (generated from dot_config/litellm/config.yaml.tmpl)
+# Using file-based configuration - no database required
 
 # Create OpenHands configuration
 cat > ~/.openhands-state/settings.json << 'EOF'
