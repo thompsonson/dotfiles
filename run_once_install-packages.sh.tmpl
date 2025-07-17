@@ -44,6 +44,9 @@
      "MesloLGS NF Italic.ttf"
      "MesloLGS NF Bold Italic.ttf" -}}
 
+{{ $npmPackages := list
+     "@anthropic-ai/claude-code" -}}
+
 #!/bin/bash
 
 # Detect WSL environment
@@ -190,6 +193,17 @@ if command -v fnm >/dev/null 2>&1; then
   
   echo "Node.js version: $(node --version)"
   echo "npm version: $(npm --version)"
+  
+  # Install global npm packages
+  echo 'Installing global npm packages'
+  {{ range $npmPackages -}}
+  npm install -g {{ . }}
+  {{ end -}}
+  
+  # Show installed package versions
+  if command -v claude >/dev/null 2>&1; then
+    echo "claude version: $(claude --version)"
+  fi
 else
   echo 'fnm not found - Node.js installation skipped'
 fi
@@ -524,7 +538,25 @@ if ! command -v poetry >/dev/null 2>&1; then
   curl -sSL https://install.python-poetry.org | python3 -
 fi
 
-# Install OpenHands AI CLI (common - requires uv)
+# OpenHands + LiteLLM Setup (no secrets in this script)
+echo '🤖 Installing OpenHands and LiteLLM'
+
+# Pull Docker images
+if command -v docker >/dev/null 2>&1; then
+  echo 'Pulling required Docker images'
+  docker pull docker.all-hands.dev/all-hands-ai/runtime:0.39-nikolaik
+  docker pull docker.all-hands.dev/all-hands-ai/openhands:0.39
+  docker pull ghcr.io/berriai/litellm:main-latest
+else
+  echo 'Docker not available - manual setup required'
+fi
+
+# Install via pipx if available
+if command -v pipx >/dev/null 2>&1; then
+  echo 'Installing OpenHands via pipx'
+  pipx install openhands-ai || echo "Using Docker instead"
+fi
+
 # Ensure tools are available in current session
 {{ if eq .chezmoi.os "darwin" -}}
 export PATH="/usr/local/bin:$PATH"
@@ -538,8 +570,9 @@ fi
 {{ end -}}
 hash -r  # Clear command cache
 
+# Install OpenHands via uv if available
 if command -v uv >/dev/null 2>&1; then
-  echo 'Installing OpenHands AI CLI'
+  echo 'Installing OpenHands AI CLI via uv'
   if ! command -v openhands >/dev/null 2>&1; then
     uv tool install openhands-ai || echo "Failed to install OpenHands - continuing..."
   else
@@ -551,6 +584,60 @@ else
   echo "Brew status: $(command -v brew || echo 'not found')"
   echo "Try: brew install uv"
 fi
+
+# Create configuration directories
+mkdir -p ~/.openhands-state
+mkdir -p ~/.config/litellm
+
+# Create LiteLLM configuration template (with environment variable placeholder)
+cat > ~/.config/litellm/config.yaml << 'EOF'
+model_list:
+  - model_name: devstral
+    litellm_params:
+      model: mistral/devstral-small-2505
+      api_key: ${MISTRAL_API_KEY}
+      api_base: https://api.mistral.ai/v1
+  - model_name: mistral-small
+    litellm_params:
+      model: mistral/mistral-small-latest
+      api_key: ${MISTRAL_API_KEY}
+      api_base: https://api.mistral.ai/v1
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+
+general_settings:
+  master_key: local_dev_key_change_me
+EOF
+
+# Create OpenHands configuration
+cat > ~/.openhands-state/settings.json << 'EOF'
+{
+  "language": "en",
+  "agent": "CodeActAgent",
+  "max_iterations": null,
+  "security_analyzer": null,
+  "confirmation_mode": false,
+  "llm_model": "openai/devstral",
+  "llm_api_key": "local_dev_key_change_me",
+  "llm_base_url": "http://localhost:4000",
+  "remote_runtime_resource_factor": null,
+  "github_token": null,
+  "enable_default_condenser": true
+}
+EOF
+
+echo '✅ OpenHands and LiteLLM setup complete!'
+echo ''
+echo '🔐 IMPORTANT: Set your API key securely:'
+echo '   1. Create ~/.env with: MISTRAL_API_KEY=your_key_here'
+echo '   2. Never commit API keys to git!'
+echo ''
+echo '💡 Then run:'
+echo '   ai-start         # Start LiteLLM proxy'
+echo '   openhands-start  # Start OpenHands'
+echo '   ai-dev test      # Test the setup'
 
 # Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
