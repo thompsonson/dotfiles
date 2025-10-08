@@ -471,31 +471,8 @@ else
   fi
 fi
 
-# Basic SSH config
-if [ ! -f ~/.ssh/config ]; then
-  cat > ~/.ssh/config << 'EOF'
-# Default settings for all hosts
-Host *
-  AddKeysToAgent yes
-  UseKeychain yes
-  IdentityFile ~/.ssh/id_ed25519
-  ServerAliveInterval 60
-  ServerAliveCountMax 3
-
-# GitHub
-Host github.com
-  HostName github.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519
-
-# GitLab
-Host gitlab.com
-  HostName gitlab.com
-  User git
-  IdentityFile ~/.ssh/id_ed25519
-EOF
-  chmod 600 ~/.ssh/config
-fi
+# SSH config is managed by chezmoi (see dot_ssh/config.tmpl)
+# This ensures cross-platform compatibility (macOS UseKeychain vs Linux)
 
 # Configure environment for current session only
 echo 'Setting up current session environment'
