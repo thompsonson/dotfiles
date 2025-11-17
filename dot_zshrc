@@ -51,6 +51,11 @@ if command -v fnm >/dev/null 2>&1; then
   eval "$(fnm env --use-on-cd)"
 fi
 
+# Smart directory jumping with zoxide
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
+
 # Create missing completion directories to prevent errors (all platforms)
 mkdir -p ~/.antigen/bundles/robbyrussell/oh-my-zsh/cache/completions 2>/dev/null
 
@@ -119,8 +124,21 @@ alias h="history"
 if command -v btop >/dev/null 2>&1; then
   alias top="btop"
 fi
+
+# Disk usage tools
 if command -v ncdu >/dev/null 2>&1; then
   alias du="ncdu"
+fi
+if command -v duf >/dev/null 2>&1; then
+  alias df="duf"
+fi
+if command -v dust >/dev/null 2>&1; then
+  alias dust-tree="dust"  # Keep 'dust' command, add tree variant
+fi
+
+# Process viewer
+if command -v procs >/dev/null 2>&1; then
+  alias ps="procs"
 fi
 
 # Enable better completion handling - ENHANCED VERSION
