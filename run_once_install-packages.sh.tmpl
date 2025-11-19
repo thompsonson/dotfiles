@@ -23,12 +23,17 @@
 
 {{ $modernCli := list
      "bat"
-     "eza" 
+     "eza"
      "fd"
      "git-delta"
      "ncdu"
      "httpie"
-     "tmux" -}}
+     "tmux"
+     "zoxide"
+     "duf"
+     "hyperfine"
+     "procs"
+     "dust" -}}
 
 {{ $macosSpecific := list 
      "python" 
@@ -173,8 +178,9 @@ echo '   Or: eval "$(~/.linuxbrew/bin/brew shellenv)"'
 brew install {{ $allBrewPackages | join " " }}
 {{ else -}}
 # Install modern CLI tools via apt for non-amd64 architectures
-{{ $sudo }}apt-get install -y bat fd-find ncdu tmux
-# Note: eza, delta, httpie may need alternative installation methods on ARM
+{{ $sudo }}apt-get install -y bat fd-find ncdu tmux duf hyperfine
+# Note: eza, delta, httpie, procs, dust may need alternative installation methods on ARM
+# Some of these may not be available on older Ubuntu/Debian versions
 {{ end -}}
 
 # Set up fnm and install Node.js (after Homebrew packages are installed)
