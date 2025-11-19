@@ -1,5 +1,5 @@
 # If you come from bash you might have to change your $PATH.
-export PATH=$HOME/.local/bin:$HOME/bin:$PATH
+export PATH=$HOME/.local/share/chezmoi/bin:$HOME/.local/bin:$HOME/bin:$PATH
 
 # History configuration - ADD THIS SECTION
 HISTFILE=~/.zsh_history
