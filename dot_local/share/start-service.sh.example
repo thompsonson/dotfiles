@@ -1,0 +1,245 @@
+#!/bin/bash
+# ============================================================================
+# Service Starter Template for Remote Development
+# ============================================================================
+# This is an example script showing how to use tmux for remote development
+# Copy this template to your project directory and customize for your needs
+#
+# Usage:
+#   ./start-service.sh              Start all services
+#   ./start-service.sh --attach     Start and attach to the session
+#   ./start-service.sh --stop       Stop all services
+#
+# Example Projects:
+#   - Web application (frontend + backend + database)
+#   - Microservices architecture
+#   - Development server with hot-reload
+#   - Long-running background processes
+
+set -e
+
+# ============================================================================
+# Configuration
+# ============================================================================
+
+# Session name (customize for your project)
+SESSION_NAME="${SESSION_NAME:-myproject}"
+
+# Project directory (customize to your project root)
+PROJECT_DIR="${PROJECT_DIR:-$(pwd)}"
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+# ============================================================================
+# Helper Functions
+# ============================================================================
+
+log_info() {
+    echo -e "${BLUE}ℹ${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}✓${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}⚠${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}✗${NC} $1"
+}
+
+# Check if tmux session exists
+session_exists() {
+    tmux has-session -t "$SESSION_NAME" 2>/dev/null
+}
+
+# ============================================================================
+# Service Startup Functions
+# ============================================================================
+
+start_services() {
+    log_info "Starting services for '$SESSION_NAME'..."
+
+    # Kill existing session if it exists
+    if session_exists; then
+        log_warning "Session '$SESSION_NAME' already exists. Killing it..."
+        tmux kill-session -t "$SESSION_NAME"
+    fi
+
+    # Create new detached session
+    log_info "Creating tmux session '$SESSION_NAME'..."
+    tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_DIR"
+
+    # Rename first window
+    tmux rename-window -t "$SESSION_NAME:1" "main"
+
+    # ========================================================================
+    # Window 1: Main application/frontend
+    # ========================================================================
+    log_info "Setting up main application window..."
+    tmux send-keys -t "$SESSION_NAME:1" "cd $PROJECT_DIR" C-m
+    tmux send-keys -t "$SESSION_NAME:1" "# Start your main application here" C-m
+    tmux send-keys -t "$SESSION_NAME:1" "# Example: npm run dev" C-m
+    # Uncomment and customize:
+    # tmux send-keys -t "$SESSION_NAME:1" "npm run dev" C-m
+
+    # ========================================================================
+    # Window 2: Backend/API server
+    # ========================================================================
+    log_info "Setting up backend window..."
+    tmux new-window -t "$SESSION_NAME:2" -n "backend" -c "$PROJECT_DIR"
+    tmux send-keys -t "$SESSION_NAME:2" "# Start your backend server here" C-m
+    tmux send-keys -t "$SESSION_NAME:2" "# Example: python manage.py runserver" C-m
+    # Uncomment and customize:
+    # tmux send-keys -t "$SESSION_NAME:2" "cd backend && python manage.py runserver" C-m
+
+    # ========================================================================
+    # Window 3: Database/Services
+    # ========================================================================
+    log_info "Setting up services window..."
+    tmux new-window -t "$SESSION_NAME:3" -n "services" -c "$PROJECT_DIR"
+    tmux send-keys -t "$SESSION_NAME:3" "# Start your database or other services here" C-m
+    tmux send-keys -t "$SESSION_NAME:3" "# Example: docker-compose up" C-m
+    # Uncomment and customize:
+    # tmux send-keys -t "$SESSION_NAME:3" "docker-compose up" C-m
+
+    # ========================================================================
+    # Window 4: Logs/Monitoring
+    # ========================================================================
+    log_info "Setting up logs window..."
+    tmux new-window -t "$SESSION_NAME:4" -n "logs" -c "$PROJECT_DIR"
+    tmux send-keys -t "$SESSION_NAME:4" "# Monitor logs here" C-m
+    tmux send-keys -t "$SESSION_NAME:4" "# Example: tail -f logs/*.log" C-m
+    # Uncomment and customize:
+    # tmux send-keys -t "$SESSION_NAME:4" "tail -f logs/app.log" C-m
+
+    # ========================================================================
+    # Window 5: Shell (for interactive commands)
+    # ========================================================================
+    log_info "Setting up shell window..."
+    tmux new-window -t "$SESSION_NAME:5" -n "shell" -c "$PROJECT_DIR"
+    tmux send-keys -t "$SESSION_NAME:5" "# Interactive shell for running commands" C-m
+
+    # Split the shell window into two panes (optional)
+    # tmux split-window -h -t "$SESSION_NAME:5" -c "$PROJECT_DIR"
+
+    # Select the first window
+    tmux select-window -t "$SESSION_NAME:1"
+
+    log_success "Services started successfully!"
+    log_info "Session: $SESSION_NAME"
+    log_info ""
+    log_info "To attach to the session, run:"
+    log_info "  tmux attach-session -t $SESSION_NAME"
+    log_info ""
+    log_info "Or use the helper script:"
+    log_info "  tmux-session $SESSION_NAME"
+    log_info ""
+    log_info "To list all windows:"
+    log_info "  tmux list-windows -t $SESSION_NAME"
+}
+
+stop_services() {
+    log_info "Stopping services for '$SESSION_NAME'..."
+
+    if session_exists; then
+        tmux kill-session -t "$SESSION_NAME"
+        log_success "Session '$SESSION_NAME' stopped successfully!"
+    else
+        log_warning "Session '$SESSION_NAME' is not running"
+    fi
+}
+
+attach_to_session() {
+    if session_exists; then
+        log_info "Attaching to session '$SESSION_NAME'..."
+        tmux attach-session -t "$SESSION_NAME"
+    else
+        log_error "Session '$SESSION_NAME' does not exist"
+        log_info "Start services first with: $0"
+        exit 1
+    fi
+}
+
+show_status() {
+    if session_exists; then
+        log_success "Session '$SESSION_NAME' is running"
+        log_info ""
+        log_info "Windows:"
+        tmux list-windows -t "$SESSION_NAME"
+        log_info ""
+        log_info "To attach: tmux attach-session -t $SESSION_NAME"
+    else
+        log_warning "Session '$SESSION_NAME' is not running"
+    fi
+}
+
+# ============================================================================
+# Main Script
+# ============================================================================
+
+main() {
+    # Check if tmux is installed
+    if ! command -v tmux &> /dev/null; then
+        log_error "tmux is not installed"
+        log_info "Install it with: brew install tmux"
+        exit 1
+    fi
+
+    # Parse arguments
+    case "${1:-}" in
+        --stop)
+            stop_services
+            ;;
+        --attach|-a)
+            if ! session_exists; then
+                start_services
+                sleep 1  # Give services time to start
+            fi
+            attach_to_session
+            ;;
+        --status|-s)
+            show_status
+            ;;
+        --help|-h)
+            cat << EOF
+Service Starter Script
+
+Usage:
+    $0                 Start services in a tmux session
+    $0 --attach        Start services and attach to the session
+    $0 --stop          Stop all services
+    $0 --status        Show session status
+    $0 --help          Show this help message
+
+Environment Variables:
+    SESSION_NAME       Tmux session name (default: myproject)
+    PROJECT_DIR        Project root directory (default: current directory)
+
+Examples:
+    $0                            # Start services
+    $0 --attach                   # Start and attach
+    SESSION_NAME=dev $0           # Use custom session name
+    $0 --stop                     # Stop services
+
+Remote Access:
+    Once services are running, you can:
+    1. Detach: Press Ctrl-a then d
+    2. Reconnect from anywhere: tmux attach-session -t $SESSION_NAME
+    3. List sessions: tmux list-sessions
+EOF
+            ;;
+        *)
+            start_services
+            ;;
+    esac
+}
+
+main "$@"

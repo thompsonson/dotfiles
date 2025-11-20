@@ -1,0 +1,127 @@
+#!/bin/bash
+# ============================================================================
+# Tmux Session Manager
+# ============================================================================
+# Helper script to create or attach to tmux sessions
+# Usage: tmux-session [session-name]
+#        tmux-session -l|--list    (list all sessions)
+#        tmux-session -k|--kill <session-name>  (kill a session)
+#        tmux-session -h|--help    (show help)
+
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to display help
+show_help() {
+    cat << EOF
+Tmux Session Manager
+
+Usage:
+    tmux-session [session-name]              Create or attach to a session
+    tmux-session -l, --list                  List all active sessions
+    tmux-session -k, --kill <session-name>   Kill a specific session
+    tmux-session -h, --help                  Show this help message
+
+Examples:
+    tmux-session myproject       # Create/attach to 'myproject' session
+    tmux-session dev             # Create/attach to 'dev' session
+    tmux-session --list          # List all sessions
+    tmux-session --kill dev      # Kill 'dev' session
+
+Notes:
+    - If no session name is provided, defaults to 'default'
+    - If session exists, attaches to it; otherwise creates new session
+    - Safe to run from within tmux (will switch sessions)
+EOF
+}
+
+# Function to list all sessions
+list_sessions() {
+    if ! tmux list-sessions 2>/dev/null; then
+        echo -e "${YELLOW}No tmux sessions are currently active.${NC}"
+        return 1
+    fi
+}
+
+# Function to kill a session
+kill_session() {
+    local session_name="$1"
+
+    if [ -z "$session_name" ]; then
+        echo -e "${RED}Error: Session name required for kill operation${NC}"
+        echo "Usage: tmux-session --kill <session-name>"
+        return 1
+    fi
+
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        tmux kill-session -t "$session_name"
+        echo -e "${GREEN}Session '$session_name' killed successfully${NC}"
+    else
+        echo -e "${RED}Error: Session '$session_name' does not exist${NC}"
+        return 1
+    fi
+}
+
+# Function to create or attach to a session
+create_or_attach() {
+    local session_name="${1:-default}"
+
+    # Check if tmux is installed
+    if ! command -v tmux &> /dev/null; then
+        echo -e "${RED}Error: tmux is not installed${NC}"
+        echo "Install tmux first: brew install tmux"
+        return 1
+    fi
+
+    # If we're already inside tmux, switch to the session
+    if [ -n "$TMUX" ]; then
+        if tmux has-session -t "$session_name" 2>/dev/null; then
+            echo -e "${BLUE}Switching to existing session '$session_name'...${NC}"
+            tmux switch-client -t "$session_name"
+        else
+            echo -e "${GREEN}Creating new session '$session_name'...${NC}"
+            tmux new-session -d -s "$session_name"
+            tmux switch-client -t "$session_name"
+        fi
+    else
+        # Not inside tmux, attach or create
+        if tmux has-session -t "$session_name" 2>/dev/null; then
+            echo -e "${BLUE}Attaching to existing session '$session_name'...${NC}"
+            tmux attach-session -t "$session_name"
+        else
+            echo -e "${GREEN}Creating new session '$session_name'...${NC}"
+            tmux new-session -s "$session_name"
+        fi
+    fi
+}
+
+# Main script logic
+main() {
+    # Parse arguments
+    case "${1:-}" in
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        -l|--list)
+            list_sessions
+            exit $?
+            ;;
+        -k|--kill)
+            kill_session "$2"
+            exit $?
+            ;;
+        *)
+            create_or_attach "$1"
+            exit $?
+            ;;
+    esac
+}
+
+main "$@"

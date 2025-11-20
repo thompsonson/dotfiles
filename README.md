@@ -5,8 +5,9 @@ Cross-platform dotfiles managed with [chezmoi](https://www.chezmoi.io/) for macO
 ## Features
 
 - **Cross-platform support**: Works on macOS, Linux, and WSL
-- **Modern CLI tools**: bat, eza, fd, delta, ncdu, httpie, tmux
+- **Modern CLI tools**: bat, eza, fd, delta, ncdu, httpie, tmux, and more
 - **Shell configuration**: Zsh with oh-my-zsh, antigen, and powerlevel10k
+- **Remote development**: Tmux configuration with session management helpers
 - **Node.js management**: fnm for version management
 - **Package management**: Homebrew integration across platforms
 - **Docker support**: Platform-specific Docker configuration
@@ -98,6 +99,24 @@ The zsh configuration includes:
 - Auto-completion enhancements
 - Modern CLI tool aliases
 - Platform-specific configurations
+- Tmux integration with convenient aliases
+
+### Tmux for Remote Development
+
+Includes a complete tmux setup optimized for remote development:
+- **Modern keybindings**: Vim-style navigation with `C-a` prefix
+- **Session helpers**: `tmux-session` script for easy session management
+- **Service templates**: Example scripts for running project services
+- **Mouse support**: Toggle-able mouse mode for convenience
+- **Cross-platform**: Works seamlessly on macOS, Linux, and WSL
+
+Quick start:
+```bash
+tms myproject          # Create/attach to session
+./start-service.sh     # Use template in your projects
+```
+
+See `~/.local/share/start-service.sh.example` for project integration patterns.
 
 ### VS Code Configuration
 

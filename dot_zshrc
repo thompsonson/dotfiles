@@ -141,6 +141,20 @@ if command -v procs >/dev/null 2>&1; then
   alias ps="procs"
 fi
 
+# Tmux aliases and configuration
+if command -v tmux >/dev/null 2>&1; then
+  alias tm="tmux"
+  alias tma="tmux attach-session -t"
+  alias tmn="tmux new-session -s"
+  alias tml="tmux list-sessions"
+  alias tmk="tmux kill-session -t"
+
+  # Quick session management with helper script
+  if command -v tmux-session >/dev/null 2>&1; then
+    alias tms="tmux-session"
+  fi
+fi
+
 # Enable better completion handling - ENHANCED VERSION
 zstyle ':completion:*:warnings' format 'No matches found'
 zstyle ':completion:*' menu select
