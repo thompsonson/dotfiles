@@ -4,7 +4,11 @@ Research into local/self-hosted **voice conversation** interfaces (speak to an L
 
 ## Context
 
-Looking for a local voice assistant experience - like ChatGPT voice mode but self-hosted. [Handy](https://handy.computer/) does local speech-to-text (Whisper/Parakeet) but is dictation-only, not conversational. The goal is a full voice loop: **Speech → LLM → Speech**.
+Looking for a local voice assistant experience - like ChatGPT voice mode but self-hosted.
+
+[Handy](https://handy.computer/) ([GitHub](https://github.com/cjpais/Handy)) is the starting reference point. It does local speech-to-text via Whisper/Parakeet - press a key, speak, text gets pasted into the active app. Built with Tauri (Rust + React), fully offline, ~14k GitHub stars. The same author's [handy-cli](https://github.com/cjpais/handy-cli) extends the concept with LLM interaction (OpenRouter/Claude), voice commands, and code generation from voice - but relies on cloud LLM and has no voice output (TTS).
+
+The goal: go beyond Handy to a full voice loop running locally - **Speech → LLM → Speech** - where the AI talks back.
 
 ## The Pipeline
 
