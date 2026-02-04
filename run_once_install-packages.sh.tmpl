@@ -68,6 +68,7 @@ echo '🐧 Installing Linux packages'
 
 {{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" -}}
 {{ $linuxWithDocker := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" -}}
+{{ $linuxWithoutDocker := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" -}}
 {{ $sudo := "sudo " -}}
 {{ if eq .chezmoi.username "root" -}}
 {{   $sudo = "" -}}
@@ -75,11 +76,62 @@ echo '🐧 Installing Linux packages'
 
 {{ $sudo }}apt-get update
 
+install_apt_packages() {
+  local packages=("$@")
+  local failed_packages=()
+  local current=0 total=${#packages[@]}
+  echo "Installing $total apt packages..."
+  for package in "${packages[@]}"; do
+    current=$((current + 1))
+    # apt-get install -y handles all cases: installs if missing, upgrades if outdated,
+    # does nothing if already at newest version
+    if {{ $sudo }}apt-get install -y "$package" 2>&1; then
+      echo "  [$current/$total] $package ✓"
+    else
+      echo "  [$current/$total] $package FAILED"
+      failed_packages+=("$package")
+    fi
+  done
+  if [ ${#failed_packages[@]} -gt 0 ]; then
+    echo "Failed: ${failed_packages[*]}"
+    echo "Retry: {{ $sudo }}apt-get install ${failed_packages[*]}"
+  fi
+}
+
+install_brew_packages() {
+  local packages=("$@")
+  local failed_packages=()
+  local current=0 total=${#packages[@]}
+  echo "Installing $total brew packages..."
+  for package in "${packages[@]}"; do
+    current=$((current + 1))
+    if brew list "$package" &>/dev/null; then
+      # Already installed — attempt upgrade
+      if brew upgrade "$package" 2>&1; then
+        echo "  [$current/$total] $package ✓ (upgraded)"
+      else
+        echo "  [$current/$total] $package ✓ (already latest)"
+      fi
+    else
+      if brew install "$package" 2>&1; then
+        echo "  [$current/$total] $package ✓ (installed)"
+      else
+        echo "  [$current/$total] $package FAILED"
+        failed_packages+=("$package")
+      fi
+    fi
+  done
+  if [ ${#failed_packages[@]} -gt 0 ]; then
+    echo "Failed: ${failed_packages[*]}"
+    echo "Retry: brew install ${failed_packages[*]}"
+  fi
+}
+
 # Choose package list based on environment
 if is_wsl; then
   echo '🪟 Detected WSL environment - installing without Docker'
   {{ $allLinuxPackages := concat $commonPackages $linuxSpecific -}}
-  {{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
+  install_apt_packages {{ $allLinuxPackages | join " " }}
   
   # WSL-specific configurations
   echo 'Configuring WSL-specific settings'
@@ -140,14 +192,32 @@ EOF
   echo '   alias docker-compose="docker-compose.exe"'
 
 else
-  echo '🐧 Standard Linux environment - installing with Docker'
-  {{ $allLinuxPackages := concat $commonPackages $linuxWithDocker -}}
-  {{ $sudo }}apt-get install -y {{ $allLinuxPackages | join " " }}
-  
+  echo '🐧 Standard Linux environment - installing packages'
+  {{ $allLinuxPackages := concat $commonPackages $linuxWithoutDocker -}}
+  install_apt_packages {{ $allLinuxPackages | join " " }}
+
+  # Install Docker separately with conflict detection
+  if command -v docker >/dev/null 2>&1; then
+    echo "Docker already installed — skipping"
+  elif dpkg -l docker-ce 2>/dev/null | grep -q '^ii'; then
+    echo "docker-ce (official Docker repo) detected — skipping docker.io"
+  elif dpkg -l containerd.io 2>/dev/null | grep -q '^ii'; then
+    echo "WARNING: containerd.io is installed and conflicts with docker.io — skipping Docker"
+    echo "To install Docker, either remove containerd.io or use the official Docker repo:"
+    echo "  https://docs.docker.com/engine/install/"
+  else
+    echo "Installing docker.io and docker-compose-plugin..."
+    if {{ $sudo }}apt-get install -y docker.io docker-compose-plugin 2>&1; then
+      echo "Docker installed successfully"
+    else
+      echo "Docker installation FAILED — other packages were not affected"
+    fi
+  fi
+
   # Start and enable Docker (non-WSL only)
-  {{ $sudo }}systemctl start docker
-  {{ $sudo }}systemctl enable docker
-  {{ $sudo }}usermod -aG docker {{ .chezmoi.username }}
+  {{ $sudo }}systemctl start docker || true
+  {{ $sudo }}systemctl enable docker || true
+  {{ $sudo }}usermod -aG docker {{ .chezmoi.username }} || true
 fi
 
 # Install pipx (Linux method)
@@ -175,10 +245,10 @@ echo '   Or: eval "$(~/.linuxbrew/bin/brew shellenv)"'
 
 # Install additional brew packages (including modern CLI tools)
 {{ $allBrewPackages := concat $brewPackages $modernCli -}}
-brew install {{ $allBrewPackages | join " " }}
+install_brew_packages {{ $allBrewPackages | join " " }}
 {{ else -}}
 # Install modern CLI tools via apt for non-amd64 architectures
-{{ $sudo }}apt-get install -y bat fd-find ncdu tmux duf hyperfine
+install_apt_packages bat fd-find ncdu tmux duf hyperfine
 # Note: eza, delta, httpie, procs, dust may need alternative installation methods on ARM
 # Some of these may not be available on older Ubuntu/Debian versions
 {{ end -}}
