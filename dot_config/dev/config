@@ -1,6 +1,7 @@
 # Dev session configuration
-# Format: project_name=layout
+# Format: project_name=layout[@host]
 # Layouts: default, claude
+# Host: optional SSH hostname; omit for local projects
 #
 # Projects are auto-discovered from ~/Projects/
 # This file sets the default layout when opening a project.
@@ -10,6 +11,6 @@
 default_layout=default
 
 # Per-project overrides
-# atomicguard=claude
-# manta-deploy=claude
+# atomicguard=claude@myserver
+# manta-deploy=claude@myserver
 # c4ai-ml-agents=default

@@ -50,15 +50,45 @@ config_get() {
   fi
 }
 
-# Get the layout for a project: check config, then default_layout, then "default"
+# Get the layout for a project: check config, then default_layout, then "default".
+# Strips @host suffix if present.
 get_layout() {
   local project="$1"
-  local layout
-  layout=$(config_get "$project")
-  if [ -z "$layout" ]; then
-    layout=$(config_get "default_layout")
+  local raw
+  raw=$(config_get "$project")
+  if [ -z "$raw" ]; then
+    raw=$(config_get "default_layout")
   fi
+  # Strip @host if present
+  local layout="${raw%%@*}"
   echo "${layout:-default}"
+}
+
+# Get the remote host for a project. Returns empty if local.
+get_host() {
+  local project="$1"
+  local raw
+  raw=$(config_get "$project")
+  if [[ "$raw" == *@* ]]; then
+    echo "${raw#*@}"
+  fi
+}
+
+# Check if a project should be forwarded to a remote host.
+# If so, exec ssh (does not return). Otherwise returns normally.
+# Usage: maybe_forward_remote <project> [dev args...]
+maybe_forward_remote() {
+  local project="$1"
+  shift
+  local host
+  host=$(get_host "$project")
+  if [ -n "$host" ]; then
+    local local_hostname
+    local_hostname=$(hostname -s 2>/dev/null || hostname)
+    if [ "$local_hostname" != "$host" ]; then
+      exec ssh -t "$host" "dev $*"
+    fi
+  fi
 }
 
 # --- Project Discovery -------------------------------------------------------
@@ -170,19 +200,38 @@ open_project() {
   local query="$1"
   local force_layout="${2:-}"
 
-  # Check if it's an existing session first
+  # 1. Remote check FIRST (before local resolution).
+  #    Uses the query name to look up config. If remote, SSH forward
+  #    and never return. This works even if the project doesn't exist locally.
+  if [ -n "$force_layout" ]; then
+    maybe_forward_remote "$query" "$force_layout" "$query"
+  else
+    maybe_forward_remote "$query" "$query"
+  fi
+
+  # 2. Check if it's an existing local session
   if tmux has-session -t "=$query" 2>/dev/null; then
     attach_session "$query"
     return 0
   fi
 
-  # Resolve project path
+  # 3. Resolve local project path
   local project_path
   if ! project_path=$(resolve_project "$query"); then
     die "Project '$query' not found in $PROJECTS_DIR"
   fi
 
   local session_name="${project_path##*/}"
+
+  # 4. Also check resolved name for remote (in case query was fuzzy-matched)
+  if [ "$session_name" != "$query" ]; then
+    if [ -n "$force_layout" ]; then
+      maybe_forward_remote "$session_name" "$force_layout" "$session_name"
+    else
+      maybe_forward_remote "$session_name" "$session_name"
+    fi
+  fi
+
   local layout="${force_layout:-$(get_layout "$session_name")}"
 
   # Session might exist under the resolved name
@@ -266,7 +315,8 @@ picker_fzf() {
     done < <(tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}|#{session_activity}' 2>/dev/null)
   fi
 
-  # Available projects
+  # Available local projects
+  local -A seen_projects=()
   while IFS=$'\t' read -r display_name full_path; do
     # Skip projects that already have a session
     local basename="${full_path##*/}"
@@ -278,9 +328,40 @@ picker_fzf() {
       fi
     done
     if ! $already_active; then
-      entries+=("$(printf "[project]  %-22s %s" "$display_name" "$full_path")")
+      local host_annotation=""
+      local host
+      host=$(get_host "$basename")
+      if [ -n "$host" ]; then
+        host_annotation="  @${host}"
+      fi
+      entries+=("$(printf "[project]  %-22s %s%s" "$display_name" "$full_path" "$host_annotation")")
+      seen_projects[$basename]=1
     fi
   done < <(discover_projects)
+
+  # Add config-only remote projects (not found locally)
+  local local_hostname
+  local_hostname=$(hostname -s 2>/dev/null || hostname)
+  if [ -f "$CONFIG_FILE" ]; then
+    while IFS='=' read -r key value; do
+      [[ "$key" =~ ^#.*$ || -z "$key" || "$key" == "default_layout" ]] && continue
+      if [[ "$value" == *@* ]]; then
+        local cfg_host="${value#*@}"
+        if [ "$cfg_host" != "$local_hostname" ] && [ -z "${seen_projects[$key]+_}" ]; then
+          local already_active=false
+          for s in "${session_names[@]+"${session_names[@]}"}"; do
+            if [ "$s" = "$key" ]; then
+              already_active=true
+              break
+            fi
+          done
+          if ! $already_active; then
+            entries+=("$(printf "[project]  %-22s @%s" "$key" "$cfg_host")")
+          fi
+        fi
+      fi
+    done < "$CONFIG_FILE"
+  fi
 
   if [ ${#entries[@]} -eq 0 ]; then
     die "No sessions or projects found"
@@ -350,8 +431,9 @@ picker_fallback() {
     done < <(tmux list-sessions -F '#{session_name}|#{session_windows}|#{session_attached}|#{session_activity}' 2>/dev/null)
   fi
 
-  # Available projects
+  # Available local projects
   local has_projects=false
+  local -A seen_projects=()
   while IFS=$'\t' read -r display_name full_path; do
     local basename="${full_path##*/}"
     local already_active=false
@@ -366,12 +448,50 @@ picker_fallback() {
         echo -e "\n${BOLD} AVAILABLE PROJECTS${NC}"
         has_projects=true
       fi
-      printf "  ${GREEN}%2d)${NC} %-22s %s\n" "$idx" "$display_name" "$full_path"
+      local host_annotation=""
+      local host
+      host=$(get_host "$basename")
+      if [ -n "$host" ]; then
+        host_annotation="  @${host}"
+      fi
+      printf "  ${GREEN}%2d)${NC} %-22s %s%s\n" "$idx" "$display_name" "$full_path" "$host_annotation"
       types+=("project")
       names+=("$display_name")
+      seen_projects[$basename]=1
       idx=$((idx + 1))
     fi
   done < <(discover_projects)
+
+  # Add config-only remote projects (not found locally)
+  local local_hostname
+  local_hostname=$(hostname -s 2>/dev/null || hostname)
+  if [ -f "$CONFIG_FILE" ]; then
+    while IFS='=' read -r key value; do
+      [[ "$key" =~ ^#.*$ || -z "$key" || "$key" == "default_layout" ]] && continue
+      if [[ "$value" == *@* ]]; then
+        local cfg_host="${value#*@}"
+        if [ "$cfg_host" != "$local_hostname" ] && [ -z "${seen_projects[$key]+_}" ]; then
+          local already_active=false
+          for s in "${session_names[@]+"${session_names[@]}"}"; do
+            if [ "$s" = "$key" ]; then
+              already_active=true
+              break
+            fi
+          done
+          if ! $already_active; then
+            if ! $has_projects; then
+              echo -e "\n${BOLD} AVAILABLE PROJECTS${NC}"
+              has_projects=true
+            fi
+            printf "  ${GREEN}%2d)${NC} %-22s @%s\n" "$idx" "$key" "$cfg_host"
+            types+=("project")
+            names+=("$key")
+            idx=$((idx + 1))
+          fi
+        fi
+      fi
+    done < "$CONFIG_FILE"
+  fi
 
   if [ ${#names[@]} -eq 0 ]; then
     die "No sessions or projects found"
@@ -432,8 +552,19 @@ CONFIGURATION
   Per-project layouts are configured in ~/.config/dev/config:
 
     default_layout=default
-    atomicguard=claude
-    manta-deploy=claude
+    atomicguard=claude@myserver
+    manta-deploy=claude@myserver
+    my-local-thing=default
+
+  Format: project=layout[@host]
+  - layout: default, claude
+  - @host:  optional SSH hostname; omit for local projects
+
+REMOTE PROJECTS
+  If a project has @host in its config and the local hostname doesn't
+  match, `dev` will SSH to that host and run `dev` there. This works
+  for opening, killing, and the interactive picker. Projects that only
+  exist on a remote host still appear in the picker.
 
 INSIDE TMUX
   Running `dev <x>` inside tmux switches to that session (no nesting).
@@ -469,6 +600,7 @@ main() {
     kill)
       local name="${2:-}"
       [ -n "$name" ] || die "Usage: dev kill <session-name>"
+      maybe_forward_remote "$name" kill "$name"
       if tmux has-session -t "=$name" 2>/dev/null; then
         tmux kill-session -t "=$name"
         info "Session '$name' killed"
