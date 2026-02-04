@@ -87,7 +87,10 @@ Per-project layouts are configured in `~/.config/dev/config`:
 default_layout=default
 atomicguard=claude
 manta-deploy=claude
+dotfiles=claude:~/.local/share/chezmoi
 ```
+
+Format: `project=layout[:path][@host]` — `:path` for custom directories, `@host` for remote SSH.
 
 ### Layouts
 - **default**: Single shell pane in the project directory
@@ -141,3 +144,47 @@ For complex multi-service setups, copy `~/.local/share/start-service.sh.example`
 - Check template syntax with `chezmoi execute-template`
 - Verify file permissions and PATH configuration
 - Ensure platform-specific code is properly guarded
+
+## Package Management Workflow
+
+When adding a new package or CLI tool to the dotfiles, follow these steps:
+
+### 1. Install Script (`run_once_install-packages.sh.tmpl`)
+
+Add the package to the appropriate list:
+- `$commonPackages` — core utilities available everywhere (curl, jq, ripgrep, etc.)
+- `$brewPackages` — Homebrew-only tools (fnm, btop, gh, etc.)
+- `$modernCli` — modern replacements for standard commands (bat, eza, fd, etc.)
+- `$macosSpecific` — macOS-only packages (docker, awscli, etc.)
+- `$linuxSpecific` / `$linuxWithDocker` — Linux/WSL apt packages
+
+### 2. Doctor Check (`dot_local/bin/executable_sysup`)
+
+Add the tool to the appropriate array in the `doctor` command:
+- `tools_pm` — package managers (brew, apt-get, fnm, uv, etc.)
+- `tools_dev` — development tools (git, tmux, docker, etc.)
+- `tools_cli` — modern CLI replacements (eza, bat, fd, rg, etc.)
+
+If the tool has a non-standard version flag, add a case to `get_version()`.
+
+### 3. Shell Aliases (`dot_zshrc`)
+
+If the new tool replaces a standard command, add a conditional alias:
+```zsh
+if command -v newtool >/dev/null 2>&1; then
+  alias oldcmd="newtool"
+fi
+```
+
+Only add aliases when the tool is a drop-in replacement. Skip this step for tools with their own unique commands.
+
+### 4. Documentation
+
+Update this file (CLAUDE.md) if the package changes any documented behavior.
+
+### 5. Verification Checklist
+
+- [ ] `chezmoi execute-template < run_once_install-packages.sh.tmpl` — template renders
+- [ ] `chezmoi apply --dry-run` — all changes deploy cleanly
+- [ ] `sysup doctor` — new tool appears in the correct section
+- [ ] Aliases work: open a new shell and verify `command -v <tool>`

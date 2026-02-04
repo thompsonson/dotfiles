@@ -51,7 +51,7 @@ config_get() {
 }
 
 # Get the layout for a project: check config, then default_layout, then "default".
-# Strips @host suffix if present.
+# Strips @host suffix and :path suffix if present.
 get_layout() {
   local project="$1"
   local raw
@@ -59,8 +59,9 @@ get_layout() {
   if [ -z "$raw" ]; then
     raw=$(config_get "default_layout")
   fi
-  # Strip @host if present
-  local layout="${raw%%@*}"
+  # Strip @host if present, then strip :path if present
+  local without_host="${raw%%@*}"
+  local layout="${without_host%%:*}"
   echo "${layout:-default}"
 }
 
@@ -71,6 +72,20 @@ get_host() {
   raw=$(config_get "$project")
   if [[ "$raw" == *@* ]]; then
     echo "${raw#*@}"
+  fi
+}
+
+# Get the custom path for a project. Returns empty if no custom path.
+get_path() {
+  local project="$1"
+  local raw
+  raw=$(config_get "$project")
+  [ -z "$raw" ] && return
+  # Strip @host if present, then check for :path
+  local without_host="${raw%%@*}"
+  if [[ "$without_host" == *:* ]]; then
+    local path_part="${without_host#*:}"
+    echo "${path_part/#\~/$HOME}"
   fi
 }
 
@@ -121,6 +136,19 @@ discover_projects() {
     fi
     echo -e "${display_name}\t${PROJECTS_DIR}/${rel_path}"
   done
+
+  # Append custom-path entries from config
+  if [ -f "$CONFIG_FILE" ]; then
+    while IFS='=' read -r key value; do
+      [[ "$key" =~ ^#.*$ || -z "$key" || "$key" == "default_layout" ]] && continue
+      local without_host="${value%%@*}"
+      if [[ "$without_host" == *:* ]]; then
+        local custom_path="${without_host#*:}"
+        custom_path="${custom_path/#\~/$HOME}"
+        [ -d "$custom_path" ] && echo -e "${key}\t${custom_path}"
+      fi
+    done < "$CONFIG_FILE"
+  fi
 }
 
 # Resolve a project name/pattern to a full path.
@@ -215,13 +243,24 @@ open_project() {
     return 0
   fi
 
-  # 3. Resolve local project path
+  # 3. Resolve local project path (check custom path first, then discover)
   local project_path
-  if ! project_path=$(resolve_project "$query"); then
+  local custom_path
+  custom_path=$(get_path "$query")
+  if [ -n "$custom_path" ]; then
+    [ -d "$custom_path" ] || die "Custom path for '$query' does not exist: $custom_path"
+    project_path="$custom_path"
+  elif ! project_path=$(resolve_project "$query"); then
     die "Project '$query' not found in $PROJECTS_DIR"
   fi
 
-  local session_name="${project_path##*/}"
+  # Use config key as session name for custom-path projects, otherwise basename
+  local session_name
+  if [ -n "$custom_path" ]; then
+    session_name="$query"
+  else
+    session_name="${project_path##*/}"
+  fi
 
   # 4. Also check resolved name for remote (in case query was fuzzy-matched)
   if [ "$session_name" != "$query" ]; then
@@ -555,10 +594,15 @@ CONFIGURATION
     atomicguard=claude@myserver
     manta-deploy=claude@myserver
     my-local-thing=default
+    dotfiles=claude:~/.local/share/chezmoi
 
-  Format: project=layout[@host]
+  Format: project=layout[:path][@host]
   - layout: default, claude
+  - :path:  optional custom directory (expands ~); omit for ~/Projects projects
   - @host:  optional SSH hostname; omit for local projects
+
+  Custom-path projects appear in the picker alongside ~/Projects entries
+  and use the config key as the session name.
 
 REMOTE PROJECTS
   If a project has @host in its config and the local hostname doesn't
@@ -572,6 +616,7 @@ INSIDE TMUX
 EXAMPLES
   dev                     # Pick from sessions/projects interactively
   dev atomicguard         # Open atomicguard with configured layout
+  dev dotfiles            # Open dotfiles in custom path (chezmoi dir)
   dev claude myproject    # Open myproject with claude+shell split
   dev kill myproject      # Kill myproject session
 EOF

@@ -1,5 +1,5 @@
 # Dev session configuration
-# Format: project_name=layout[@host]
+# Format: project_name=layout[:path][@host]
 # Layouts: default, claude
 # Host: optional SSH hostname; omit for local projects
 #
@@ -14,3 +14,7 @@ default_layout=default
 # atomicguard=claude@myserver
 # manta-deploy=claude@myserver
 # c4ai-ml-agents=default
+
+# Custom-path projects (format: name=layout:path)
+# Dotfiles agent: Claude Code + shell in chezmoi source directory
+dotfiles=claude:~/.local/share/chezmoi
