@@ -41,14 +41,16 @@ The zsh configuration uses these variables:
 ## Key Files
 
 ### Shell Configuration
-- `dot_zshrc`: Main shell configuration with tmux aliases
+- `dot_zshrc`: Main shell configuration with SSH login reminder and dev completion
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
 
-### Tmux Configuration (Remote Development)
-- `dot_tmux.conf`: Tmux configuration with vi-style keybindings and modern features
-- `executable_dot_local/bin/tmux-session`: Helper script for session management
-- `dot_local/share/start-service.sh.example`: Template for project service management
+### Tmux & Dev Sessions
+- `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
+- `dot_local/bin/executable_dev`: Dev session manager (project discovery, fzf picker, layouts)
+- `dot_config/dev/config`: Per-project layout configuration
+- `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
+- `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
 ### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
@@ -56,25 +58,38 @@ The zsh configuration uses these variables:
 - `dot_config/Code/User/keybindings.json`: VS Code custom keybindings
 - `dot_config/Code/User/extensions.json`: VS Code recommended extensions
 
-## Tmux for Remote Development
+## Dev Session Manager
 
-This dotfiles repository includes a complete tmux setup for remote development and service management:
+The `dev` command provides persistent tmux sessions for multi-device development. Sessions survive disconnects and can be accessed from any device via SSH.
 
-### Features
-- **Modern keybindings**: Prefix changed to `C-a`, vim-style navigation (`h/j/k/l`)
-- **Mouse support**: Toggle with `prefix + m`
-- **Session management**: Helper scripts for creating/attaching to sessions
-- **Service templates**: Example script for managing project services in tmux
-
-### Quick Reference
+### Commands
 ```bash
-# Session management
-tms myproject          # Create or attach to 'myproject' session
-tml                    # List all sessions
-tma myproject          # Attach to session
-tmk myproject          # Kill session
+dev                     # Interactive picker (fzf or numbered fallback)
+dev <project>           # Create or attach to session for <project>
+dev claude <project>    # Force claude+shell layout (vertical split)
+dev detach              # Detach from current tmux session
+dev kill <name>         # Kill a session
+dev kill-all            # Kill all sessions (with confirmation)
+dev help                # Full help text
+```
 
-# Within tmux (prefix = C-a)
+### Configuration
+Per-project layouts are configured in `~/.config/dev/config`:
+```ini
+default_layout=default
+atomicguard=claude
+manta-deploy=claude
+```
+
+### Layouts
+- **default**: Single shell pane in the project directory
+- **claude**: Vertical split with `claude` (left) and shell (right)
+
+### Project Discovery
+Projects are auto-discovered from `~/Projects/` (up to 3 levels deep). Any directory containing `.git` is treated as a project.
+
+### Tmux Keybindings (prefix = C-a)
+```bash
 C-a |                  # Split horizontally
 C-a -                  # Split vertically
 C-a h/j/k/l            # Navigate panes (vim-style)
@@ -82,29 +97,21 @@ C-a r                  # Reload config
 C-a d                  # Detach from session
 ```
 
-### Using in Projects
-Copy `~/.local/share/start-service.sh.example` to your project and customize it to:
-1. Start multiple services in different windows
-2. Split panes for monitoring
-3. Set up project-specific environments
-4. Enable remote access to running services
+### Session Persistence (TPM)
+Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.
 
-Example workflow:
-```bash
-# In your project directory
-cp ~/.local/share/start-service.sh.example ./start-service.sh
-chmod +x start-service.sh
-./start-service.sh              # Start services
-./start-service.sh --attach     # Start and attach
-./start-service.sh --status     # Check status
-```
+### SSH Login Reminder
+When connecting via SSH, active tmux sessions are displayed automatically with a reminder to use `dev`.
+
+### Multi-Service Orchestration
+For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
 
 ## Recent Changes
 
-1. **Tmux configuration**: Added comprehensive tmux setup for remote development
-2. **Helper scripts**: Added `tmux-session` for easy session management
-3. **Service templates**: Added example script for managing project services
-4. **Shell aliases**: Added tmux convenience aliases to zshrc
+1. **Dev session manager**: Replaced tmux-session with `dev` command (fzf picker, project discovery, layouts)
+2. **TPM & session persistence**: Enabled tmux-resurrect and tmux-continuum for automatic session save/restore
+3. **SSH login reminder**: Active tmux sessions shown on SSH login
+4. **Service templates**: Example script for managing project services
 5. **PATH syntax error**: Fixed semicolon separator in PATH export
 6. **Antigen cache directory**: Moved creation outside WSL-specific block
 7. **Cross-platform compatibility**: Ensured all platforms can create necessary directories

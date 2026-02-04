@@ -1,0 +1,15 @@
+# Dev session configuration
+# Format: project_name=layout
+# Layouts: default, claude
+#
+# Projects are auto-discovered from ~/Projects/
+# This file sets the default layout when opening a project.
+# Use "dev claude <project>" to override with claude layout.
+
+# Default layout for all projects (if not specified below)
+default_layout=default
+
+# Per-project overrides
+# atomicguard=claude
+# manta-deploy=claude
+# c4ai-ml-agents=default

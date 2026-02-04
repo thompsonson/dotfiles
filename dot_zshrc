@@ -141,17 +141,21 @@ if command -v procs >/dev/null 2>&1; then
   alias ps="procs"
 fi
 
-# Tmux aliases and configuration
+# Development session management
 if command -v tmux >/dev/null 2>&1; then
-  alias tm="tmux"
-  alias tma="tmux attach-session -t"
-  alias tmn="tmux new-session -s"
-  alias tml="tmux list-sessions"
-  alias tmk="tmux kill-session -t"
-
-  # Quick session management with helper script
-  if command -v tmux-session >/dev/null 2>&1; then
-    alias tms="tmux-session"
+  # Show active tmux sessions on SSH login (not in tmux, not in VS Code terminal)
+  if [ -n "$SSH_CONNECTION" ] && [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ]; then
+    _sessions=$(tmux list-sessions 2>/dev/null)
+    if [ -n "$_sessions" ]; then
+      echo "\033[1;36m tmux sessions running:\033[0m"
+      echo "$_sessions" | while read -r line; do
+        echo "  $line"
+      done
+      echo ""
+      echo "  Type \033[1mdev\033[0m to manage sessions"
+      echo ""
+    fi
+    unset _sessions
   fi
 fi
 
@@ -163,6 +167,20 @@ setopt NULL_GLOB
 setopt AUTO_MENU
 setopt COMPLETE_IN_WORD
 setopt ALWAYS_TO_END
+
+# dev command completion
+_dev_completion() {
+  local -a subcmds sessions projects
+  subcmds=(claude detach kill kill-all help)
+  sessions=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
+  projects=(${(f)"$(/usr/bin/find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
+  _arguments '1:command:->cmd' '2:target:->target'
+  case $state in
+    cmd) _describe 'command' subcmds -- sessions -- projects ;;
+    target) _describe 'target' sessions -- projects ;;
+  esac
+}
+compdef _dev_completion dev 2>/dev/null
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
