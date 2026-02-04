@@ -87,7 +87,10 @@ Per-project layouts are configured in `~/.config/dev/config`:
 default_layout=default
 atomicguard=claude
 manta-deploy=claude
+dotfiles=claude:~/.local/share/chezmoi
 ```
+
+Format: `project=layout[:path][@host]` — `:path` for custom directories, `@host` for remote SSH.
 
 ### Layouts
 - **default**: Single shell pane in the project directory
@@ -114,18 +117,12 @@ On new interactive shells (local terminals, SSH logins), a welcome message shows
 ### Multi-Service Orchestration
 For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
 
-## Recent Changes
+## Documentation
 
-1. **Dev session manager**: Replaced tmux-session with `dev` command (fzf picker, project discovery, layouts)
-2. **TPM & session persistence**: Enabled tmux-resurrect and tmux-continuum for automatic session save/restore
-3. **Welcome message**: Replaced SSH-only tmux reminder with general welcome message (hostname, platform, commands, active sessions)
-4. **Service templates**: Example script for managing project services
-5. **PATH syntax error**: Fixed semicolon separator in PATH export
-6. **Antigen cache directory**: Moved creation outside WSL-specific block
-7. **Cross-platform compatibility**: Ensured all platforms can create necessary directories
-8. **VS Code configuration**: Added comprehensive settings, keybindings, and extensions
-9. **TTY warning**: Known issue with antigen during `chezmoi apply` (cosmetic only)
-10. **sysup utility**: Cross-platform system update command (brew, apt, fnm, uv, pipx, tpm, vscode, chezmoi)
+Detailed usage guides are in `docs/`:
+- [`docs/dev.md`](docs/dev.md) — Dev session manager reference
+- [`docs/sysup.md`](docs/sysup.md) — System update utility reference
+- [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
 
@@ -141,3 +138,47 @@ For complex multi-service setups, copy `~/.local/share/start-service.sh.example`
 - Check template syntax with `chezmoi execute-template`
 - Verify file permissions and PATH configuration
 - Ensure platform-specific code is properly guarded
+
+## Package Management Workflow
+
+When adding a new package or CLI tool to the dotfiles, follow these steps:
+
+### 1. Install Script (`run_once_install-packages.sh.tmpl`)
+
+Add the package to the appropriate list:
+- `$commonPackages` — core utilities available everywhere (curl, jq, ripgrep, etc.)
+- `$brewPackages` — Homebrew-only tools (fnm, btop, gh, etc.)
+- `$modernCli` — modern replacements for standard commands (bat, eza, fd, etc.)
+- `$macosSpecific` — macOS-only packages (docker, awscli, etc.)
+- `$linuxSpecific` / `$linuxWithDocker` — Linux/WSL apt packages
+
+### 2. Doctor Check (`dot_local/bin/executable_sysup`)
+
+Add the tool to the appropriate array in the `doctor` command:
+- `tools_pm` — package managers (brew, apt-get, fnm, uv, etc.)
+- `tools_dev` — development tools (git, tmux, docker, etc.)
+- `tools_cli` — modern CLI replacements (eza, bat, fd, rg, etc.)
+
+If the tool has a non-standard version flag, add a case to `get_version()`.
+
+### 3. Shell Aliases (`dot_zshrc`)
+
+If the new tool replaces a standard command, add a conditional alias:
+```zsh
+if command -v newtool >/dev/null 2>&1; then
+  alias oldcmd="newtool"
+fi
+```
+
+Only add aliases when the tool is a drop-in replacement. Skip this step for tools with their own unique commands.
+
+### 4. Documentation
+
+Update this file (CLAUDE.md) if the package changes any documented behavior.
+
+### 5. Verification Checklist
+
+- [ ] `chezmoi execute-template < run_once_install-packages.sh.tmpl` — template renders
+- [ ] `chezmoi apply --dry-run` — all changes deploy cleanly
+- [ ] `sysup doctor` — new tool appears in the correct section
+- [ ] Aliases work: open a new shell and verify `command -v <tool>`
