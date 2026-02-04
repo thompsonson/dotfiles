@@ -375,7 +375,7 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sox whisper-cli)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
@@ -391,6 +391,7 @@ cmd_doctor() {
   check_path "$HOME/.oh-my-zsh" "oh-my-zsh"
   check_path "$HOME/.config/dev/config" "dev config"
   check_path "$HOME/Projects" "Projects directory"
+  check_path "$HOME/.local/share/whisper/ggml-base.en.bin" "Whisper model"
 }
 
 check_tool() {
@@ -433,6 +434,8 @@ get_version() {
     zoxide)    zoxide --version 2>/dev/null | awk '{print $2}' ;;
     jq)        jq --version 2>/dev/null | tr -d 'jq-' ;;
     apt-get)   apt-get --version 2>/dev/null | head -1 | awk '{print $2}' ;;
+    sox)       sox --version 2>/dev/null | head -1 | awk '{print $NF}' ;;
+    whisper-cli) whisper-cli --version 2>/dev/null | head -1 || echo "installed" ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
 }

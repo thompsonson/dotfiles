@@ -1,0 +1,188 @@
+#!/bin/bash
+# ============================================================================
+# voice-input - Speech-to-text with tmux popup confirmation
+# ============================================================================
+# Records audio, transcribes via whisper.cpp, shows a confirmation popup,
+# and injects the text into a target tmux pane.
+#
+# Usage:
+#   voice-input <target-pane-id>
+#   voice-input --check           Check dependencies
+#
+# Dependencies: sox, whisper-cli (whisper.cpp), tmux
+# Model: ~/.local/share/whisper/ggml-base.en.bin
+
+set -euo pipefail
+
+# --- Configuration -----------------------------------------------------------
+
+WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.local/share/whisper/ggml-base.en.bin}"
+WHISPER_CMD="${WHISPER_CMD:-whisper-cli}"
+SAMPLE_RATE=16000
+SILENCE_THRESHOLD="1%"    # sox silence detection threshold
+SILENCE_DURATION="1.5"    # seconds of silence before auto-stop
+MAX_DURATION=30            # maximum recording duration in seconds
+
+# --- Colors ------------------------------------------------------------------
+
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[1;36m'
+NC='\033[0m'
+
+# --- Helpers -----------------------------------------------------------------
+
+die() { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+
+check_deps() {
+  local missing=()
+  command -v sox &>/dev/null || missing+=("sox")
+  command -v "$WHISPER_CMD" &>/dev/null || missing+=("$WHISPER_CMD (whisper.cpp)")
+  command -v tmux &>/dev/null || missing+=("tmux")
+
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo -e "${RED}Missing dependencies:${NC}"
+    for dep in "${missing[@]}"; do
+      echo -e "  - $dep"
+    done
+    echo ""
+    echo "Install with:"
+    echo "  brew install sox whisper-cpp    # macOS"
+    echo "  apt install sox && brew install whisper-cpp  # Linux"
+    return 1
+  fi
+
+  if [ ! -f "$WHISPER_MODEL" ]; then
+    echo -e "${YELLOW}Whisper model not found:${NC} $WHISPER_MODEL"
+    echo ""
+    echo "Download with:"
+    echo "  mkdir -p ~/.local/share/whisper"
+    echo "  whisper-cpp-download-ggml-model base.en"
+    echo "  mv ggml-base.en.bin ~/.local/share/whisper/"
+    echo ""
+    echo "Or set WHISPER_MODEL to point to an existing model file."
+    return 1
+  fi
+
+  echo -e "${GREEN}All dependencies found.${NC}"
+  echo -e "  sox:        $(command -v sox)"
+  echo -e "  whisper:    $(command -v "$WHISPER_CMD")"
+  echo -e "  model:      $WHISPER_MODEL"
+  return 0
+}
+
+# --- Main Logic --------------------------------------------------------------
+
+record_and_transcribe() {
+  local target_pane="$1"
+  local tmpfile
+  tmpfile=$(mktemp /tmp/voice-input-XXXXXX.wav)
+
+  # Trap to clean up temp file
+  trap "rm -f '$tmpfile'" EXIT
+
+  echo -e "${CYAN}${BOLD}  Voice Input${NC}"
+  echo ""
+  echo -e "  Recording... ${DIM}(Enter to stop, or auto-stops after ${SILENCE_DURATION}s silence)${NC}"
+  echo ""
+
+  # Record audio: auto-stop on silence or Enter keypress
+  # sox: -d = default mic, silence detection stops recording after SILENCE_DURATION
+  sox -d -r "$SAMPLE_RATE" -c 1 -b 16 "$tmpfile" \
+    trim 0 "$MAX_DURATION" \
+    silence 1 0.1 "$SILENCE_THRESHOLD" 1 "$SILENCE_DURATION" "$SILENCE_THRESHOLD" \
+    2>/dev/null &
+  local sox_pid=$!
+
+  # Wait for Enter OR sox to finish
+  while kill -0 "$sox_pid" 2>/dev/null; do
+    if read -rsn1 -t 0.2 key 2>/dev/null; then
+      kill "$sox_pid" 2>/dev/null || true
+      wait "$sox_pid" 2>/dev/null || true
+      break
+    fi
+  done
+
+  # Check if any audio was captured
+  if [ ! -s "$tmpfile" ]; then
+    echo -e "  ${YELLOW}No audio captured.${NC}"
+    sleep 1
+    return 1
+  fi
+
+  echo -e "  Transcribing...${DIM}"
+
+  # Transcribe with whisper.cpp
+  local text
+  text=$("$WHISPER_CMD" \
+    -m "$WHISPER_MODEL" \
+    -f "$tmpfile" \
+    --no-timestamps \
+    -nt \
+    2>/dev/null | sed 's/^[[:space:]]*//' | sed '/^$/d')
+
+  echo -e "${NC}"
+
+  if [ -z "$text" ]; then
+    echo -e "  ${YELLOW}No speech detected.${NC}"
+    sleep 1
+    return 1
+  fi
+
+  # Show transcription and confirmation prompt
+  echo -e "  ${GREEN}Transcribed:${NC}"
+  echo ""
+  echo -e "  ${BOLD}$text${NC}"
+  echo ""
+  echo -e "  ${DIM}[Enter] Send  [e] Edit  [Esc/q] Cancel${NC}"
+  echo ""
+
+  read -rsn1 key
+  case "$key" in
+    ""|$'\n')
+      # Enter: send as-is
+      tmux send-keys -t "$target_pane" -l "$text"
+      echo -e "  ${GREEN}Sent.${NC}"
+      sleep 0.3
+      ;;
+    e|E)
+      # Edit before sending
+      echo -ne "  Edit: "
+      read -r -e -i "$text" edited
+      if [ -n "$edited" ]; then
+        tmux send-keys -t "$target_pane" -l "$edited"
+        echo -e "  ${GREEN}Sent.${NC}"
+        sleep 0.3
+      else
+        echo -e "  ${YELLOW}Cancelled (empty).${NC}"
+        sleep 0.5
+      fi
+      ;;
+    *)
+      echo -e "  ${YELLOW}Cancelled.${NC}"
+      sleep 0.3
+      ;;
+  esac
+}
+
+# --- Entry Point -------------------------------------------------------------
+
+case "${1:-}" in
+  --check)
+    check_deps
+    ;;
+  "")
+    die "Usage: voice-input <target-pane-id>\n       voice-input --check"
+    ;;
+  *)
+    # Verify dependencies exist before recording
+    command -v sox &>/dev/null || die "sox not installed (brew install sox)"
+    command -v "$WHISPER_CMD" &>/dev/null || die "$WHISPER_CMD not installed (brew install whisper-cpp)"
+    [ -f "$WHISPER_MODEL" ] || die "Whisper model not found: $WHISPER_MODEL\nRun: voice-input --check"
+
+    record_and_transcribe "$1"
+    ;;
+esac

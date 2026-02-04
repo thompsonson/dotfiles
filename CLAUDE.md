@@ -60,6 +60,9 @@ The zsh configuration uses these variables:
 - `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
+### Voice Input
+- `dot_local/bin/executable_voice-input`: Speech-to-text with tmux popup confirmation
+
 ### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
 - `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
@@ -75,6 +78,8 @@ The `dev` command provides persistent tmux sessions for multi-device development
 dev                     # Interactive picker (fzf or numbered fallback)
 dev <project>           # Create or attach to session for <project>
 dev claude <project>    # Force claude+shell layout (vertical split)
+dev voice               # Voice input: speak, confirm, inject into current pane
+dev voice check         # Check voice input dependencies
 dev detach              # Detach from current tmux session
 dev kill <name>         # Kill a session
 dev kill-all            # Kill all sessions (with confirmation)
@@ -106,7 +111,21 @@ C-a -                  # Split vertically
 C-a h/j/k/l            # Navigate panes (vim-style)
 C-a r                  # Reload config
 C-a d                  # Detach from session
+C-a v                  # Voice input (speech-to-text with confirmation)
 ```
+
+### Voice Input
+Speak instead of type inside any tmux pane. Press `prefix + v` (C-a v) or run `dev voice`. A popup records your speech, transcribes locally via whisper.cpp, shows the text for confirmation, then injects it into the active pane.
+
+**Dependencies**: `sox`, `whisper-cpp` (installed via brew), Whisper model file
+**Check**: `dev voice check`
+**Model**: `~/.local/share/whisper/ggml-base.en.bin`
+**Script**: `~/.local/bin/voice-input`
+
+The popup shows three options after transcription:
+- **Enter**: send text as-is to the target pane
+- **e**: edit the text before sending
+- **Esc/q**: cancel
 
 ### Session Persistence (TPM)
 Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.

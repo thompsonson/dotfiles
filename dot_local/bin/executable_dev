@@ -573,6 +573,9 @@ USAGE
   dev                     Interactive picker (fzf or numbered fallback)
   dev <project>           Create or attach to session for <project>
   dev claude <project>    Force claude+shell layout (vertical split)
+  dev voice               Voice input: speak, confirm, inject into current pane
+  dev voice <pane-id>     Voice input into a specific pane
+  dev voice check         Check voice input dependencies
   dev detach              Detach from current tmux session
   dev kill <name>         Kill a session
   dev kill-all            Kill all sessions (with confirmation)
@@ -613,11 +616,27 @@ REMOTE PROJECTS
 INSIDE TMUX
   Running `dev <x>` inside tmux switches to that session (no nesting).
 
+VOICE INPUT
+  Speak instead of type. Press prefix + v (C-a v) inside tmux, or run
+  dev voice. A popup records your speech, transcribes it locally via
+  whisper.cpp, shows the result for confirmation, then injects the text
+  into your active pane.
+
+  Dependencies: sox, whisper-cpp (whisper-cli)
+  Model: ~/.local/share/whisper/ggml-base.en.bin
+  Check: dev voice check
+
+  Environment variables:
+    WHISPER_MODEL   Path to whisper.cpp model file
+    WHISPER_CMD     Name of whisper CLI binary (default: whisper-cli)
+
 EXAMPLES
   dev                     # Pick from sessions/projects interactively
   dev atomicguard         # Open atomicguard with configured layout
   dev dotfiles            # Open dotfiles in custom path (chezmoi dir)
   dev claude myproject    # Open myproject with claude+shell split
+  dev voice               # Voice input into current pane
+  dev voice check         # Check voice dependencies are installed
   dev kill myproject      # Kill myproject session
 EOF
 }
@@ -676,6 +695,28 @@ main() {
       local project="${2:-}"
       [ -n "$project" ] || die "Usage: dev claude <project>"
       open_project "$project" "claude"
+      ;;
+    voice)
+      # Voice input: record, transcribe, confirm, inject into current or target pane
+      if ! command -v voice-input &>/dev/null; then
+        die "voice-input not found in PATH"
+      fi
+      case "${2:-}" in
+        check)
+          voice-input --check
+          ;;
+        *)
+          if [ -z "${TMUX:-}" ]; then
+            die "voice-input requires a tmux session (run inside tmux)"
+          fi
+          local target_pane="${2:-}"
+          if [ -z "$target_pane" ]; then
+            target_pane=$(tmux display-message -p '#{pane_id}')
+          fi
+          tmux display-popup -E -w 70% -h 40% -T " Voice Input " \
+            "voice-input $target_pane"
+          ;;
+      esac
       ;;
     *)
       open_project "$1"
