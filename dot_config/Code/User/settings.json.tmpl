@@ -93,9 +93,13 @@
   // Python settings
   "python.defaultInterpreterPath": "python3",
   "python.terminal.activateEnvironment": true,
-  "python.formatting.provider": "black",
-  "python.linting.enabled": true,
-  "python.linting.pylintEnabled": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
 
   // Markdown settings
   "markdown.preview.fontSize": 14,
