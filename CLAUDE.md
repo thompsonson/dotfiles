@@ -61,7 +61,8 @@ The zsh configuration uses these variables:
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
 ### Voice Input
-- `dot_local/bin/executable_voice-input`: Speech-to-text with tmux popup confirmation
+- `dot_local/bin/executable_voice-transcribe`: Record and transcribe to stdout (pipeable Unix tool)
+- `dot_local/bin/executable_voice-input`: Tmux integration (popup confirmation, VAD loop, pane injection)
 
 ### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
@@ -111,21 +112,22 @@ C-a -                  # Split vertically
 C-a h/j/k/l            # Navigate panes (vim-style)
 C-a r                  # Reload config
 C-a d                  # Detach from session
-C-a v                  # Voice input (speech-to-text with confirmation)
+C-a v                  # Voice input (one-shot: record, confirm, inject)
 ```
 
 ### Voice Input
-Speak instead of type inside any tmux pane. Press `prefix + v` (C-a v) or run `dev voice`. A popup records your speech, transcribes locally via whisper.cpp, shows the text for confirmation, then injects it into the active pane.
+Speak instead of type. Two modes:
+
+- **`dev voice`** (or `dev voice start`): Continuous VAD listening. Automatically detects speech, transcribes, shows a confirmation popup, and injects into the Claude pane. Runs until `dev voice stop`.
+- **`prefix + v`** (C-a v) or **`dev voice once`**: One-shot recording.
+
+Two underlying scripts follow Unix philosophy:
+- **`voice-transcribe`**: Record → transcribe → stdout. Pipeable: `voice-transcribe | llm "summarize"`
+- **`voice-input`**: Tmux integration (popup confirmation, VAD loop, pane injection)
 
 **Dependencies**: `sox`, `whisper-cpp` (installed via brew), Whisper model file
 **Check**: `dev voice check`
 **Model**: `~/.local/share/whisper/ggml-base.en.bin`
-**Script**: `~/.local/bin/voice-input`
-
-The popup shows three options after transcription:
-- **Enter**: send text as-is to the target pane
-- **e**: edit the text before sending
-- **Esc/q**: cancel
 
 ### Session Persistence (TPM)
 Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.

@@ -1,0 +1,185 @@
+#!/bin/bash
+# ============================================================================
+# voice-transcribe - Record and transcribe speech to stdout
+# ============================================================================
+# Unix-friendly: records from mic, transcribes via whisper.cpp, outputs
+# plain text to stdout. Pipe to anything.
+#
+# Usage:
+#   voice-transcribe                 # Record until silence, print text
+#   voice-transcribe --vad           # VAD mode: wait for speech, record, print
+#   voice-transcribe -f audio.wav    # Transcribe existing file
+#   voice-transcribe --check         # Check dependencies
+#
+# Pipe examples:
+#   voice-transcribe | llm "summarize this"
+#   voice-transcribe | tee prompt.txt | claude
+#   voice-transcribe >> journal.txt
+#
+# Dependencies: sox, whisper-cli (whisper.cpp)
+# Model: ~/.local/share/whisper/ggml-base.en.bin
+
+set -euo pipefail
+
+# --- Configuration -----------------------------------------------------------
+
+WHISPER_MODEL="${WHISPER_MODEL:-$HOME/.local/share/whisper/ggml-base.en.bin}"
+WHISPER_CMD="${WHISPER_CMD:-whisper-cli}"
+SAMPLE_RATE=16000
+SILENCE_THRESHOLD="${VOICE_SILENCE_THRESHOLD:-1%}"
+SILENCE_DURATION="${VOICE_SILENCE_DURATION:-1.5}"
+MAX_DURATION="${VOICE_MAX_DURATION:-30}"
+
+# --- Helpers -----------------------------------------------------------------
+
+die() { echo "Error: $*" >&2; exit 1; }
+
+check_deps() {
+  local missing=()
+  command -v sox &>/dev/null || missing+=("sox")
+  command -v "$WHISPER_CMD" &>/dev/null || missing+=("$WHISPER_CMD (whisper.cpp)")
+
+  if [ ${#missing[@]} -gt 0 ]; then
+    echo "Missing dependencies:" >&2
+    for dep in "${missing[@]}"; do
+      echo "  - $dep" >&2
+    done
+    echo "" >&2
+    echo "Install with:" >&2
+    echo "  brew install sox whisper-cpp" >&2
+    return 1
+  fi
+
+  if [ ! -f "$WHISPER_MODEL" ]; then
+    echo "Whisper model not found: $WHISPER_MODEL" >&2
+    echo "" >&2
+    echo "Download with:" >&2
+    echo "  mkdir -p ~/.local/share/whisper" >&2
+    echo "  whisper-cpp-download-ggml-model base.en" >&2
+    echo "  mv ggml-base.en.bin ~/.local/share/whisper/" >&2
+    return 1
+  fi
+
+  echo "All dependencies found." >&2
+  echo "  sox:        $(command -v sox)" >&2
+  echo "  whisper:    $(command -v "$WHISPER_CMD")" >&2
+  echo "  model:      $WHISPER_MODEL" >&2
+  return 0
+}
+
+transcribe_file() {
+  local file="$1"
+  "$WHISPER_CMD" \
+    -m "$WHISPER_MODEL" \
+    -f "$file" \
+    --no-timestamps \
+    -nt \
+    2>/dev/null | sed 's/^[[:space:]]*//' | sed '/^$/d'
+}
+
+# Record a single utterance: wait for speech, capture until silence.
+# Sox silence effect: skip leading silence, stop after SILENCE_DURATION of trailing silence.
+record_utterance() {
+  local tmpfile="$1"
+  sox -d -r "$SAMPLE_RATE" -c 1 -b 16 "$tmpfile" \
+    silence 1 0.3 "$SILENCE_THRESHOLD" \
+    1 "$SILENCE_DURATION" "$SILENCE_THRESHOLD" \
+    trim 0 "$MAX_DURATION" \
+    2>/dev/null
+}
+
+# --- Entry Point -------------------------------------------------------------
+
+MODE="record"
+INPUT_FILE=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --check)
+      check_deps
+      exit $?
+      ;;
+    --vad)
+      MODE="vad"
+      shift
+      ;;
+    -f|--file)
+      MODE="file"
+      INPUT_FILE="${2:-}"
+      [ -n "$INPUT_FILE" ] || die "Usage: voice-transcribe -f <audio-file>"
+      [ -f "$INPUT_FILE" ] || die "File not found: $INPUT_FILE"
+      shift 2
+      ;;
+    -h|--help)
+      echo "Usage: voice-transcribe [OPTIONS]"
+      echo ""
+      echo "Record speech and output transcription to stdout."
+      echo ""
+      echo "Options:"
+      echo "  --vad           VAD mode: wait for speech, record, output text"
+      echo "  -f, --file FILE Transcribe an existing audio file"
+      echo "  --check         Check dependencies"
+      echo "  -h, --help      Show this help"
+      echo ""
+      echo "Environment:"
+      echo "  WHISPER_MODEL            Path to model (default: ~/.local/share/whisper/ggml-base.en.bin)"
+      echo "  WHISPER_CMD              Whisper binary (default: whisper-cli)"
+      echo "  VOICE_SILENCE_THRESHOLD  Sox silence threshold (default: 1%)"
+      echo "  VOICE_SILENCE_DURATION   Seconds of silence to stop (default: 1.5)"
+      echo "  VOICE_MAX_DURATION       Max recording seconds (default: 30)"
+      exit 0
+      ;;
+    *)
+      die "Unknown option: $1 (try --help)"
+      ;;
+  esac
+done
+
+# Verify dependencies
+command -v sox &>/dev/null || die "sox not installed (brew install sox)"
+command -v "$WHISPER_CMD" &>/dev/null || die "$WHISPER_CMD not installed (brew install whisper-cpp)"
+[ -f "$WHISPER_MODEL" ] || die "Whisper model not found: $WHISPER_MODEL (run: voice-transcribe --check)"
+
+case "$MODE" in
+  file)
+    transcribe_file "$INPUT_FILE"
+    ;;
+  record)
+    # One-shot: record until silence, transcribe, print
+    tmpfile=$(mktemp /tmp/voice-XXXXXX.wav)
+    trap "rm -f '$tmpfile'" EXIT
+    echo "Recording... (speak, then pause to finish)" >&2
+    record_utterance "$tmpfile"
+    if [ ! -s "$tmpfile" ]; then
+      echo "No audio captured." >&2
+      exit 1
+    fi
+    echo "Transcribing..." >&2
+    text=$(transcribe_file "$tmpfile")
+    if [ -z "$text" ]; then
+      echo "No speech detected." >&2
+      exit 1
+    fi
+    echo "$text"
+    ;;
+  vad)
+    # VAD mode: same as record but explicitly waits for speech onset.
+    # Sox silence effect handles this: `silence 1 0.3 THRESHOLD` skips
+    # leading silence until 0.3s of sound above threshold is detected.
+    tmpfile=$(mktemp /tmp/voice-XXXXXX.wav)
+    trap "rm -f '$tmpfile'" EXIT
+    echo "Listening... (waiting for speech)" >&2
+    record_utterance "$tmpfile"
+    if [ ! -s "$tmpfile" ]; then
+      echo "No audio captured." >&2
+      exit 1
+    fi
+    echo "Transcribing..." >&2
+    text=$(transcribe_file "$tmpfile")
+    if [ -z "$text" ]; then
+      echo "No speech detected." >&2
+      exit 1
+    fi
+    echo "$text"
+    ;;
+esac

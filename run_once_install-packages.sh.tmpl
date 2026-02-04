@@ -609,6 +609,38 @@ else
   echo "Try: brew install uv"
 fi
 
+# Download Whisper model for voice input (if whisper-cli is available)
+if command -v whisper-cli >/dev/null 2>&1; then
+  WHISPER_MODEL_DIR="$HOME/.local/share/whisper"
+  WHISPER_MODEL="$WHISPER_MODEL_DIR/ggml-base.en.bin"
+  if [ ! -f "$WHISPER_MODEL" ]; then
+    echo 'Downloading Whisper base.en model for voice input'
+    mkdir -p "$WHISPER_MODEL_DIR"
+    if command -v whisper-cpp-download-ggml-model >/dev/null 2>&1; then
+      (cd "$WHISPER_MODEL_DIR" && whisper-cpp-download-ggml-model base.en)
+      # whisper-cpp-download-ggml-model may place the file in the current directory
+      if [ -f "$WHISPER_MODEL_DIR/ggml-base.en.bin" ]; then
+        echo "Whisper model downloaded to $WHISPER_MODEL"
+      elif [ -f "ggml-base.en.bin" ]; then
+        mv ggml-base.en.bin "$WHISPER_MODEL"
+        echo "Whisper model downloaded to $WHISPER_MODEL"
+      else
+        echo "Warning: Whisper model download may have failed. Run: dev voice check"
+      fi
+    else
+      # Fallback: download directly from Hugging Face
+      curl -fL -o "$WHISPER_MODEL" \
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" \
+        && echo "Whisper model downloaded to $WHISPER_MODEL" \
+        || echo "Warning: Whisper model download failed. Run: dev voice check"
+    fi
+  else
+    echo 'Whisper model already downloaded'
+  fi
+else
+  echo 'whisper-cli not found - skipping Whisper model download'
+fi
+
 # Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")

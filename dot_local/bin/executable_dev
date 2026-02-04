@@ -106,6 +106,50 @@ maybe_forward_remote() {
   fi
 }
 
+# --- Claude Pane Detection ---------------------------------------------------
+
+# Find the Claude pane in a session. Checks:
+# 1. Pane content for the Claude Code TUI (most reliable)
+# 2. The pane_start_command for 'claude' (preserves original command)
+# 3. The pane at index 1 in a 2-pane claude layout (layout convention)
+# Outputs the pane_id or empty string.
+find_claude_pane() {
+  local session="$1"
+
+  # Strategy 1: check pane_start_command (the command that launched the pane's shell)
+  while IFS='|' read -r pane_id start_cmd; do
+    if [[ "$start_cmd" == *claude* ]]; then
+      echo "$pane_id"
+      return 0
+    fi
+  done < <(tmux list-panes -s -t "$session" \
+    -F '#{pane_id}|#{pane_start_command}' 2>/dev/null)
+
+  # Strategy 2: capture visible pane content and look for Claude Code markers
+  while IFS= read -r pane_id; do
+    local content
+    content=$(tmux capture-pane -t "$pane_id" -p 2>/dev/null | head -5)
+    if [[ "$content" == *"claude"* ]] || [[ "$content" == *"Claude"* ]]; then
+      echo "$pane_id"
+      return 0
+    fi
+  done < <(tmux list-panes -s -t "$session" -F '#{pane_id}' 2>/dev/null)
+
+  # Strategy 3: if session has a claude layout (2 panes), assume pane 1
+  local layout
+  layout=$(get_layout "$session")
+  if [ "$layout" = "claude" ]; then
+    local pane_count
+    pane_count=$(tmux list-panes -t "$session" 2>/dev/null | wc -l)
+    if [ "$pane_count" -ge 2 ]; then
+      tmux list-panes -t "$session:1" -F '#{pane_id}' 2>/dev/null | head -1
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
 # --- Project Discovery -------------------------------------------------------
 
 # Discover projects under ~/Projects by finding .git directories.
@@ -573,8 +617,10 @@ USAGE
   dev                     Interactive picker (fzf or numbered fallback)
   dev <project>           Create or attach to session for <project>
   dev claude <project>    Force claude+shell layout (vertical split)
-  dev voice               Voice input: speak, confirm, inject into current pane
-  dev voice <pane-id>     Voice input into a specific pane
+  dev voice               Start continuous voice listening (targets Claude pane)
+  dev voice stop          Stop voice listening
+  dev voice status        Check if voice listening is active
+  dev voice once          One-shot: record, confirm, inject into Claude pane
   dev voice check         Check voice input dependencies
   dev detach              Detach from current tmux session
   dev kill <name>         Kill a session
@@ -617,25 +663,40 @@ INSIDE TMUX
   Running `dev <x>` inside tmux switches to that session (no nesting).
 
 VOICE INPUT
-  Speak instead of type. Press prefix + v (C-a v) inside tmux, or run
-  dev voice. A popup records your speech, transcribes it locally via
-  whisper.cpp, shows the result for confirmation, then injects the text
-  into your active pane.
+  Speak instead of type. Run `dev voice` to start continuous listening.
+  It uses VAD (sox silence detection) to detect speech, transcribes
+  locally via whisper.cpp, shows a confirmation popup, then injects text
+  into the Claude pane of the current session.
+
+  `dev voice once` or `prefix + v` (C-a v) does a single recording.
+
+  Two underlying scripts follow Unix philosophy:
+    voice-transcribe       Record and transcribe to stdout (pipeable)
+    voice-input            Tmux integration (popup, inject, VAD loop)
+
+  Pipe examples:
+    voice-transcribe | llm "summarize this"
+    voice-transcribe | tee prompt.txt
 
   Dependencies: sox, whisper-cpp (whisper-cli)
   Model: ~/.local/share/whisper/ggml-base.en.bin
   Check: dev voice check
 
   Environment variables:
-    WHISPER_MODEL   Path to whisper.cpp model file
-    WHISPER_CMD     Name of whisper CLI binary (default: whisper-cli)
+    WHISPER_MODEL              Path to whisper.cpp model file
+    WHISPER_CMD                Name of whisper CLI binary (default: whisper-cli)
+    VOICE_SILENCE_THRESHOLD    Sox silence threshold (default: 1%)
+    VOICE_SILENCE_DURATION     Seconds of silence to stop (default: 1.5)
+    VOICE_MAX_DURATION         Max recording seconds (default: 30)
 
 EXAMPLES
   dev                     # Pick from sessions/projects interactively
   dev atomicguard         # Open atomicguard with configured layout
   dev dotfiles            # Open dotfiles in custom path (chezmoi dir)
   dev claude myproject    # Open myproject with claude+shell split
-  dev voice               # Voice input into current pane
+  dev voice               # Start continuous voice input (targets Claude pane)
+  dev voice stop          # Stop continuous voice input
+  dev voice once          # One-shot voice input into Claude pane
   dev voice check         # Check voice dependencies are installed
   dev kill myproject      # Kill myproject session
 EOF
@@ -697,24 +758,50 @@ main() {
       open_project "$project" "claude"
       ;;
     voice)
-      # Voice input: record, transcribe, confirm, inject into current or target pane
-      if ! command -v voice-input &>/dev/null; then
-        die "voice-input not found in PATH"
-      fi
+      # Voice input: start/stop/status/check for speech-to-text
       case "${2:-}" in
         check)
+          command -v voice-input &>/dev/null || die "voice-input not found in PATH"
           voice-input --check
           ;;
-        *)
+        stop)
+          voice-input --stop
+          ;;
+        status)
+          voice-input --status
+          ;;
+        start|"")
+          command -v voice-input &>/dev/null || die "voice-input not found in PATH"
           if [ -z "${TMUX:-}" ]; then
-            die "voice-input requires a tmux session (run inside tmux)"
+            die "voice input requires a tmux session (run inside tmux)"
           fi
-          local target_pane="${2:-}"
+          local session_name target_pane
+          session_name=$(tmux display-message -p '#{session_name}')
+          target_pane=$(find_claude_pane "$session_name")
           if [ -z "$target_pane" ]; then
-            target_pane=$(tmux display-message -p '#{pane_id}')
+            target_pane="${3:-$(tmux display-message -p '#{pane_id}')}"
+            info "No Claude pane found, targeting current pane ($target_pane)"
+          else
+            info "Targeting Claude pane ($target_pane)"
           fi
-          tmux display-popup -E -w 70% -h 40% -T " Voice Input " \
-            "voice-input $target_pane"
+          voice-input --listen "$target_pane"
+          ;;
+        once)
+          # One-shot: record, confirm, inject (targets Claude pane)
+          command -v voice-input &>/dev/null || die "voice-input not found in PATH"
+          if [ -z "${TMUX:-}" ]; then
+            die "voice input requires a tmux session (run inside tmux)"
+          fi
+          local session_name_once target_pane_once
+          session_name_once=$(tmux display-message -p '#{session_name}')
+          target_pane_once=$(find_claude_pane "$session_name_once")
+          if [ -z "$target_pane_once" ]; then
+            target_pane_once="${3:-$(tmux display-message -p '#{pane_id}')}"
+          fi
+          voice-input "$target_pane_once"
+          ;;
+        *)
+          die "Usage: dev voice [start|stop|status|once|check]"
           ;;
       esac
       ;;
