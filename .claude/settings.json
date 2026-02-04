@@ -1,0 +1,39 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(chezmoi status:*)",
+      "Bash(chezmoi diff:*)",
+      "Bash(chezmoi doctor:*)",
+      "Bash(chezmoi managed:*)",
+      "Bash(chezmoi data:*)",
+      "Bash(chezmoi execute-template:*)",
+      "Bash(chezmoi apply --dry-run:*)",
+      "Bash(chezmoi cat-config:*)",
+      "Bash(sysup doctor:*)",
+      "Bash(sysup status:*)",
+      "Bash(brew list:*)",
+      "Bash(brew info:*)",
+      "Bash(apt list:*)",
+      "Bash(command -v:*)",
+      "Bash(which:*)",
+      "Bash(uname:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(fd:*)",
+      "Bash(tree:*)",
+      "Bash(bat:*)",
+      "Bash(eza:*)",
+      "Read(*)",
+      "Glob(*)",
+      "Grep(*)"
+    ]
+  }
+}

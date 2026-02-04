@@ -10,6 +10,7 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Package Management**: Homebrew (cross-platform)
 - **Node.js**: fnm for version management
 - **VS Code**: Settings, keybindings, and extensions configuration
+- **Remote Development**: Tmux configuration for managing services and interactive sessions
 
 ## Common Commands
 
@@ -18,6 +19,11 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Check status**: `chezmoi status`
 - **Validate templates**: `chezmoi execute-template`
 - **Dry run**: `chezmoi apply --dry-run`
+
+### System Updates
+- **Check outdated**: `sysup` or `sysup status`
+- **Apply all updates**: `sysup upgrade`
+- **Verify tools**: `sysup doctor`
 
 ### Development Workflow
 - **Edit files**: `chezmoi edit <file>`
@@ -39,21 +45,84 @@ The zsh configuration uses these variables:
 
 ## Key Files
 
-- `dot_zshrc`: Main shell configuration
+### Shell Configuration
+- `dot_zshrc`: Main shell configuration with welcome message and dev completion
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
+
+### System Maintenance
+- `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
+
+### Tmux & Dev Sessions
+- `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
+- `dot_local/bin/executable_dev`: Dev session manager (project discovery, fzf picker, layouts)
+- `dot_config/dev/config`: Per-project layout configuration
+- `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
+- `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
+
+### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
 - `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
 - `dot_config/Code/User/keybindings.json`: VS Code custom keybindings
 - `dot_config/Code/User/extensions.json`: VS Code recommended extensions
 
-## Recent Changes
+## Dev Session Manager
 
-1. **PATH syntax error**: Fixed semicolon separator in PATH export
-2. **Antigen cache directory**: Moved creation outside WSL-specific block
-3. **Cross-platform compatibility**: Ensured all platforms can create necessary directories
-4. **VS Code configuration**: Added comprehensive settings, keybindings, and extensions
-5. **TTY warning**: Known issue with antigen during `chezmoi apply` (cosmetic only)
+The `dev` command provides persistent tmux sessions for multi-device development. Sessions survive disconnects and can be accessed from any device via SSH.
+
+### Commands
+```bash
+dev                     # Interactive picker (fzf or numbered fallback)
+dev <project>           # Create or attach to session for <project>
+dev claude <project>    # Force claude+shell layout (vertical split)
+dev detach              # Detach from current tmux session
+dev kill <name>         # Kill a session
+dev kill-all            # Kill all sessions (with confirmation)
+dev help                # Full help text
+```
+
+### Configuration
+Per-project layouts are configured in `~/.config/dev/config`:
+```ini
+default_layout=default
+atomicguard=claude
+manta-deploy=claude
+dotfiles=claude:~/.local/share/chezmoi
+```
+
+Format: `project=layout[:path][@host]` — `:path` for custom directories, `@host` for remote SSH.
+
+### Layouts
+- **default**: Single shell pane in the project directory
+- **claude**: Vertical split with `claude` (left) and shell (right)
+
+### Project Discovery
+Projects are auto-discovered from `~/Projects/` (up to 3 levels deep). Any directory containing `.git` is treated as a project.
+
+### Tmux Keybindings (prefix = C-a)
+```bash
+C-a |                  # Split horizontally
+C-a -                  # Split vertically
+C-a h/j/k/l            # Navigate panes (vim-style)
+C-a r                  # Reload config
+C-a d                  # Detach from session
+```
+
+### Session Persistence (TPM)
+Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.
+
+### Welcome Message
+On new interactive shells (local terminals, SSH logins), a welcome message shows the hostname, platform, available commands (`dev`, `sysup`), and any active tmux sessions. Suppressed inside tmux panes and VS Code terminals.
+
+### Multi-Service Orchestration
+For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
+
+## Documentation
+
+Detailed usage guides are in `docs/`:
+- [`docs/dev.md`](docs/dev.md) — Dev session manager reference
+- [`docs/sysup.md`](docs/sysup.md) — System update utility reference
+- [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
 
@@ -69,3 +138,47 @@ The zsh configuration uses these variables:
 - Check template syntax with `chezmoi execute-template`
 - Verify file permissions and PATH configuration
 - Ensure platform-specific code is properly guarded
+
+## Package Management Workflow
+
+When adding a new package or CLI tool to the dotfiles, follow these steps:
+
+### 1. Install Script (`run_once_install-packages.sh.tmpl`)
+
+Add the package to the appropriate list:
+- `$commonPackages` — core utilities available everywhere (curl, jq, ripgrep, etc.)
+- `$brewPackages` — Homebrew-only tools (fnm, btop, gh, etc.)
+- `$modernCli` — modern replacements for standard commands (bat, eza, fd, etc.)
+- `$macosSpecific` — macOS-only packages (docker, awscli, etc.)
+- `$linuxSpecific` / `$linuxWithDocker` — Linux/WSL apt packages
+
+### 2. Doctor Check (`dot_local/bin/executable_sysup`)
+
+Add the tool to the appropriate array in the `doctor` command:
+- `tools_pm` — package managers (brew, apt-get, fnm, uv, etc.)
+- `tools_dev` — development tools (git, tmux, docker, etc.)
+- `tools_cli` — modern CLI replacements (eza, bat, fd, rg, etc.)
+
+If the tool has a non-standard version flag, add a case to `get_version()`.
+
+### 3. Shell Aliases (`dot_zshrc`)
+
+If the new tool replaces a standard command, add a conditional alias:
+```zsh
+if command -v newtool >/dev/null 2>&1; then
+  alias oldcmd="newtool"
+fi
+```
+
+Only add aliases when the tool is a drop-in replacement. Skip this step for tools with their own unique commands.
+
+### 4. Documentation
+
+Update this file (CLAUDE.md) if the package changes any documented behavior.
+
+### 5. Verification Checklist
+
+- [ ] `chezmoi execute-template < run_once_install-packages.sh.tmpl` — template renders
+- [ ] `chezmoi apply --dry-run` — all changes deploy cleanly
+- [ ] `sysup doctor` — new tool appears in the correct section
+- [ ] Aliases work: open a new shell and verify `command -v <tool>`

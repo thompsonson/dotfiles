@@ -141,6 +141,34 @@ if command -v procs >/dev/null 2>&1; then
   alias ps="procs"
 fi
 
+# Welcome message (new interactive shells, not inside tmux or VS Code)
+if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
+  _hostname=$(hostname -s 2>/dev/null || hostname)
+  _platform="Linux"
+  [ "$IS_MACOS" = true ] && _platform="macOS"
+  [ "$IS_WSL" = true ] && _platform="WSL"
+
+  echo ""
+  echo "  \033[1m${_hostname}\033[0m  \033[2m${_platform}\033[0m"
+  echo ""
+  echo "  \033[36mdev\033[0m [project]     tmux sessions"
+  echo "  \033[36msysup\033[0m [status]    system updates"
+  echo "  \033[36msysup doctor\033[0m      tool health check"
+
+  if command -v tmux >/dev/null 2>&1; then
+    _sessions=$(tmux list-sessions 2>/dev/null)
+    if [ -n "$_sessions" ]; then
+      echo ""
+      echo "  \033[1;36mactive sessions:\033[0m"
+      echo "$_sessions" | while read -r line; do
+        echo "    $line"
+      done
+    fi
+  fi
+  echo ""
+  unset _hostname _platform _sessions
+fi
+
 # Enable better completion handling - ENHANCED VERSION
 zstyle ':completion:*:warnings' format 'No matches found'
 zstyle ':completion:*' menu select
@@ -149,6 +177,37 @@ setopt NULL_GLOB
 setopt AUTO_MENU
 setopt COMPLETE_IN_WORD
 setopt ALWAYS_TO_END
+
+# dev command completion
+_dev_completion() {
+  local -a subcmds sessions projects
+  subcmds=(claude detach kill kill-all help)
+  sessions=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
+  projects=(${(f)"$(/usr/bin/find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
+  # Add custom-path projects from config
+  if [ -f ~/.config/dev/config ]; then
+    local -a config_projects
+    config_projects=(${(f)"$(grep -E '^[a-zA-Z].*=.*:' ~/.config/dev/config | cut -d= -f1)"})
+    projects+=($config_projects)
+  fi
+  _arguments '1:command:->cmd' '2:target:->target'
+  case $state in
+    cmd) _describe 'command' subcmds -- sessions -- projects ;;
+    target) _describe 'target' sessions -- projects ;;
+  esac
+}
+compdef _dev_completion dev 2>/dev/null
+
+# sysup command completion
+_sysup_completion() {
+  local -a subcmds
+  subcmds=(status upgrade doctor version help)
+  _arguments '1:command:->cmd'
+  case $state in
+    cmd) _describe 'command' subcmds ;;
+  esac
+}
+compdef _sysup_completion sysup 2>/dev/null
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
