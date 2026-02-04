@@ -56,13 +56,24 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 .
 ├── dot_zshrc                           # Zsh configuration
 ├── dot_p10k.zsh                       # Powerlevel10k theme config
+├── dot_tmux.conf                      # Tmux configuration (TPM, resurrect, continuum)
 ├── dot_claude/                        # Claude Code configuration
 │   └── settings.json
-├── dot_config/Code/User/               # VS Code configuration
-│   ├── settings.json.tmpl             # VS Code settings
-│   ├── keybindings.json               # Custom keybindings
-│   └── extensions.json                # Recommended extensions
+├── dot_config/
+│   ├── Code/User/                     # VS Code configuration
+│   │   ├── settings.json.tmpl         # VS Code settings
+│   │   ├── keybindings.json           # Custom keybindings
+│   │   └── extensions.json            # Recommended extensions
+│   └── dev/config                     # Dev session manager config
+├── dot_local/bin/
+│   ├── executable_dev                 # Dev session manager
+│   └── executable_sysup               # System update utility
+├── docs/                              # Detailed documentation
+│   ├── dev.md                         # Dev session manager reference
+│   ├── sysup.md                       # System update utility reference
+│   └── dotfiles-agent.md             # Dotfiles agent guide
 ├── run_once_install-packages.sh.tmpl  # Package installation script
+├── run_once_after_install-tpm.sh      # TPM auto-installer
 └── run_once_after_chsh.sh.tmpl       # Shell change script
 ```
 
@@ -101,22 +112,35 @@ The zsh configuration includes:
 - Platform-specific configurations
 - Tmux integration with convenient aliases
 
-### Tmux for Remote Development
+### Dev Session Manager
 
-Includes a complete tmux setup optimized for remote development:
-- **Modern keybindings**: Vim-style navigation with `C-a` prefix
-- **Session helpers**: `tmux-session` script for easy session management
-- **Service templates**: Example scripts for running project services
-- **Mouse support**: Toggle-able mouse mode for convenience
-- **Cross-platform**: Works seamlessly on macOS, Linux, and WSL
+The `dev` command provides persistent tmux sessions for multi-device development:
+- **Project discovery**: Auto-discovers projects from `~/Projects/`
+- **Interactive picker**: fzf-powered (with numbered fallback) session/project selector
+- **Layouts**: Single shell or Claude Code + shell split
+- **Remote support**: SSH-transparent session management via `@host` config
+- **Session persistence**: Auto-saved every 15 minutes via tmux-resurrect/continuum
 
 Quick start:
 ```bash
-tms myproject          # Create/attach to session
-./start-service.sh     # Use template in your projects
+dev                    # Interactive picker
+dev myproject          # Create/attach to session
+dev claude myproject   # Force Claude Code + shell layout
 ```
 
-See `~/.local/share/start-service.sh.example` for project integration patterns.
+See [docs/dev.md](docs/dev.md) for the full reference.
+
+### System Updates
+
+The `sysup` command manages all package managers from a single entry point:
+
+```bash
+sysup                  # Check what's outdated
+sysup upgrade          # Update everything
+sysup doctor           # Verify tool installation
+```
+
+See [docs/sysup.md](docs/sysup.md) for the full reference.
 
 ### VS Code Configuration
 
@@ -126,6 +150,14 @@ The VS Code setup includes:
 - **Extensions**: Curated list of recommended extensions for development
 - **Database support**: SQLite viewer and SQLTools integration
 - **Language support**: Python, JavaScript, TypeScript, Rust, Go, and more
+
+## Documentation
+
+Detailed usage guides for the custom tools in this repository:
+
+- [Dev Session Manager](docs/dev.md) -- persistent tmux sessions for multi-device development
+- [System Update Utility](docs/sysup.md) -- cross-platform package manager orchestration
+- [Dotfiles Agent](docs/dotfiles-agent.md) -- Claude Code + shell session for dotfiles maintenance
 
 ## Troubleshooting
 

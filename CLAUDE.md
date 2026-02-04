@@ -117,18 +117,12 @@ On new interactive shells (local terminals, SSH logins), a welcome message shows
 ### Multi-Service Orchestration
 For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
 
-## Recent Changes
+## Documentation
 
-1. **Dev session manager**: Replaced tmux-session with `dev` command (fzf picker, project discovery, layouts)
-2. **TPM & session persistence**: Enabled tmux-resurrect and tmux-continuum for automatic session save/restore
-3. **Welcome message**: Replaced SSH-only tmux reminder with general welcome message (hostname, platform, commands, active sessions)
-4. **Service templates**: Example script for managing project services
-5. **PATH syntax error**: Fixed semicolon separator in PATH export
-6. **Antigen cache directory**: Moved creation outside WSL-specific block
-7. **Cross-platform compatibility**: Ensured all platforms can create necessary directories
-8. **VS Code configuration**: Added comprehensive settings, keybindings, and extensions
-9. **TTY warning**: Known issue with antigen during `chezmoi apply` (cosmetic only)
-10. **sysup utility**: Cross-platform system update command (brew, apt, fnm, uv, pipx, tpm, vscode, chezmoi)
+Detailed usage guides are in `docs/`:
+- [`docs/dev.md`](docs/dev.md) — Dev session manager reference
+- [`docs/sysup.md`](docs/sysup.md) — System update utility reference
+- [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
 
