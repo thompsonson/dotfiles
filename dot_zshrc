@@ -141,22 +141,32 @@ if command -v procs >/dev/null 2>&1; then
   alias ps="procs"
 fi
 
-# Development session management
-if command -v tmux >/dev/null 2>&1; then
-  # Show active tmux sessions on SSH login (not in tmux, not in VS Code terminal)
-  if [ -n "$SSH_CONNECTION" ] && [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ]; then
+# Welcome message (new interactive shells, not inside tmux or VS Code)
+if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
+  _hostname=$(hostname -s 2>/dev/null || hostname)
+  _platform="Linux"
+  [ "$IS_MACOS" = true ] && _platform="macOS"
+  [ "$IS_WSL" = true ] && _platform="WSL"
+
+  echo ""
+  echo "  \033[1m${_hostname}\033[0m  \033[2m${_platform}\033[0m"
+  echo ""
+  echo "  \033[36mdev\033[0m [project]     tmux sessions"
+  echo "  \033[36msysup\033[0m [status]    system updates"
+  echo "  \033[36msysup doctor\033[0m      tool health check"
+
+  if command -v tmux >/dev/null 2>&1; then
     _sessions=$(tmux list-sessions 2>/dev/null)
     if [ -n "$_sessions" ]; then
-      echo "\033[1;36m tmux sessions running:\033[0m"
+      echo ""
+      echo "  \033[1;36mactive sessions:\033[0m"
       echo "$_sessions" | while read -r line; do
-        echo "  $line"
+        echo "    $line"
       done
-      echo ""
-      echo "  Type \033[1mdev\033[0m to manage sessions"
-      echo ""
     fi
-    unset _sessions
   fi
+  echo ""
+  unset _hostname _platform _sessions
 fi
 
 # Enable better completion handling - ENHANCED VERSION

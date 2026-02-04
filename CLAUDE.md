@@ -46,7 +46,7 @@ The zsh configuration uses these variables:
 ## Key Files
 
 ### Shell Configuration
-- `dot_zshrc`: Main shell configuration with SSH login reminder and dev completion
+- `dot_zshrc`: Main shell configuration with welcome message and dev completion
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
 
@@ -108,8 +108,8 @@ C-a d                  # Detach from session
 ### Session Persistence (TPM)
 Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.
 
-### SSH Login Reminder
-When connecting via SSH, active tmux sessions are displayed automatically with a reminder to use `dev`.
+### Welcome Message
+On new interactive shells (local terminals, SSH logins), a welcome message shows the hostname, platform, available commands (`dev`, `sysup`), and any active tmux sessions. Suppressed inside tmux panes and VS Code terminals.
 
 ### Multi-Service Orchestration
 For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
@@ -118,7 +118,7 @@ For complex multi-service setups, copy `~/.local/share/start-service.sh.example`
 
 1. **Dev session manager**: Replaced tmux-session with `dev` command (fzf picker, project discovery, layouts)
 2. **TPM & session persistence**: Enabled tmux-resurrect and tmux-continuum for automatic session save/restore
-3. **SSH login reminder**: Active tmux sessions shown on SSH login
+3. **Welcome message**: Replaced SSH-only tmux reminder with general welcome message (hostname, platform, commands, active sessions)
 4. **Service templates**: Example script for managing project services
 5. **PATH syntax error**: Fixed semicolon separator in PATH export
 6. **Antigen cache directory**: Moved creation outside WSL-specific block
