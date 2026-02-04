@@ -79,7 +79,10 @@ The `dev` command provides persistent tmux sessions for multi-device development
 dev                     # Interactive picker (fzf or numbered fallback)
 dev <project>           # Create or attach to session for <project>
 dev claude <project>    # Force claude+shell layout (vertical split)
-dev voice               # Voice input: speak, confirm, inject into current pane
+dev voice               # Start continuous voice listening (targets Claude pane)
+dev voice stop          # Stop voice listening
+dev voice status        # Check if voice listening is active
+dev voice once          # One-shot: record, confirm, inject into Claude pane
 dev voice check         # Check voice input dependencies
 dev detach              # Detach from current tmux session
 dev kill <name>         # Kill a session
