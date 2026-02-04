@@ -19,7 +19,8 @@
      "uv"
      "sqlite"
      "gh"
-     "just" -}}
+     "just"
+     "shellcheck" -}}
 
 {{ $modernCli := list
      "bat"
@@ -258,7 +259,7 @@ if command -v fnm >/dev/null 2>&1; then
   echo 'Setting up fnm and installing Node.js LTS'
   
   # Set up fnm environment for current session
-  eval "$(fnm env --use-on-cd)"
+  eval "$(fnm env --shell bash)"
   
   # Install latest LTS Node.js
   fnm install --lts

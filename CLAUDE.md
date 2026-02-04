@@ -20,6 +20,11 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Validate templates**: `chezmoi execute-template`
 - **Dry run**: `chezmoi apply --dry-run`
 
+### System Updates
+- **Check outdated**: `sysup` or `sysup status`
+- **Apply all updates**: `sysup upgrade`
+- **Verify tools**: `sysup doctor`
+
 ### Development Workflow
 - **Edit files**: `chezmoi edit <file>`
 - **Add new files**: `chezmoi add <file>`
@@ -44,6 +49,9 @@ The zsh configuration uses these variables:
 - `dot_zshrc`: Main shell configuration with SSH login reminder and dev completion
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
+
+### System Maintenance
+- `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
@@ -117,6 +125,7 @@ For complex multi-service setups, copy `~/.local/share/start-service.sh.example`
 7. **Cross-platform compatibility**: Ensured all platforms can create necessary directories
 8. **VS Code configuration**: Added comprehensive settings, keybindings, and extensions
 9. **TTY warning**: Known issue with antigen during `chezmoi apply` (cosmetic only)
+10. **sysup utility**: Cross-platform system update command (brew, apt, fnm, uv, pipx, tpm, vscode, chezmoi)
 
 ## When Making Changes
 
