@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.0.1](https://github.com/thompsonson/dotfiles/compare/v1.0.0...v1.0.1) (2026-02-05)
+
+
+### Refactoring
+
+* **dev:** add layout command to transform existing sessions ([#8](https://github.com/thompsonson/dotfiles/issues/8)) ([056833c](https://github.com/thompsonson/dotfiles/commit/056833c72ccace68fe13ff060a80bfe25c0a10a4))
+
+
+### Documentation
+
+* add Claude Code workflow guide ([391ede8](https://github.com/thompsonson/dotfiles/commit/391ede872d230a1ab3ab347649fb1785a97af8a0))
+* add Claude Code workflow guide ([2672823](https://github.com/thompsonson/dotfiles/commit/2672823fdae1425cd494e6d3944ec611152ce3eb))
+
 ## 1.0.0 (2026-02-05)
 
 
