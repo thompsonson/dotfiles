@@ -72,6 +72,11 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 │   ├── dev.md                         # Dev session manager reference
 │   ├── sysup.md                       # System update utility reference
 │   └── dotfiles-agent.md             # Dotfiles agent guide
+├── tests/                             # Testing infrastructure
+│   ├── test.sh                        # Local test runner
+│   └── test-templates.sh              # Template validation
+├── .github/workflows/
+│   └── test.yml                       # GitHub Actions CI
 ├── run_once_install-packages.sh.tmpl  # Package installation script
 ├── run_once_after_install-tpm.sh      # TPM auto-installer
 └── run_once_after_chsh.sh.tmpl       # Shell change script
@@ -142,6 +147,41 @@ sysup doctor           # Verify tool installation
 
 See [docs/sysup.md](docs/sysup.md) for the full reference.
 
+## Testing
+
+### Local Testing
+
+Run the test suite before committing changes:
+
+```bash
+./tests/test.sh           # Run all tests
+./tests/test.sh quick     # Lint + syntax only (fast)
+```
+
+The test runner validates:
+- Shell script syntax (bash -n)
+- ShellCheck linting
+- Chezmoi template rendering
+- Cross-platform compatibility
+
+### Continuous Integration
+
+GitHub Actions runs the full test suite on every push and pull request:
+- **Ubuntu**: Full test suite with chezmoi initialization
+- **macOS**: Full test suite with chezmoi initialization
+
+CI ensures templates render correctly and scripts pass linting on both platforms.
+
+### Platform Coverage
+
+The CI tests on Ubuntu, which provides coverage for all supported Debian-family distributions:
+
+- **Pop!_OS**: Built on Ubuntu LTS, uses identical package repositories
+- **Debian**: Ubuntu's upstream - packages and behavior are nearly identical
+- **Raspbian**: Debian-based but ARM architecture; the dotfiles handle this via architecture detection (`{{ if eq .chezmoi.arch "amd64" }}`) rather than distro detection
+
+The install script's `{{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" }}` check treats all Debian-family distros identically - they all use apt and follow the same code path. Platform-specific behavior is determined by architecture (amd64 vs ARM), not distribution.
+
 ### VS Code Configuration
 
 The VS Code setup includes:
@@ -176,9 +216,10 @@ Detailed usage guides for the custom tools in this repository:
 ## Contributing
 
 1. Make changes to the dotfiles
-2. Test on your platform
-3. Commit changes with descriptive messages
-4. Ensure cross-platform compatibility
+2. Run `./tests/test.sh` to validate changes
+3. Test on your platform with `chezmoi apply --dry-run`
+4. Commit changes with descriptive messages
+5. Ensure cross-platform compatibility
 
 ## License
 
