@@ -15,6 +15,8 @@ This is a chezmoi-managed dotfiles repository that supports:
 ## Common Commands
 
 ### Testing and Validation
+- **Run all tests**: `./tests/test.sh`
+- **Quick lint check**: `./tests/test.sh quick`
 - **Apply changes**: `chezmoi apply`
 - **Check status**: `chezmoi status`
 - **Validate templates**: `chezmoi execute-template`
@@ -65,6 +67,11 @@ The zsh configuration uses these variables:
 - `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
 - `dot_config/Code/User/keybindings.json`: VS Code custom keybindings
 - `dot_config/Code/User/extensions.json`: VS Code recommended extensions
+
+### Testing
+- `tests/test.sh`: Local test runner (syntax, linting, templates)
+- `tests/test-templates.sh`: Template validation script
+- `.github/workflows/test.yml`: CI workflow (Ubuntu + macOS)
 
 ## Dev Session Manager
 
@@ -131,6 +138,7 @@ Detailed usage guides are in `docs/`:
 3. Check that templates render correctly
 4. Ensure package installation works on target platforms
 5. Update documentation if adding new features
+6. Run `./tests/test.sh` before committing
 
 ## Troubleshooting
 
