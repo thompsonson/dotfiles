@@ -43,6 +43,9 @@ jobs:
         run: |
           sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
 
+      - name: Initialize chezmoi
+        run: chezmoi init --source=$PWD
+
       - name: Install jq
         run: sudo apt-get install -y jq
 
@@ -78,11 +81,14 @@ jobs:
       - name: Install chezmoi
         run: brew install chezmoi
 
+      - name: Initialize chezmoi
+        run: chezmoi init --source=$PWD
+
       - name: Install shellcheck
         run: brew install shellcheck
 
-      - name: Run template tests (darwin)
-        run: ./tests/test-templates.sh darwin
+      - name: Run template tests
+        run: ./tests/test-templates.sh
 
       - name: Run shellcheck on sysup
         run: shellcheck -x -s bash dot_local/bin/executable_sysup

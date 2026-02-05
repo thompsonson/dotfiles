@@ -82,9 +82,12 @@ test_template() {
     error_file=$(mktemp)
 
     # Try to render the template using chezmoi execute-template
-    # Use --init to provide minimal chezmoi data for .chezmoi.toml.tmpl
+    # First try without --init (works if chezmoi is initialized)
+    # Fall back to --init for minimal data (covers .chezmoi.* but not .osid)
     local render_success=0
-    if chezmoi execute-template --init < "$template" > "$output_file" 2> "$error_file"; then
+    if chezmoi execute-template < "$template" > "$output_file" 2> "$error_file"; then
+        render_success=1
+    elif chezmoi execute-template --init < "$template" > "$output_file" 2> "$error_file"; then
         render_success=1
     fi
 
