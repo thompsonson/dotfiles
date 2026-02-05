@@ -2,11 +2,18 @@
 Host *
   AddKeysToAgent yes
 {{- if eq .chezmoi.os "darwin" }}
+  IgnoreUnknown UseKeychain
   UseKeychain yes
 {{- end }}
   IdentityFile ~/.ssh/id_ed25519
   ServerAliveInterval 60
   ServerAliveCountMax 3
+
+# Pop Mini
+Host pop-mini
+  HostName pop-mini
+  User mt
+  IdentityFile ~/.ssh/id_ed25519
 
 # GitHub
 Host github.com
