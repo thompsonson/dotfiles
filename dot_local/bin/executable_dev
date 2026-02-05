@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ============================================================================
 # dev - Persistent tmux session manager for multi-device development
 # ============================================================================
@@ -15,6 +15,13 @@
 #   dev help                Show full help
 
 set -euo pipefail
+
+# Require bash 4+ for associative arrays
+if ((BASH_VERSINFO[0] < 4)); then
+  echo "Error: dev requires bash 4+. Found: $BASH_VERSION" >&2
+  echo "Install with: brew install bash" >&2
+  exit 1
+fi
 
 # --- Configuration -----------------------------------------------------------
 
