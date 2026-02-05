@@ -6,25 +6,36 @@ on:
     branches: [main]
 
 jobs:
-  lint:
-    name: Shellcheck Lint
+  # ============================================================================
+  # Ubuntu Tests
+  # ============================================================================
+  ubuntu:
+    name: Ubuntu
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install shellcheck
-        run: sudo apt-get install -y shellcheck
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck zsh jq
 
-      - name: Run shellcheck on sysup
+      - name: Install chezmoi
+        run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+
+      - name: Initialize chezmoi
+        run: chezmoi init --source=$PWD
+
+      # Shellcheck
+      - name: Shellcheck - sysup
         run: shellcheck -x -s bash dot_local/bin/executable_sysup
 
-      - name: Run shellcheck on dev
+      - name: Shellcheck - dev
         run: shellcheck -x -s bash dot_local/bin/executable_dev
 
-      - name: Run shellcheck on run_once scripts
+      - name: Shellcheck - run_once scripts
         run: |
-          # Only check pure shell scripts, not .tmpl files (Go templates confuse shellcheck)
           for script in run_once_*.sh; do
             if [[ -f "$script" && "$script" != *.tmpl ]]; then
               echo "Checking $script..."
@@ -32,66 +43,53 @@ jobs:
             fi
           done
 
-  templates-linux:
-    name: Template Validation (Linux)
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install chezmoi
-        run: |
-          sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
-
-      - name: Initialize chezmoi
-        run: chezmoi init --source=$PWD
-
-      - name: Install jq
-        run: sudo apt-get install -y jq
-
-      - name: Run template tests
-        run: ./tests/test-templates.sh
-
-  syntax:
-    name: Syntax Checks
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install zsh
-        run: sudo apt-get install -y zsh
-
-      - name: Check zsh syntax
+      # Syntax checks
+      - name: Syntax - zshrc
         run: zsh -n dot_zshrc
 
-      - name: Check bash syntax on sysup
+      - name: Syntax - sysup
         run: bash -n dot_local/bin/executable_sysup
 
-      - name: Check bash syntax on dev
+      - name: Syntax - dev
         run: bash -n dot_local/bin/executable_dev
 
+      # Template validation
+      - name: Templates - validate all
+        run: ./tests/test-templates.sh
+
+  # ============================================================================
+  # macOS Tests
+  # ============================================================================
   macos:
-    name: macOS Tests
+    name: macOS
     runs-on: macos-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install chezmoi
-        run: brew install chezmoi
+      - name: Install dependencies
+        run: brew install chezmoi shellcheck
 
       - name: Initialize chezmoi
         run: chezmoi init --source=$PWD
 
-      - name: Install shellcheck
-        run: brew install shellcheck
-
-      - name: Run template tests
-        run: ./tests/test-templates.sh
-
-      - name: Run shellcheck on sysup
+      # Shellcheck
+      - name: Shellcheck - sysup
         run: shellcheck -x -s bash dot_local/bin/executable_sysup
 
-      - name: Run shellcheck on dev
+      - name: Shellcheck - dev
         run: shellcheck -x -s bash dot_local/bin/executable_dev
+
+      # Syntax checks (zsh is pre-installed on macOS)
+      - name: Syntax - zshrc
+        run: zsh -n dot_zshrc
+
+      - name: Syntax - sysup
+        run: bash -n dot_local/bin/executable_sysup
+
+      - name: Syntax - dev
+        run: bash -n dot_local/bin/executable_dev
+
+      # Template validation
+      - name: Templates - validate all
+        run: ./tests/test-templates.sh
