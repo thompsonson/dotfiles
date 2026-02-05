@@ -1,0 +1,95 @@
+name: Test Dotfiles
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ============================================================================
+  # Ubuntu Tests
+  # ============================================================================
+  ubuntu:
+    name: Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck zsh jq
+
+      - name: Install chezmoi
+        run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
+
+      - name: Initialize chezmoi
+        run: chezmoi init --source=$PWD
+
+      # Shellcheck
+      - name: Shellcheck - sysup
+        run: shellcheck -x -s bash dot_local/bin/executable_sysup
+
+      - name: Shellcheck - dev
+        run: shellcheck -x -s bash dot_local/bin/executable_dev
+
+      - name: Shellcheck - run_once scripts
+        run: |
+          for script in run_once_*.sh; do
+            if [[ -f "$script" && "$script" != *.tmpl ]]; then
+              echo "Checking $script..."
+              shellcheck -x -s bash "$script" || exit 1
+            fi
+          done
+
+      # Syntax checks
+      - name: Syntax - zshrc
+        run: zsh -n dot_zshrc
+
+      - name: Syntax - sysup
+        run: bash -n dot_local/bin/executable_sysup
+
+      - name: Syntax - dev
+        run: bash -n dot_local/bin/executable_dev
+
+      # Template validation
+      - name: Templates - validate all
+        run: ./tests/test-templates.sh
+
+  # ============================================================================
+  # macOS Tests
+  # ============================================================================
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: brew install chezmoi shellcheck
+
+      - name: Initialize chezmoi
+        run: chezmoi init --source=$PWD
+
+      # Shellcheck
+      - name: Shellcheck - sysup
+        run: shellcheck -x -s bash dot_local/bin/executable_sysup
+
+      - name: Shellcheck - dev
+        run: shellcheck -x -s bash dot_local/bin/executable_dev
+
+      # Syntax checks (zsh is pre-installed on macOS)
+      - name: Syntax - zshrc
+        run: zsh -n dot_zshrc
+
+      - name: Syntax - sysup
+        run: bash -n dot_local/bin/executable_sysup
+
+      - name: Syntax - dev
+        run: bash -n dot_local/bin/executable_dev
+
+      # Template validation
+      - name: Templates - validate all
+        run: ./tests/test-templates.sh
