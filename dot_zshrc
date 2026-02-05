@@ -181,7 +181,7 @@ setopt ALWAYS_TO_END
 # dev command completion
 _dev_completion() {
   local -a subcmds sessions projects
-  subcmds=(claude detach kill kill-all help)
+  subcmds=(claude layout detach kill kill-all help)
   sessions=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
   projects=(${(f)"$(/usr/bin/find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
   # Add custom-path projects from config

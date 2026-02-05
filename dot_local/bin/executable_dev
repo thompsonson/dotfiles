@@ -193,6 +193,28 @@ resolve_project() {
 
 # --- Session Management ------------------------------------------------------
 
+# Apply layout to current tmux session (must be inside tmux)
+apply_layout() {
+  local layout="$1"
+
+  case "$layout" in
+    claude)
+      # Split current pane: new pane on left, current stays on right
+      # -h = horizontal split (side by side)
+      # -b = put new pane before (left of) current
+      # -c = use current pane's path
+      tmux split-window -hb -c "#{pane_current_path}"
+      # Run claude in the new (left) pane
+      tmux send-keys 'claude' Enter
+      # Focus back to the right pane (shell)
+      tmux select-pane -R
+      ;;
+    *)
+      die "Unknown layout: $layout"
+      ;;
+  esac
+}
+
 # Create a new tmux session with the given layout.
 create_session() {
   local session_name="$1"
@@ -578,6 +600,7 @@ USAGE
   dev                     Interactive picker (fzf or numbered fallback)
   dev <project>           Create or attach to session for <project>
   dev claude <project>    Force claude+shell layout (vertical split)
+  dev layout [name]       Show or change layout (claude = add claude pane)
   dev detach              Detach from current tmux session
   dev kill <name>         Kill a session
   dev kill-all            Kill all sessions (with confirmation)
@@ -681,6 +704,25 @@ main() {
       local project="${2:-}"
       [ -n "$project" ] || die "Usage: dev claude <project>"
       open_project "$project" "claude"
+      ;;
+    layout)
+      if [ -z "${TMUX:-}" ]; then
+        die "Not inside a tmux session. Use 'dev claude <project>' to create a new session."
+      fi
+      local layout_name="${2:-}"
+      if [ -z "$layout_name" ]; then
+        # No layout specified - show current pane info
+        local pane_count
+        pane_count=$(tmux list-panes | wc -l | tr -d ' ')
+        if [ "$pane_count" -ge 2 ]; then
+          info "Current layout: claude+shell ($pane_count panes)"
+        else
+          info "Current layout: default (1 pane)"
+          echo "  Use 'dev layout claude' to split"
+        fi
+        return 0
+      fi
+      apply_layout "$layout_name"
       ;;
     *)
       open_project "$1"
