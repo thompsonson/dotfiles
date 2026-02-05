@@ -172,6 +172,16 @@ GitHub Actions runs the full test suite on every push and pull request:
 
 CI ensures templates render correctly and scripts pass linting on both platforms.
 
+### Platform Coverage
+
+The CI tests on Ubuntu, which provides coverage for all supported Debian-family distributions:
+
+- **Pop!_OS**: Built on Ubuntu LTS, uses identical package repositories
+- **Debian**: Ubuntu's upstream - packages and behavior are nearly identical
+- **Raspbian**: Debian-based but ARM architecture; the dotfiles handle this via architecture detection (`{{ if eq .chezmoi.arch "amd64" }}`) rather than distro detection
+
+The install script's `{{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" }}` check treats all Debian-family distros identically - they all use apt and follow the same code path. Platform-specific behavior is determined by architecture (amd64 vs ARM), not distribution.
+
 ### VS Code Configuration
 
 The VS Code setup includes:
