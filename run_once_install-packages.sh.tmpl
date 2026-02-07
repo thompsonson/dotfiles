@@ -315,6 +315,150 @@ fi
 {{ end -}}
 
 
+{{ if eq .chezmoi.os "android" -}}
+echo '🤖 Installing Termux/Android packages'
+
+# Termux package names (some differ from Debian/Homebrew)
+{{ $termuxPackages := list
+     "curl"
+     "jq"
+     "make"
+     "rsync"
+     "tree"
+     "ripgrep"
+     "fzf"
+     "grep"
+     "findutils"
+     "coreutils"
+     "zsh"
+     "git"
+     "tmux"
+     "openssh"
+     "python"
+     "ncdu"
+     "sox" -}}
+
+{{ $termuxModernCli := list
+     "bat"
+     "eza"
+     "fd"
+     "git-delta"
+     "zoxide"
+     "duf" -}}
+
+install_termux_packages() {
+  local packages=("$@")
+  local failed_packages=()
+  local current=0 total=${#packages[@]}
+  echo "Installing $total packages..."
+  for package in "${packages[@]}"; do
+    current=$((current + 1))
+    if pkg install -y "$package" 2>&1; then
+      echo "  [$current/$total] $package ✓"
+    else
+      echo "  [$current/$total] $package FAILED"
+      failed_packages+=("$package")
+    fi
+  done
+  if [ ${#failed_packages[@]} -gt 0 ]; then
+    echo "Failed: ${failed_packages[*]}"
+    echo "Retry: pkg install ${failed_packages[*]}"
+  fi
+}
+
+# Update package lists first
+pkg update -y
+
+# Install core packages
+{{ $allTermuxPackages := concat $termuxPackages $termuxModernCli -}}
+install_termux_packages {{ $allTermuxPackages | join " " }}
+
+# Install pipx
+if ! command -v pipx >/dev/null 2>&1; then
+  echo 'Installing pipx'
+  pip install --user pipx
+  python -m pipx ensurepath
+fi
+
+# Create development directories
+echo 'Creating development directories'
+mkdir -p ~/Projects ~/Scripts
+
+# Git configuration
+echo 'Configuring Git'
+git config --global user.name "Matthew Thompson"
+git config --global user.email "thompsonson@gmail.com"
+git config --global init.defaultBranch main
+git config --global pull.rebase true
+git config --global core.editor "nano"
+
+# Configure Git to use delta for better diffs
+if command -v delta >/dev/null 2>&1; then
+  git config --global core.pager delta
+  git config --global interactive.diffFilter "delta --color-only"
+  git config --global delta.navigate true
+  git config --global delta.light false
+  git config --global merge.conflictstyle diff3
+  git config --global diff.colorMoved default
+fi
+
+# SSH setup
+echo 'Setting up SSH'
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+if [ ! -f ~/.ssh/id_ed25519 ]; then
+  echo 'Generating new SSH key'
+  ssh-keygen -t ed25519 -C "thompsonson@gmail.com" -f ~/.ssh/id_ed25519 -N ""
+  echo '📋 Your SSH public key (add this to GitHub/GitLab):'
+  cat ~/.ssh/id_ed25519.pub
+else
+  echo 'SSH key already exists'
+fi
+
+# Install Oh My Zsh
+if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
+  echo '💰  Installing oh-my-zsh'
+  yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+fi
+
+# Install Antigen
+if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
+  mkdir -p ~/.zsh/antigen
+  echo '😷 Installing Antigen plugin Manager'
+  curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh
+fi
+
+# Note: whisper-cpp is not available in Termux repos
+# It would need to be built from source for voice input
+echo ''
+echo 'ℹ️  Note: whisper-cpp requires manual build on Termux'
+echo '   Voice input (dev voice) will not work without it.'
+echo '   See: https://github.com/ggerganov/whisper.cpp#building'
+
+echo ''
+echo '✅ Termux installation complete!'
+echo ''
+echo '📝 Next steps:'
+echo '   1. Apply chezmoi templates: chezmoi apply'
+echo '   2. Restart shell: exec zsh'
+echo '   3. Add your SSH public key to GitHub/GitLab'
+echo '   4. Set Termux font: see Termux:Styling app'
+echo ''
+echo '📋 Available tools:'
+echo '   dev       - tmux session manager'
+echo '   sysup     - system update utility'
+echo ''
+echo '⚠️  Termux-specific notes:'
+echo '   • No Docker (use remote containers if needed)'
+echo '   • No Homebrew (use pkg instead)'
+echo '   • Voice input requires manual whisper.cpp build'
+echo '   • Some modern CLI tools may be unavailable'
+echo ''
+echo '🎉 Your Termux development environment is ready!'
+{{ end -}}
+
+
 {{ if eq .chezmoi.os "darwin" -}}
 echo '🍎 Installing macOS packages'
 {{ $allMacosPackages := concat $commonPackages $macosSpecific $brewPackages $modernCli -}}
