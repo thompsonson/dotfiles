@@ -69,6 +69,10 @@ jobs:
       - name: Templates - validate all
         run: ./tests/test-templates.sh
 
+      # Smoke tests
+      - name: Smoke tests - sysmon
+        run: ./tests/test.sh smoke
+
   # ============================================================================
   # macOS Tests
   # ============================================================================
@@ -117,3 +121,7 @@ jobs:
       # Template validation
       - name: Templates - validate all
         run: ./tests/test-templates.sh
+
+      # Smoke tests
+      - name: Smoke tests - sysmon
+        run: ./tests/test.sh smoke

@@ -243,17 +243,13 @@ get_disk_mounts_local() {
 # Top processes by CPU: prints "pid user cpu% mem% command"
 get_top_procs_cpu() {
   local count="${1:-5}"
-  ps -eo pid,user,%cpu,%mem,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
+  ps -eo pid,user,%cpu,%mem,comm 2>/dev/null | sort -k3 -rn | awk -v n="$count" 'NR<=n'
 }
 
 # Top processes by memory: prints "pid user cpu% mem% rss command"
 get_top_procs_mem() {
   local count="${1:-5}"
-  if [ "$IS_MACOS" = true ]; then
-    ps -eo pid,user,%mem,rss,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
-  else
-    ps -eo pid,user,%mem,rss,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
-  fi
+  ps -eo pid,user,%mem,rss,comm 2>/dev/null | sort -k3 -rn | awk -v n="$count" 'NR<=n'
 }
 
 # Process state summary
@@ -277,7 +273,7 @@ get_interfaces() {
     ifaces=$(ifconfig -l 2>/dev/null | tr ' ' '\n' | grep -v '^$')
     while IFS= read -r iface; do
       local addr status
-      addr=$(ifconfig "$iface" 2>/dev/null | awk '/inet / {print $2}' | head -1)
+      addr=$(ifconfig "$iface" 2>/dev/null | awk '/inet / {print $2; exit}')
       if [ -n "$addr" ]; then
         status=$(ifconfig "$iface" 2>/dev/null | grep -q 'status: active\|UP' && echo "UP" || echo "DOWN")
         echo "$iface $addr $status"
@@ -561,7 +557,7 @@ cmd_disk() {
 }
 
 du_fallback() {
-  du -d 1 -k "$HOME" 2>/dev/null | sort -rn | tail -n +2 | head -10 | while IFS=$'\t' read -r size path; do
+  du -d 1 -k "$HOME" 2>/dev/null | sort -rn | awk -v n=11 'NR>1 && NR<=n' | while IFS=$'\t' read -r size path; do
     [ -z "$size" ] && continue
     local name
     name="${path/#$HOME\//\~\/}"
@@ -679,7 +675,7 @@ cmd_net() {
     fi
   elif [ "$IS_MACOS" = true ]; then
     local dns
-    dns=$(scutil --dns 2>/dev/null | awk '/nameserver\[0\]/ {print $3}' | head -3)
+    dns=$(scutil --dns 2>/dev/null | awk '/nameserver\[0\]/ && c<3 {print $3; c++}')
     if [ -n "$dns" ]; then
       while IFS= read -r ns; do
         printf "  Nameserver: %s\n" "$ns"
@@ -693,7 +689,7 @@ cmd_net() {
   ports=$(get_listening_ports)
   if [ -n "$ports" ]; then
     printf "  ${DIM}%-8s %-8s %-8s %s${NC}\n" "PORT" "PROTO" "PID" "COMMAND"
-    echo "$ports" | head -20 | while IFS=$'\t' read -r port proto pid cmd; do
+    echo "$ports" | awk 'NR<=20' | while IFS=$'\t' read -r port proto pid cmd; do
       printf "  %-8s %-8s %-8s %s\n" "$port" "$proto" "${pid:-?}" "${cmd:-?}"
     done
   else

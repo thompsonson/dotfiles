@@ -8,6 +8,7 @@
 #   ./tests/test.sh lint      # Shellcheck only
 #   ./tests/test.sh templates # Template tests only
 #   ./tests/test.sh syntax    # Syntax checks only
+#   ./tests/test.sh smoke     # Smoke tests only (execute scripts)
 
 set -euo pipefail
 
@@ -155,6 +156,78 @@ run_templates() {
     return 0
 }
 
+# Run smoke tests (actually execute scripts)
+run_smoke() {
+    print_header "Smoke Tests"
+
+    local sysmon="$REPO_DIR/dot_local/bin/executable_sysmon"
+    local smoke_failed=0
+
+    if [[ ! -f "$sysmon" ]]; then
+        skip "executable_sysmon not found"
+        return 0
+    fi
+
+    # help: exit 0, output contains USAGE
+    local output
+    if output=$(bash "$sysmon" help 2>&1); then
+        if echo "$output" | grep -q "USAGE"; then
+            pass "sysmon help"
+        else
+            fail "sysmon help (missing USAGE in output)"
+            smoke_failed=1
+        fi
+    else
+        fail "sysmon help (non-zero exit)"
+        smoke_failed=1
+    fi
+
+    # version: exit 0, output matches sysmon [0-9]
+    if output=$(bash "$sysmon" version 2>&1); then
+        if echo "$output" | grep -q "sysmon [0-9]"; then
+            pass "sysmon version"
+        else
+            fail "sysmon version (unexpected output: $output)"
+            smoke_failed=1
+        fi
+    else
+        fail "sysmon version (non-zero exit)"
+        smoke_failed=1
+    fi
+
+    # Subcommands that should exit 0
+    local cmd
+    for cmd in status disk mem proc net; do
+        if bash "$sysmon" "$cmd" >/dev/null 2>&1; then
+            pass "sysmon $cmd"
+        else
+            fail "sysmon $cmd (exit $?)"
+            smoke_failed=1
+        fi
+    done
+
+    # warn: exit 0 (healthy), 1 (warnings), or 2 (critical) are all valid health statuses
+    local rc
+    bash "$sysmon" warn >/dev/null 2>&1
+    rc=$?
+    if [[ $rc -le 2 ]]; then
+        pass "sysmon warn (exit $rc)"
+    else
+        fail "sysmon warn (exit $rc)"
+        smoke_failed=1
+    fi
+
+    # Invalid subcommand should exit non-zero
+    if bash "$sysmon" bogus >/dev/null 2>&1; then
+        fail "sysmon bogus (expected non-zero exit)"
+        smoke_failed=1
+    else
+        pass "sysmon bogus (rejected invalid subcommand)"
+    fi
+
+    return $smoke_failed
+}
+
 # Print summary
 print_summary() {
     print_header "Summary"
@@ -199,6 +272,7 @@ main() {
             run_lint || exit_code=1
             run_syntax || exit_code=1
             run_templates || exit_code=1
+            run_smoke || exit_code=1
             ;;
         quick)
             run_lint || exit_code=1
@@ -213,9 +287,12 @@ main() {
         templates)
             run_templates || exit_code=1
             ;;
+        smoke)
+            run_smoke || exit_code=1
+            ;;
         *)
             echo "Unknown mode: $mode"
-            echo "Usage: $0 [all|quick|lint|syntax|templates]"
+            echo "Usage: $0 [all|quick|lint|syntax|templates|smoke]"
             exit 1
             ;;
     esac
