@@ -27,6 +27,14 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Apply all updates**: `sysup upgrade`
 - **Verify tools**: `sysup doctor`
 
+### System Monitoring
+- **Health dashboard**: `sysmon` or `sysmon status`
+- **Disk usage**: `sysmon disk`
+- **Memory usage**: `sysmon mem`
+- **Processes**: `sysmon proc`
+- **Network**: `sysmon net`
+- **Health warnings**: `sysmon warn`
+
 ### Development Workflow
 - **Edit files**: `chezmoi edit <file>`
 - **Add new files**: `chezmoi add <file>`
@@ -54,6 +62,7 @@ The zsh configuration uses these variables:
 
 ### System Maintenance
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
+- `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
 
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
@@ -119,7 +128,7 @@ C-a d                  # Detach from session
 Sessions are automatically saved every 15 minutes via tmux-continuum and restored on tmux server start via tmux-resurrect. Press `prefix + I` to install/update plugins.
 
 ### Welcome Message
-On new interactive shells (local terminals, SSH logins), a welcome message shows the hostname, platform, available commands (`dev`, `sysup`), and any active tmux sessions. Suppressed inside tmux panes and VS Code terminals.
+On new interactive shells (local terminals, SSH logins), a welcome message shows the hostname, platform, available commands (`dev`, `sysup`, `sysmon`), active tmux sessions, and any system health warnings. Suppressed inside tmux panes and VS Code terminals.
 
 ### Multi-Service Orchestration
 For complex multi-service setups, copy `~/.local/share/start-service.sh.example` to your project directory and customize it.
@@ -129,6 +138,7 @@ For complex multi-service setups, copy `~/.local/share/start-service.sh.example`
 Detailed usage guides are in `docs/`:
 - [`docs/dev.md`](docs/dev.md) — Dev session manager reference
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
+- [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes

@@ -1,0 +1,775 @@
+#!/bin/bash
+# ============================================================================
+# sysmon - Cross-platform system health monitor
+# ============================================================================
+# Non-interactive, instant system health dashboard. Shows CPU, memory, disk,
+# processes, services, and network info across macOS, Linux, and WSL.
+#
+# Usage: sysmon [command]
+#   sysmon              One-screen health dashboard (same as sysmon status)
+#   sysmon status       System overview: load, memory, disk, processes
+#   sysmon disk         Detailed disk usage breakdown
+#   sysmon mem          Memory usage and top consumers
+#   sysmon proc         Process summary and top consumers
+#   sysmon net          Network interfaces, ports, connections
+#   sysmon warn         Warnings only (exit 0=ok, 1=warn, 2=critical)
+#   sysmon help         Show usage text
+
+set -euo pipefail
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+
+if [ -t 1 ]; then
+  BOLD='\033[1m'
+  DIM='\033[2m'
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[1;36m'
+  NC='\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+die()     { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info()    { echo -e "${CYAN}$*${NC}"; }
+header()  { echo -e "\n${BOLD}${BLUE}── $* ──${NC}"; }
+
+has() { command -v "$1" &>/dev/null; }
+
+# --- Platform Detection -------------------------------------------------------
+
+IS_WSL=false
+IS_MACOS=false
+IS_LINUX=false
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
+  IS_WSL=true
+else
+  IS_LINUX=true
+fi
+
+# --- Display Helpers ----------------------------------------------------------
+
+# Render a percentage bar with color coding
+# Usage: bar <percent> [width]
+bar() {
+  local pct="${1:-0}" width="${2:-16}"
+  local filled=$(( pct * width / 100 ))
+  local empty=$(( width - filled ))
+
+  local color="${GREEN}"
+  if [ "$pct" -ge 85 ]; then
+    color="${RED}"
+  elif [ "$pct" -ge 60 ]; then
+    color="${YELLOW}"
+  fi
+
+  local bar_str=""
+  local i
+  for (( i=0; i<filled; i++ )); do bar_str+="█"; done
+  for (( i=0; i<empty; i++ )); do bar_str+="░"; done
+  echo -e "${color}${bar_str}${NC}"
+}
+
+# Format bytes (in KB) to human-readable
+fmt_kb() {
+  local kb="${1:-0}"
+  if [ "$kb" -ge 1048576 ]; then
+    awk "BEGIN {printf \"%.1fG\", $kb/1048576}"
+  elif [ "$kb" -ge 1024 ]; then
+    awk "BEGIN {printf \"%.0fM\", $kb/1024}"
+  else
+    echo "${kb}K"
+  fi
+}
+
+# --- Platform Abstraction Layer -----------------------------------------------
+
+get_cpu_count() {
+  if [ "$IS_MACOS" = true ]; then
+    sysctl -n hw.ncpu 2>/dev/null || echo "1"
+  else
+    nproc 2>/dev/null || grep -c ^processor /proc/cpuinfo 2>/dev/null || echo "1"
+  fi
+}
+
+get_load_avg() {
+  if [ "$IS_MACOS" = true ]; then
+    sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'
+  else
+    awk '{print $1, $2, $3}' /proc/loadavg 2>/dev/null || echo "0 0 0"
+  fi
+}
+
+get_uptime_human() {
+  if [ "$IS_MACOS" = true ]; then
+    local boot_epoch
+    boot_epoch=$(sysctl -n kern.boottime 2>/dev/null | awk -F'[= ,}]' '{for(i=1;i<=NF;i++){if($i=="sec"){print $(i+1)}}}')
+    if [ -n "$boot_epoch" ]; then
+      local now
+      now=$(date +%s)
+      local secs=$(( now - boot_epoch ))
+      format_seconds "$secs"
+    else
+      uptime | awk -F'(up |,)' '{print $2}' | xargs
+    fi
+  else
+    local secs
+    secs=$(awk '{print int($1)}' /proc/uptime 2>/dev/null || echo "0")
+    format_seconds "$secs"
+  fi
+}
+
+format_seconds() {
+  local secs="$1"
+  local days=$(( secs / 86400 ))
+  local hours=$(( (secs % 86400) / 3600 ))
+  local mins=$(( (secs % 3600) / 60 ))
+  if [ "$days" -gt 0 ]; then
+    printf "%dd %dh %dm" "$days" "$hours" "$mins"
+  elif [ "$hours" -gt 0 ]; then
+    printf "%dh %dm" "$hours" "$mins"
+  else
+    printf "%dm" "$mins"
+  fi
+}
+
+get_os_info() {
+  if [ "$IS_MACOS" = true ]; then
+    echo "macOS $(sw_vers -productVersion 2>/dev/null || echo 'unknown') ($(uname -m))"
+  elif [ "$IS_WSL" = true ]; then
+    local distro
+    distro=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo "Linux")
+    echo "WSL - $distro ($(uname -m))"
+  else
+    local distro
+    distro=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo "Linux")
+    echo "$distro ($(uname -m))"
+  fi
+}
+
+# Memory info: sets MEM_TOTAL_KB, MEM_USED_KB, MEM_AVAILABLE_KB, SWAP_TOTAL_KB, SWAP_USED_KB
+get_memory_info() {
+  MEM_TOTAL_KB=0
+  MEM_USED_KB=0
+  MEM_AVAILABLE_KB=0
+  SWAP_TOTAL_KB=0
+  SWAP_USED_KB=0
+
+  if [ "$IS_MACOS" = true ]; then
+    local total_bytes page_size
+    total_bytes=$(sysctl -n hw.memsize 2>/dev/null || echo "0")
+    MEM_TOTAL_KB=$(( total_bytes / 1024 ))
+
+    page_size=$(sysctl -n hw.pagesize 2>/dev/null || echo "4096")
+    local vm_output
+    vm_output=$(vm_stat 2>/dev/null)
+    local active inactive speculative wired compressed
+    active=$(echo "$vm_output" | awk '/Pages active/ {gsub(/\./,"",$NF); print $NF}')
+    inactive=$(echo "$vm_output" | awk '/Pages inactive/ {gsub(/\./,"",$NF); print $NF}')
+    speculative=$(echo "$vm_output" | awk '/Pages speculative/ {gsub(/\./,"",$NF); print $NF}')
+    wired=$(echo "$vm_output" | awk '/Pages wired/ {gsub(/\./,"",$NF); print $NF}')
+    compressed=$(echo "$vm_output" | awk '/Pages occupied by compressor/ {gsub(/\./,"",$NF); print $NF}')
+
+    active=${active:-0}; inactive=${inactive:-0}; speculative=${speculative:-0}
+    wired=${wired:-0}; compressed=${compressed:-0}
+
+    local used_pages=$(( active + wired + compressed ))
+    MEM_USED_KB=$(( used_pages * page_size / 1024 ))
+    MEM_AVAILABLE_KB=$(( MEM_TOTAL_KB - MEM_USED_KB ))
+
+    local swap_info
+    swap_info=$(sysctl -n vm.swapusage 2>/dev/null || echo "")
+    if [ -n "$swap_info" ]; then
+      SWAP_TOTAL_KB=$(echo "$swap_info" | awk '{gsub(/M/,"",$3); printf "%d", $3*1024}')
+      SWAP_USED_KB=$(echo "$swap_info" | awk '{gsub(/M/,"",$6); printf "%d", $6*1024}')
+    fi
+  else
+    # Linux / WSL
+    MEM_TOTAL_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    MEM_AVAILABLE_KB=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    MEM_USED_KB=$(( MEM_TOTAL_KB - MEM_AVAILABLE_KB ))
+    SWAP_TOTAL_KB=$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    local swap_free
+    swap_free=$(awk '/^SwapFree:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+    SWAP_USED_KB=$(( SWAP_TOTAL_KB - swap_free ))
+  fi
+}
+
+# Disk info: prints lines of "mount used_kb total_kb percent"
+# Filters to real/meaningful filesystems, excluding virtual mounts
+get_disk_mounts() {
+  if [ "$IS_MACOS" = true ]; then
+    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
+  elif [ "$IS_WSL" = true ]; then
+    # Show real Linux mounts, filter out Windows mounts (/mnt/c, etc.) and virtual FS
+    df -k 2>/dev/null | awk 'NR>1 {
+      dev=$1; mp=$6; used=$3; total=$2; pct=$5
+      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
+      if (mp ~ /\/mnt\/[a-z]/) next
+      if (total+0 == 0) next
+      print mp, used, total, pct
+    }' | sort
+  else
+    df -k 2>/dev/null | awk 'NR>1 {
+      dev=$1; mp=$6; used=$3; total=$2; pct=$5
+      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
+      if (total+0 == 0) next
+      print mp, used, total, pct
+    }' | sort
+  fi
+}
+
+# All disk mounts including WSL windows mounts
+get_all_disk_mounts() {
+  if [ "$IS_MACOS" = true ]; then
+    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
+  else
+    df -k 2>/dev/null | awk 'NR>1 {
+      dev=$1; mp=$6; used=$3; total=$2; pct=$5
+      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
+      if (total+0 == 0) next
+      print mp, used, total, pct
+    }' | sort
+  fi
+}
+
+# Top processes by CPU: prints "pid user cpu% mem% command"
+get_top_procs_cpu() {
+  local count="${1:-5}"
+  ps -eo pid,user,%cpu,%mem,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
+}
+
+# Top processes by memory: prints "pid user cpu% mem% rss command"
+get_top_procs_mem() {
+  local count="${1:-5}"
+  if [ "$IS_MACOS" = true ]; then
+    ps -eo pid,user,%mem,rss,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
+  else
+    ps -eo pid,user,%mem,rss,comm 2>/dev/null | sort -k3 -rn | head -n "$count"
+  fi
+}
+
+# Process state summary
+get_proc_counts() {
+  local total states running sleeping stopped zombie
+  total=$( (ps -e 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
+  states=$( (ps -eo state 2>/dev/null || true) | tail -n +2)
+  running=$(echo "$states" | grep -c 'R' || true)
+  sleeping=$(echo "$states" | grep -c 'S' || true)
+  stopped=$(echo "$states" | grep -c 'T' || true)
+  zombie=$(echo "$states" | grep -c 'Z' || true)
+  echo "$total ${running:-0} ${sleeping:-0} ${stopped:-0} ${zombie:-0}"
+}
+
+# Network interfaces
+get_interfaces() {
+  if [ "$IS_MACOS" = true ]; then
+    # Use ifconfig on macOS
+    local ifaces
+    ifaces=$(ifconfig -l 2>/dev/null | tr ' ' '\n' | grep -v '^$')
+    while IFS= read -r iface; do
+      local addr status
+      addr=$(ifconfig "$iface" 2>/dev/null | awk '/inet / {print $2}' | head -1)
+      if [ -n "$addr" ]; then
+        status=$(ifconfig "$iface" 2>/dev/null | grep -q 'status: active\|UP' && echo "UP" || echo "DOWN")
+        echo "$iface $addr $status"
+      fi
+    done <<< "$ifaces"
+  else
+    # Use ip on Linux
+    if has ip; then
+      ip -o -4 addr show 2>/dev/null | awk '{split($4,a,"/"); print $2, a[1], $NF}' | while read -r iface addr _; do
+        local state
+        state=$(ip link show "$iface" 2>/dev/null | grep -q 'state UP' && echo "UP" || echo "DOWN")
+        echo "$iface $addr $state"
+      done
+    fi
+  fi
+}
+
+# Listening ports
+get_listening_ports() {
+  if [ "$IS_MACOS" = true ]; then
+    lsof -i -P -n 2>/dev/null | awk '/LISTEN/ {split($9,a,":"); printf "%s\t%s\t%s\t%s\n", a[NF], "tcp", $2, $1}' | sort -t$'\t' -k1 -n | uniq
+  else
+    if has ss; then
+      ss -tlnp 2>/dev/null | awk 'NR>1 {split($4,a,":"); port=a[length(a)]; match($0,/users:\(\("([^"]+)",pid=([0-9]+)/,m); printf "%s\ttcp\t%s\t%s\n", port, m[2], m[1]}' | sort -t$'\t' -k1 -n | uniq
+    fi
+  fi
+}
+
+# Connection counts
+get_connection_counts() {
+  if [ "$IS_MACOS" = true ]; then
+    local net_output established listening time_wait
+    net_output=$(netstat -an 2>/dev/null || true)
+    established=$(echo "$net_output" | grep -c 'ESTABLISHED' 2>/dev/null || echo "0")
+    listening=$(echo "$net_output" | grep -c 'LISTEN' 2>/dev/null || echo "0")
+    time_wait=$(echo "$net_output" | grep -c 'TIME_WAIT' 2>/dev/null || echo "0")
+    echo "$established $listening $time_wait"
+  else
+    if has ss; then
+      local established listening time_wait
+      established=$( (ss -t state established 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
+      listening=$( (ss -tl 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
+      time_wait=$( (ss -t state time-wait 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
+      echo "$established $listening $time_wait"
+    else
+      echo "0 0 0"
+    fi
+  fi
+}
+
+# === Warning Engine ===========================================================
+
+WARN_COUNT=0
+CRIT_COUNT=0
+WARN_MESSAGES=()
+
+add_warning() {
+  local level="$1" msg="$2"
+  if [ "$level" = "critical" ]; then
+    WARN_MESSAGES+=("${RED}✗ $msg${NC}")
+    CRIT_COUNT=$(( CRIT_COUNT + 1 ))
+  else
+    WARN_MESSAGES+=("${YELLOW}⚠ $msg${NC}")
+    WARN_COUNT=$(( WARN_COUNT + 1 ))
+  fi
+}
+
+check_warnings() {
+  WARN_COUNT=0
+  CRIT_COUNT=0
+  WARN_MESSAGES=()
+
+  # Memory warnings
+  get_memory_info
+  if [ "$MEM_TOTAL_KB" -gt 0 ]; then
+    local mem_pct=$(( MEM_USED_KB * 100 / MEM_TOTAL_KB ))
+    if [ "$mem_pct" -ge 95 ]; then
+      add_warning "critical" "RAM usage at ${mem_pct}% (above 95% threshold)"
+    elif [ "$mem_pct" -ge 80 ]; then
+      add_warning "warn" "RAM usage at ${mem_pct}% (above 80% threshold)"
+    fi
+
+    if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+      local swap_pct=$(( SWAP_USED_KB * 100 / SWAP_TOTAL_KB ))
+      if [ "$swap_pct" -ge 80 ]; then
+        add_warning "critical" "Swap usage at ${swap_pct}% (above 80% threshold)"
+      elif [ "$swap_pct" -ge 50 ]; then
+        add_warning "warn" "Swap usage at ${swap_pct}% (above 50% threshold)"
+      fi
+    fi
+  fi
+
+  # Disk warnings
+  while IFS=' ' read -r mount _ total_kb pct_str; do
+    local pct
+    pct=$(echo "$pct_str" | tr -d '%')
+    if [ "$pct" -ge 95 ] 2>/dev/null; then
+      add_warning "critical" "Disk $mount at ${pct}% (above 95% threshold)"
+    elif [ "$pct" -ge 85 ] 2>/dev/null; then
+      add_warning "warn" "Disk $mount at ${pct}% (above 85% threshold)"
+    fi
+  done < <(get_disk_mounts)
+
+  # Load average warnings
+  local cores load1
+  cores=$(get_cpu_count)
+  load1=$(get_load_avg | awk '{printf "%d", $1}')
+  local double_cores=$(( cores * 2 ))
+  if [ "$load1" -ge "$double_cores" ] 2>/dev/null; then
+    add_warning "critical" "Load average $load1 exceeds ${double_cores} (2x core count)"
+  elif [ "$load1" -ge "$cores" ] 2>/dev/null; then
+    add_warning "warn" "Load average $load1 exceeds core count ($cores)"
+  fi
+
+  # Zombie process warnings
+  local zombie_count
+  zombie_count=$(ps -eo state 2>/dev/null | grep -c 'Z' || true)
+  zombie_count="${zombie_count:-0}"
+  if [ "$zombie_count" -ge 5 ] 2>/dev/null; then
+    add_warning "critical" "$zombie_count zombie processes detected"
+  elif [ "$zombie_count" -ge 1 ] 2>/dev/null; then
+    add_warning "warn" "$zombie_count zombie process(es) detected"
+  fi
+}
+
+# === Subcommands ==============================================================
+
+# --- status (default) ---------------------------------------------------------
+
+cmd_status() {
+  # System info
+  header "System"
+  local hostname_str
+  hostname_str=$(hostname -s 2>/dev/null || hostname)
+  printf "  %-10s %s\n" "Host:" "$hostname_str"
+  printf "  %-10s %s\n" "Platform:" "$(get_os_info)"
+  printf "  %-10s %s\n" "Uptime:" "$(get_uptime_human)"
+  local cores
+  cores=$(get_cpu_count)
+  printf "  %-10s %s  (%s cores)\n" "Load:" "$(get_load_avg)" "$cores"
+
+  # Memory
+  header "Memory"
+  get_memory_info
+  if [ "$MEM_TOTAL_KB" -gt 0 ]; then
+    local mem_pct=$(( MEM_USED_KB * 100 / MEM_TOTAL_KB ))
+    printf "  RAM:   %s / %s (%d%%)  %s\n" "$(fmt_kb "$MEM_USED_KB")" "$(fmt_kb "$MEM_TOTAL_KB")" "$mem_pct" "$(bar "$mem_pct")"
+    if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+      local swap_pct=$(( SWAP_USED_KB * 100 / SWAP_TOTAL_KB ))
+      printf "  Swap:  %s / %s (%d%%)  %s\n" "$(fmt_kb "$SWAP_USED_KB")" "$(fmt_kb "$SWAP_TOTAL_KB")" "$swap_pct" "$(bar "$swap_pct")"
+    else
+      echo -e "  Swap:  ${DIM}none${NC}"
+    fi
+  else
+    echo "  Unable to read memory info"
+  fi
+
+  # Disk
+  header "Disk"
+  while IFS=' ' read -r mount used_kb total_kb pct_str; do
+    local pct
+    pct=$(echo "$pct_str" | tr -d '%')
+    printf "  %-12s %s / %s (%s)  %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
+  done < <(get_disk_mounts)
+
+  # Top processes
+  header "Top Processes (CPU)"
+  printf "  ${DIM}%-8s %-12s %-6s %-6s %s${NC}\n" "PID" "USER" "CPU%" "MEM%" "COMMAND"
+  get_top_procs_cpu 5 | while IFS= read -r line; do
+    printf "  %s\n" "$line"
+  done
+
+  # Services
+  header "Services"
+  if has docker; then
+    local docker_status container_count
+    if docker info &>/dev/null; then
+      container_count=$( (docker ps -q 2>/dev/null || true) | wc -l | tr -d ' ')
+      printf "  %-10s ${GREEN}running${NC} (%s containers)\n" "Docker:" "$container_count"
+    else
+      printf "  %-10s ${DIM}stopped${NC}\n" "Docker:"
+    fi
+  fi
+
+  if has tmux; then
+    local session_count
+    session_count=$( (tmux list-sessions 2>/dev/null || true) | wc -l | tr -d ' ')
+    if [ "$session_count" -gt 0 ]; then
+      printf "  %-10s %s session(s)\n" "tmux:" "$session_count"
+    else
+      printf "  %-10s ${DIM}no sessions${NC}\n" "tmux:"
+    fi
+  fi
+
+  local ssh_listening=false
+  if [ "$IS_MACOS" = true ]; then
+    if lsof -i :22 -P -n 2>/dev/null | grep -q LISTEN; then
+      ssh_listening=true
+    fi
+  else
+    if ss -tln 2>/dev/null | grep -q ':22 '; then
+      ssh_listening=true
+    fi
+  fi
+  if [ "$ssh_listening" = true ]; then
+    printf "  %-10s ${GREEN}listening${NC}\n" "SSH:"
+  else
+    printf "  %-10s ${DIM}not listening${NC}\n" "SSH:"
+  fi
+
+  # Warnings
+  check_warnings
+  header "Warnings"
+  if [ ${#WARN_MESSAGES[@]} -eq 0 ]; then
+    echo -e "  ${GREEN}✓ No warnings${NC}"
+  else
+    for msg in "${WARN_MESSAGES[@]}"; do
+      echo -e "  $msg"
+    done
+  fi
+}
+
+# --- disk ---------------------------------------------------------------------
+
+cmd_disk() {
+  header "Filesystem Usage"
+  printf "  ${DIM}%-14s %-10s %-10s %-6s${NC}\n" "MOUNT" "USED" "TOTAL" "USE%"
+  while IFS=' ' read -r mount used_kb total_kb pct_str; do
+    local pct
+    pct=$(echo "$pct_str" | tr -d '%')
+    printf "  %-14s %-10s %-10s %-6s %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
+  done < <(get_all_disk_mounts)
+
+  # WSL: show Windows mounts separately
+  if [ "$IS_WSL" = true ]; then
+    local wsl_mounts
+    wsl_mounts=$(df -k 2>/dev/null | awk 'NR>1 && /\/mnt\/[a-z]/' | awk '{print $6, $3, $2, $5}' | sort)
+    if [ -n "$wsl_mounts" ]; then
+      header "Windows Mounts"
+      printf "  ${DIM}%-14s %-10s %-10s %-6s${NC}\n" "MOUNT" "USED" "TOTAL" "USE%"
+      while IFS=' ' read -r mount used_kb total_kb pct_str; do
+        local pct
+        pct=$(echo "$pct_str" | tr -d '%')
+        printf "  %-14s %-10s %-10s %-6s %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
+      done <<< "$wsl_mounts"
+    fi
+  fi
+
+  # Home directory breakdown
+  header "Home Directory (~)"
+  if has dust; then
+    dust -d 1 -n 10 "$HOME" 2>/dev/null || du_fallback
+  elif has du; then
+    du_fallback
+  fi
+}
+
+du_fallback() {
+  du -d 1 -k "$HOME" 2>/dev/null | sort -rn | tail -n +2 | head -10 | while IFS=$'\t' read -r size path; do
+    [ -z "$size" ] && continue
+    local name
+    name="${path/#$HOME\//\~\/}"
+    name="${name%/}"
+    printf "  %-8s %s\n" "$(fmt_kb "$size")" "$name"
+  done
+}
+
+# --- mem ----------------------------------------------------------------------
+
+cmd_mem() {
+  get_memory_info
+
+  header "Memory"
+  if [ "$MEM_TOTAL_KB" -gt 0 ]; then
+    local mem_pct=$(( MEM_USED_KB * 100 / MEM_TOTAL_KB ))
+    printf "  %-12s %s\n" "Total:" "$(fmt_kb "$MEM_TOTAL_KB")"
+    printf "  %-12s %s (%d%%)  %s\n" "Used:" "$(fmt_kb "$MEM_USED_KB")" "$mem_pct" "$(bar "$mem_pct" 20)"
+    printf "  %-12s %s\n" "Available:" "$(fmt_kb "$MEM_AVAILABLE_KB")"
+
+    if [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+      local buffers cached
+      buffers=$(awk '/^Buffers:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+      cached=$(awk '/^Cached:/ {print $2}' /proc/meminfo 2>/dev/null || echo "0")
+      printf "  %-12s %s\n" "Buffers:" "$(fmt_kb "$buffers")"
+      printf "  %-12s %s\n" "Cached:" "$(fmt_kb "$cached")"
+    fi
+
+    if [ "$SWAP_TOTAL_KB" -gt 0 ]; then
+      local swap_pct=$(( SWAP_USED_KB * 100 / SWAP_TOTAL_KB ))
+      printf "  %-12s %s / %s (%d%%)\n" "Swap:" "$(fmt_kb "$SWAP_USED_KB")" "$(fmt_kb "$SWAP_TOTAL_KB")" "$swap_pct"
+    else
+      echo -e "  Swap:        ${DIM}none${NC}"
+    fi
+  else
+    echo "  Unable to read memory info"
+  fi
+
+  header "Top Memory Consumers"
+  printf "  ${DIM}%-8s %-12s %-6s %-10s %s${NC}\n" "PID" "USER" "MEM%" "RSS" "COMMAND"
+  get_top_procs_mem 10 | while IFS= read -r line; do
+    printf "  %s\n" "$line"
+  done
+}
+
+# --- proc ---------------------------------------------------------------------
+
+cmd_proc() {
+  header "Process Summary"
+  local counts
+  counts=$(get_proc_counts)
+  local total running sleeping stopped zombie
+  read -r total running sleeping stopped zombie <<< "$counts"
+  printf "  %-12s %s\n" "Total:" "$total"
+  printf "  %-12s %s\n" "Running:" "$running"
+  printf "  %-12s %s\n" "Sleeping:" "$sleeping"
+  printf "  %-12s %s\n" "Stopped:" "$stopped"
+  if [ "$zombie" -gt 0 ] 2>/dev/null; then
+    printf "  %-12s ${RED}%s${NC}\n" "Zombie:" "$zombie"
+  else
+    printf "  %-12s %s\n" "Zombie:" "$zombie"
+  fi
+
+  header "Top CPU Consumers"
+  printf "  ${DIM}%-8s %-12s %-6s %-6s %s${NC}\n" "PID" "USER" "CPU%" "MEM%" "COMMAND"
+  get_top_procs_cpu 10 | while IFS= read -r line; do
+    printf "  %s\n" "$line"
+  done
+
+  header "Top Memory Consumers"
+  printf "  ${DIM}%-8s %-12s %-6s %-10s %s${NC}\n" "PID" "USER" "MEM%" "RSS" "COMMAND"
+  get_top_procs_mem 10 | while IFS= read -r line; do
+    printf "  %s\n" "$line"
+  done
+}
+
+# --- net ----------------------------------------------------------------------
+
+cmd_net() {
+  header "Interfaces"
+  local found=false
+  while IFS=' ' read -r iface addr state; do
+    if [ -n "$iface" ]; then
+      local state_color
+      if [ "$state" = "UP" ]; then
+        state_color="${GREEN}${state}${NC}"
+      else
+        state_color="${DIM}${state}${NC}"
+      fi
+      printf "  %-12s %-20s (%b)\n" "${iface}:" "$addr" "$state_color"
+      found=true
+    fi
+  done < <(get_interfaces)
+
+  if [ "$found" = false ]; then
+    echo -e "  ${DIM}No interfaces found${NC}"
+  fi
+
+  # DNS
+  header "DNS"
+  if [ -f /etc/resolv.conf ]; then
+    local nameservers
+    nameservers=$(awk '/^nameserver/ {print $2}' /etc/resolv.conf 2>/dev/null)
+    if [ -n "$nameservers" ]; then
+      while IFS= read -r ns; do
+        printf "  Nameserver: %s\n" "$ns"
+      done <<< "$nameservers"
+    else
+      echo -e "  ${DIM}No nameservers configured${NC}"
+    fi
+  elif [ "$IS_MACOS" = true ]; then
+    local dns
+    dns=$(scutil --dns 2>/dev/null | awk '/nameserver\[0\]/ {print $3}' | head -3)
+    if [ -n "$dns" ]; then
+      while IFS= read -r ns; do
+        printf "  Nameserver: %s\n" "$ns"
+      done <<< "$dns"
+    fi
+  fi
+
+  # Listening ports
+  header "Listening Ports"
+  local ports
+  ports=$(get_listening_ports)
+  if [ -n "$ports" ]; then
+    printf "  ${DIM}%-8s %-8s %-8s %s${NC}\n" "PORT" "PROTO" "PID" "COMMAND"
+    echo "$ports" | head -20 | while IFS=$'\t' read -r port proto pid cmd; do
+      printf "  %-8s %-8s %-8s %s\n" "$port" "$proto" "${pid:-?}" "${cmd:-?}"
+    done
+  else
+    echo -e "  ${DIM}No listening ports found (may require sudo)${NC}"
+  fi
+
+  # Connection summary
+  header "Connections"
+  local conn_counts
+  conn_counts=$(get_connection_counts)
+  local established listening time_wait
+  read -r established listening time_wait <<< "$conn_counts"
+  printf "  %-14s %s\n" "Established:" "$established"
+  printf "  %-14s %s\n" "Listening:" "$listening"
+  printf "  %-14s %s\n" "Time Wait:" "$time_wait"
+}
+
+# --- warn ---------------------------------------------------------------------
+
+cmd_warn() {
+  check_warnings
+  if [ ${#WARN_MESSAGES[@]} -eq 0 ]; then
+    echo -e "${GREEN}✓ All checks passed${NC}"
+    exit 0
+  fi
+
+  for msg in "${WARN_MESSAGES[@]}"; do
+    echo -e "$msg"
+  done
+
+  if [ "$CRIT_COUNT" -gt 0 ]; then
+    exit 2
+  fi
+  exit 1
+}
+
+# --- help ---------------------------------------------------------------------
+
+show_help() {
+  cat << 'EOF'
+sysmon - Cross-platform system health monitor
+
+USAGE
+  sysmon              One-screen health dashboard (same as sysmon status)
+  sysmon status       System overview: load, memory, disk, processes
+  sysmon disk         Detailed disk usage breakdown
+  sysmon mem          Memory usage and top consumers
+  sysmon proc         Process summary and top consumers
+  sysmon net          Network interfaces, ports, connections
+  sysmon warn         Warnings only (exit 0=ok, 1=warn, 2=critical)
+  sysmon version      Show sysmon version
+  sysmon help         Show this help
+
+HEALTH CHECKS (sysmon warn)
+  Disk usage          warn >85%, critical >95%
+  RAM usage           warn >80%, critical >95%
+  Swap usage          warn >50%, critical >80%
+  Load average        warn >cores, critical >cores×2
+  Zombie processes    warn >0, critical >5
+
+EXAMPLES
+  sysmon              # Quick health dashboard
+  sysmon disk         # Drill into disk usage
+  sysmon mem          # See memory consumers
+  sysmon net          # Check network & ports
+  sysmon warn         # Scriptable: exit code tells health
+EOF
+}
+
+# --- version ------------------------------------------------------------------
+
+show_version() {
+  echo "sysmon 1.0.0"
+}
+
+# === Main =====================================================================
+
+main() {
+  case "${1:-}" in
+    ""| status)
+      cmd_status
+      ;;
+    disk)
+      cmd_disk
+      ;;
+    mem)
+      cmd_mem
+      ;;
+    proc)
+      cmd_proc
+      ;;
+    net)
+      cmd_net
+      ;;
+    warn)
+      cmd_warn
+      ;;
+    version|--version|-v)
+      show_version
+      ;;
+    help|--help|-h)
+      show_help
+      ;;
+    *)
+      die "Unknown command: $1 (try 'sysmon help')"
+      ;;
+  esac
+}
+
+main "$@"
