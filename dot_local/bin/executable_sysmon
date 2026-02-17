@@ -202,13 +202,16 @@ get_memory_info() {
   fi
 }
 
-# Disk info: prints lines of "mount used_kb total_kb percent"
-# Filters to real/meaningful filesystems, excluding virtual mounts
-get_disk_mounts() {
+# Primary disk mounts: consolidates APFS volumes on macOS into one line
+# Shows /System/Volumes/Data as "/" and any external/non-system mounts
+get_primary_disk_mounts() {
   if [ "$IS_MACOS" = true ]; then
-    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
+    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {
+      mp = $NF
+      if (mp == "/System/Volumes/Data") { print "/", $3, $2, $5 }
+      else if (mp !~ /^\/System\/Volumes/ && mp != "/") { print mp, $3, $2, $5 }
+    }' | sort
   elif [ "$IS_WSL" = true ]; then
-    # Show real Linux mounts, filter out Windows mounts (/mnt/c, etc.) and virtual FS
     df -k 2>/dev/null | awk 'NR>1 {
       dev=$1; mp=$6; used=$3; total=$2; pct=$5
       if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
@@ -226,17 +229,25 @@ get_disk_mounts() {
   fi
 }
 
-# Non-Windows disk mounts (WSL /mnt/* mounts are handled separately in cmd_disk)
-get_disk_mounts_local() {
-  if [ "$IS_MACOS" = true ]; then
-    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
+# Print disk health summary line based on primary mounts
+print_disk_summary() {
+  local max_pct=0 max_mount=""
+  while IFS=' ' read -r mount _ _ pct_str; do
+    local pct
+    pct=$(echo "$pct_str" | tr -d '%')
+    if [ "$pct" -gt "$max_pct" ] 2>/dev/null; then
+      max_pct=$pct
+      max_mount=$mount
+    fi
+  done < <(get_primary_disk_mounts)
+
+  echo ""
+  if [ "$max_pct" -ge 95 ]; then
+    echo -e "  ${RED}✗ ${max_mount}: ${max_pct}% used — disk critically full${NC}"
+  elif [ "$max_pct" -ge 85 ]; then
+    echo -e "  ${YELLOW}⚠ ${max_mount}: ${max_pct}% used — consider freeing space${NC}"
   else
-    df -k 2>/dev/null | awk 'NR>1 {
-      dev=$1; mp=$6; used=$3; total=$2; pct=$5
-      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
-      if (total+0 == 0) next
-      print mp, used, total, pct
-    }' | sort
+    echo -e "  ${GREEN}✓ Disk usage healthy (below 85% threshold)${NC}"
   fi
 }
 
@@ -375,7 +386,7 @@ check_warnings() {
     elif [ "$pct" -ge 85 ] 2>/dev/null; then
       add_warning "warn" "Disk $mount at ${pct}% (above 85% threshold)"
     fi
-  done < <(get_disk_mounts)
+  done < <(get_primary_disk_mounts)
 
   # Load average warnings
   local cores load1
@@ -448,7 +459,7 @@ cmd_status() {
     local pct
     pct=$(echo "$pct_str" | tr -d '%')
     printf "  %-12s %s / %s (%s)  %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
-  done < <(get_disk_mounts)
+  done < <(get_primary_disk_mounts)
 
   # Top processes
   header "Top Processes (CPU)"
@@ -530,7 +541,9 @@ cmd_disk() {
     local pct
     pct=$(echo "$pct_str" | tr -d '%')
     printf "  %-14s %-10s %-10s %-6s %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
-  done < <(get_disk_mounts_local)
+  done < <(get_primary_disk_mounts)
+
+  print_disk_summary
 
   # WSL: show Windows mounts separately
   if [ "$IS_WSL" = true ]; then
