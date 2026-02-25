@@ -154,6 +154,7 @@ if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
   echo "  \033[36mdev\033[0m [project]     tmux sessions"
   echo "  \033[36msysup\033[0m [status]    system updates"
   echo "  \033[36msysup doctor\033[0m      tool health check"
+  echo "  \033[36msysmon\033[0m [status]   system health"
 
   if command -v tmux >/dev/null 2>&1; then
     _sessions=$(tmux list-sessions 2>/dev/null)
@@ -165,8 +166,21 @@ if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
       done
     fi
   fi
+
+  # Show health warnings if sysmon is available
+  if command -v sysmon >/dev/null 2>&1; then
+    _warnings=$(sysmon warn 2>/dev/null)
+    _warn_exit=$?
+    if [ "$_warn_exit" -ne 0 ] && [ -n "$_warnings" ]; then
+      echo ""
+      echo "  \033[1;33mhealth warnings:\033[0m"
+      echo "$_warnings" | while read -r line; do
+        echo "    $line"
+      done
+    fi
+  fi
   echo ""
-  unset _hostname _platform _sessions
+  unset _hostname _platform _sessions _warnings _warn_exit
 fi
 
 # Enable better completion handling - ENHANCED VERSION
@@ -208,6 +222,17 @@ _sysup_completion() {
   esac
 }
 compdef _sysup_completion sysup 2>/dev/null
+
+# sysmon command completion
+_sysmon_completion() {
+  local -a subcmds
+  subcmds=(status disk mem proc net warn version help)
+  _arguments '1:command:->cmd'
+  case $state in
+    cmd) _describe 'command' subcmds ;;
+  esac
+}
+compdef _sysmon_completion sysmon 2>/dev/null
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
