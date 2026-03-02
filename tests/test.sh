@@ -9,6 +9,7 @@
 #   ./tests/test.sh templates # Template tests only
 #   ./tests/test.sh syntax    # Syntax checks only
 #   ./tests/test.sh smoke     # Smoke tests only (execute scripts)
+#   ./tests/test.sh shims     # Agent shim tests only
 
 set -euo pipefail
 
@@ -69,6 +70,12 @@ run_lint() {
         "$REPO_DIR/dot_local/bin/executable_sysup"
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
+        "$REPO_DIR/dot_local/bin/executable_python"
+        "$REPO_DIR/dot_local/bin/executable_python3"
+        "$REPO_DIR/dot_local/bin/executable_pip"
+        "$REPO_DIR/dot_local/bin/executable_pip3"
+        "$REPO_DIR/dot_local/bin/executable_docker"
+        "$REPO_DIR/dot_local/bin/executable_docker-compose"
     )
 
     # Add run_once scripts (only pure shell, not .tmpl - Go templates confuse shellcheck)
@@ -118,6 +125,12 @@ run_syntax() {
         "$REPO_DIR/dot_local/bin/executable_sysup"
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
+        "$REPO_DIR/dot_local/bin/executable_python"
+        "$REPO_DIR/dot_local/bin/executable_python3"
+        "$REPO_DIR/dot_local/bin/executable_pip"
+        "$REPO_DIR/dot_local/bin/executable_pip3"
+        "$REPO_DIR/dot_local/bin/executable_docker"
+        "$REPO_DIR/dot_local/bin/executable_docker-compose"
     )
 
     for script in "${scripts[@]}"; do
@@ -226,6 +239,24 @@ run_smoke() {
     return $smoke_failed
 }
 
+# Run agent shim tests
+run_shims() {
+    print_header "Agent Shim Tests"
+
+    if [[ -x "$SCRIPT_DIR/test-agent-shims.sh" ]]; then
+        if "$SCRIPT_DIR/test-agent-shims.sh"; then
+            pass "All agent shim tests passed"
+        else
+            fail "Agent shim tests failed"
+            return 1
+        fi
+    else
+        skip "test-agent-shims.sh not found or not executable"
+    fi
+
+    return 0
+}
+
 # Print summary
 print_summary() {
     print_header "Summary"
@@ -271,6 +302,7 @@ main() {
             run_syntax || exit_code=1
             run_templates || exit_code=1
             run_smoke || exit_code=1
+            run_shims || exit_code=1
             ;;
         quick)
             run_lint || exit_code=1
@@ -288,9 +320,12 @@ main() {
         smoke)
             run_smoke || exit_code=1
             ;;
+        shims)
+            run_shims || exit_code=1
+            ;;
         *)
             echo "Unknown mode: $mode"
-            echo "Usage: $0 [all|quick|lint|syntax|templates|smoke]"
+            echo "Usage: $0 [all|quick|lint|syntax|templates|smoke|shims]"
             exit 1
             ;;
     esac

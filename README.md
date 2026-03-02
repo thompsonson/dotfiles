@@ -13,6 +13,7 @@ Cross-platform dotfiles managed with [chezmoi](https://www.chezmoi.io/) for macO
 - **Docker support**: Platform-specific Docker configuration
 - **Git configuration**: GPG signing and delta diff viewer
 - **VS Code configuration**: Settings, keybindings, and extensions
+- **Agent command shims**: Intercepts python/pip/docker in agent mode, redirecting to preferred tooling
 
 ## Quick Start
 
@@ -67,14 +68,21 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 │   └── dev/config                     # Dev session manager config
 ├── dot_local/bin/
 │   ├── executable_dev                 # Dev session manager
-│   └── executable_sysup               # System update utility
+│   ├── executable_sysup               # System update utility
+│   ├── executable_python              # Agent shim: python → uv run python
+│   ├── executable_python3             # Agent shim: python3 → uv run python
+│   ├── executable_pip                 # Agent shim: pip → uv pip
+│   ├── executable_pip3                # Agent shim: pip3 → uv pip
+│   ├── executable_docker              # Agent shim: docker → infra scripts
+│   └── executable_docker-compose      # Agent shim: docker-compose → infra scripts
 ├── docs/                              # Detailed documentation
 │   ├── dev.md                         # Dev session manager reference
 │   ├── sysup.md                       # System update utility reference
 │   └── dotfiles-agent.md             # Dotfiles agent guide
 ├── tests/                             # Testing infrastructure
 │   ├── test.sh                        # Local test runner
-│   └── test-templates.sh              # Template validation
+│   ├── test-templates.sh              # Template validation
+│   └── test-agent-shims.sh            # Agent shim tests
 ├── .github/workflows/
 │   └── test.yml                       # GitHub Actions CI
 ├── run_once_install-packages.sh.tmpl  # Package installation script
@@ -198,6 +206,7 @@ Detailed usage guides for the custom tools in this repository:
 - [Dev Session Manager](docs/dev.md) -- persistent tmux sessions for multi-device development
 - [System Update Utility](docs/sysup.md) -- cross-platform package manager orchestration
 - [Dotfiles Agent](docs/dotfiles-agent.md) -- Claude Code + shell session for dotfiles maintenance
+- [Agent Command Shims](docs/agent-shims.md) -- intercepts commands in agent sessions, redirecting to preferred tooling
 
 ## Troubleshooting
 

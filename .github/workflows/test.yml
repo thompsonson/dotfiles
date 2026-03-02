@@ -46,6 +46,13 @@ jobs:
             fi
           done
 
+      - name: Shellcheck - agent shims
+        run: |
+          for shim in dot_local/bin/executable_python dot_local/bin/executable_python3 dot_local/bin/executable_pip dot_local/bin/executable_pip3 dot_local/bin/executable_docker dot_local/bin/executable_docker-compose; do
+            echo "Checking $shim..."
+            shellcheck -x -s bash "$shim" || exit 1
+          done
+
       # Syntax checks
       - name: Syntax - zshrc
         run: zsh -n dot_zshrc
@@ -59,6 +66,13 @@ jobs:
       - name: Syntax - sysmon
         run: bash -n dot_local/bin/executable_sysmon
 
+      - name: Syntax - agent shims
+        run: |
+          for shim in dot_local/bin/executable_python dot_local/bin/executable_python3 dot_local/bin/executable_pip dot_local/bin/executable_pip3 dot_local/bin/executable_docker dot_local/bin/executable_docker-compose; do
+            echo "Checking $shim..."
+            bash -n "$shim" || exit 1
+          done
+
       # Template validation
       - name: Templates - validate all
         run: ./tests/test-templates.sh
@@ -66,6 +80,10 @@ jobs:
       # Smoke tests
       - name: Smoke tests - sysmon
         run: ./tests/test.sh smoke
+
+      # Agent shim tests
+      - name: Agent shim tests
+        run: ./tests/test-agent-shims.sh
 
   # ============================================================================
   # macOS Tests
@@ -93,6 +111,13 @@ jobs:
       - name: Shellcheck - sysmon
         run: shellcheck -x -s bash dot_local/bin/executable_sysmon
 
+      - name: Shellcheck - agent shims
+        run: |
+          for shim in dot_local/bin/executable_python dot_local/bin/executable_python3 dot_local/bin/executable_pip dot_local/bin/executable_pip3 dot_local/bin/executable_docker dot_local/bin/executable_docker-compose; do
+            echo "Checking $shim..."
+            shellcheck -x -s bash "$shim" || exit 1
+          done
+
       # Syntax checks (zsh is pre-installed on macOS)
       - name: Syntax - zshrc
         run: zsh -n dot_zshrc
@@ -106,6 +131,13 @@ jobs:
       - name: Syntax - sysmon
         run: bash -n dot_local/bin/executable_sysmon
 
+      - name: Syntax - agent shims
+        run: |
+          for shim in dot_local/bin/executable_python dot_local/bin/executable_python3 dot_local/bin/executable_pip dot_local/bin/executable_pip3 dot_local/bin/executable_docker dot_local/bin/executable_docker-compose; do
+            echo "Checking $shim..."
+            bash -n "$shim" || exit 1
+          done
+
       # Template validation
       - name: Templates - validate all
         run: ./tests/test-templates.sh
@@ -113,3 +145,7 @@ jobs:
       # Smoke tests
       - name: Smoke tests - sysmon
         run: ./tests/test.sh smoke
+
+      # Agent shim tests
+      - name: Agent shim tests
+        run: ./tests/test-agent-shims.sh

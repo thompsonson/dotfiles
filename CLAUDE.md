@@ -71,6 +71,14 @@ The zsh configuration uses these variables:
 - `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
+### Agent Command Shims
+- `dot_local/bin/executable_python`: Agent shim for python (redirects to `uv run python`)
+- `dot_local/bin/executable_python3`: Agent shim for python3 (redirects to `uv run python`)
+- `dot_local/bin/executable_pip`: Agent shim for pip (redirects to `uv pip`)
+- `dot_local/bin/executable_pip3`: Agent shim for pip3 (redirects to `uv pip`)
+- `dot_local/bin/executable_docker`: Agent shim for docker (redirects to infra scripts)
+- `dot_local/bin/executable_docker-compose`: Agent shim for docker-compose (redirects to infra scripts)
+
 ### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
 - `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
@@ -78,8 +86,9 @@ The zsh configuration uses these variables:
 - `dot_config/Code/User/extensions.json`: VS Code recommended extensions
 
 ### Testing
-- `tests/test.sh`: Local test runner (syntax, linting, templates)
+- `tests/test.sh`: Local test runner (syntax, linting, templates, shims)
 - `tests/test-templates.sh`: Template validation script
+- `tests/test-agent-shims.sh`: Agent shim validation (existence, shellcheck, block/passthrough)
 - `.github/workflows/test.yml`: CI workflow (Ubuntu + macOS)
 
 ## Dev Session Manager
@@ -140,6 +149,20 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
+- [`docs/agent-shims.md`](docs/agent-shims.md) — Agent command shim reference
+
+## Agent Command Shims
+
+This dotfiles repo installs command shims in `~/.local/bin` that intercept certain commands when run by coding agents (detected via `CLAUDECODE=1`).
+
+Shimmed commands and their replacements:
+- `python` / `python3` → use `uv run python`
+- `pip` / `pip3` → use `uv pip` or `uv add`
+- `docker` / `docker-compose` → use project infrastructure scripts
+
+If a command fails with "Agent guard", use the suggested alternative.
+
+See [docs/agent-shims.md](docs/agent-shims.md) for the full reference.
 
 ## When Making Changes
 
