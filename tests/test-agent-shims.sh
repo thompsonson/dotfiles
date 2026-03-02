@@ -264,7 +264,7 @@ test_self_skip() {
         # verifies the shim doesn't hang or loop — it will find the real one.
         local rc=0
         local stderr_output
-        stderr_output=$(PATH="$TMPDIR_SHIMS:/usr/bin" bash "$symlink" --version 2>&1 1>/dev/null) || rc=$?
+        stderr_output=$(PATH="$TMPDIR_SHIMS:/usr/bin" "$BASH" "$symlink" --version 2>&1 1>/dev/null) || rc=$?
 
         if [[ $rc -eq 127 ]]; then
             # Shim couldn't find the real binary — verify correct error message
