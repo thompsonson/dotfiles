@@ -18,7 +18,7 @@ fi
 # Find the real binary, skipping this shim
 REAL_BINARY=""
 while IFS= read -r candidate; do
-    if [ "$candidate" != "$(cd -P "$(dirname "$0")" && pwd)/$(basename "$0")" ]; then
+    if [ "$candidate" != "$(cd "$(dirname "$0")" && pwd)/$(basename "$0")" ]; then
         REAL_BINARY="$candidate"
         break
     fi

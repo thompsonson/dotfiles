@@ -272,6 +272,7 @@ test_self_skip() {
                 pass "$cmd self-skip (exit 127, correct error)"
             else
                 fail "$cmd self-skip (exit 127 but unexpected message)"
+                info "stderr: $stderr_output"
                 failed=1
             fi
         elif [[ $rc -eq 0 ]]; then
