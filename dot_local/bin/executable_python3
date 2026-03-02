@@ -1,0 +1,42 @@
+#!/bin/bash
+# Agent shim for python3
+# When run by Claude Code (CLAUDECODE=1), redirects to preferred tooling.
+# When run by a human, passes through to the real binary.
+
+SHIM_NAME="$(basename "$0")"
+
+if [ "$CLAUDECODE" = "1" ]; then
+    echo "⚠️  Agent guard: '${SHIM_NAME}' is not allowed in agent mode." >&2
+    echo "→ Use 'uv run python' instead." >&2
+    echo "→ For installing packages, use 'uv add <package>' or 'uv pip install <package>'." >&2
+    echo "→ Example: uv run python $*" >&2
+    echo "" >&2
+    echo "Agent guard: use 'uv run python' instead of '${SHIM_NAME}'"
+    exit 1
+fi
+
+# Find the real binary, skipping this shim
+REAL_BINARY=""
+while IFS= read -r candidate; do
+    if [ "$candidate" != "$(realpath "$0")" ]; then
+        REAL_BINARY="$candidate"
+        break
+    fi
+done < <(which -a "$SHIM_NAME" 2>/dev/null)
+
+# Fallback to common paths
+if [ -z "$REAL_BINARY" ]; then
+    for path in /usr/bin/${SHIM_NAME} /usr/local/bin/${SHIM_NAME} /opt/homebrew/bin/${SHIM_NAME}; do
+        if [ -x "$path" ]; then
+            REAL_BINARY="$path"
+            break
+        fi
+    done
+fi
+
+if [ -z "$REAL_BINARY" ]; then
+    echo "Error: ${SHIM_NAME} shim could not find the real '${SHIM_NAME}' binary." >&2
+    exit 127
+fi
+
+exec "$REAL_BINARY" "$@"
