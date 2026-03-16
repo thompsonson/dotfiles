@@ -587,8 +587,21 @@ cmd_restore() {
     *) info "Aborted."; return ;;
   esac
 
-  cp "$snap_file" "$abs_file"
-  success "Restored $abs_file from v$version"
+  # Back up the current file before overwriting
+  if [[ -f "$abs_file" ]]; then
+    local backup="${abs_file}.sysbak-$(date +%Y%m%d%H%M%S)"
+    cp "$abs_file" "$backup"
+    info "Backup:    $backup"
+  fi
+
+  # Atomic restore: copy to temp file then mv to avoid corruption on interrupt
+  local tmp_file="${abs_file}.sysbak-tmp"
+  if cp "$snap_file" "$tmp_file" && mv "$tmp_file" "$abs_file"; then
+    success "Restored $abs_file from v$version"
+  else
+    rm -f "$tmp_file"
+    die "Restore failed"
+  fi
 }
 
 # --- warn (scriptable staleness check) ----------------------------------------
