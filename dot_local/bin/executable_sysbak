@@ -672,6 +672,11 @@ cmd_setup() {
   read -r new_label
   new_label="${new_label:-$BACKUP_LABEL}"
 
+  # Validate inputs
+  [[ "$new_device" == /dev/* ]] || die "Device must start with /dev/ (got: $new_device)"
+  [[ "$new_mount" == /* ]]     || die "Mount point must be an absolute path (got: $new_mount)"
+  [[ "$new_label" =~ ^[a-zA-Z0-9_-]+$ ]] || die "Label must be alphanumeric (got: $new_label)"
+
   # Write config
   cat > "$CONFIG_FILE" <<EOF
 # sysbak configuration
@@ -698,8 +703,13 @@ EOF
   fi
 
   # Step 6: Write rsnapshot.conf
-  info "Writing /etc/rsnapshot.conf..."
   local rsnapshot_conf="/etc/rsnapshot.conf"
+  if [[ -f "$rsnapshot_conf" ]]; then
+    local conf_backup="${rsnapshot_conf}.bak.$(date +%Y%m%d%H%M%S)"
+    info "Backing up existing $rsnapshot_conf → $conf_backup"
+    sudo cp "$rsnapshot_conf" "$conf_backup"
+  fi
+  info "Writing $rsnapshot_conf..."
   local exclude_args=""
   for pat in "${EXCLUDE_PATTERNS[@]}"; do
     exclude_args="${exclude_args}exclude\t${pat}\n"
@@ -755,19 +765,22 @@ EOF
     # Cron jobs
     local cron_file="/etc/cron.d/sysbak"
     info "  Writing cron jobs to $cron_file..."
+    local mountpoint_bin rsnapshot_bin
+    mountpoint_bin=$(command -v mountpoint 2>/dev/null || echo "/usr/bin/mountpoint")
+    rsnapshot_bin=$(command -v rsnapshot 2>/dev/null || echo "/usr/bin/rsnapshot")
     sudo tee "$cron_file" > /dev/null <<EOF
 # sysbak - rsnapshot backup schedule
 SHELL=/bin/bash
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Alpha: every 4 hours (if drive mounted)
-0 */4 * * *  root  mountpoint -q ${new_mount} && rsnapshot alpha
+0 */4 * * *  root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} alpha
 
 # Beta: daily at 03:30 (if drive mounted)
-30 3 * * *   root  mountpoint -q ${new_mount} && rsnapshot beta
+30 3 * * *   root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} beta
 
 # Gamma: weekly Sunday 03:00 (if drive mounted)
-0 3 * * 0    root  mountpoint -q ${new_mount} && rsnapshot gamma
+0 3 * * 0    root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} gamma
 EOF
     success "  Cron jobs written"
   fi
