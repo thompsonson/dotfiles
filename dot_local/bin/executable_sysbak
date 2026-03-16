@@ -54,14 +54,17 @@ has() { command -v "$1" &>/dev/null; }
 
 IS_WSL=false
 IS_MACOS=false
-IS_LINUX=false  # shellcheck disable=SC2034 — used by future platform guards
+# shellcheck disable=SC2034 -- used by future platform guards
+IS_LINUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
-  IS_WSL=true  # shellcheck disable=SC2034
+  # shellcheck disable=SC2034
+  IS_WSL=true
 else
-  IS_LINUX=true  # shellcheck disable=SC2034
+  # shellcheck disable=SC2034
+  IS_LINUX=true
 fi
 
 # --- Configuration ------------------------------------------------------------
@@ -589,7 +592,8 @@ cmd_restore() {
 
   # Back up the current file before overwriting
   if [[ -f "$abs_file" ]]; then
-    local backup="${abs_file}.sysbak-$(date +%Y%m%d%H%M%S)"
+    local backup
+    backup="${abs_file}.sysbak-$(date +%Y%m%d%H%M%S)"
     cp "$abs_file" "$backup"
     info "Backup:    $backup"
   fi
@@ -705,7 +709,8 @@ EOF
   # Step 6: Write rsnapshot.conf
   local rsnapshot_conf="/etc/rsnapshot.conf"
   if [[ -f "$rsnapshot_conf" ]]; then
-    local conf_backup="${rsnapshot_conf}.bak.$(date +%Y%m%d%H%M%S)"
+    local conf_backup
+    conf_backup="${rsnapshot_conf}.bak.$(date +%Y%m%d%H%M%S)"
     info "Backing up existing $rsnapshot_conf → $conf_backup"
     sudo cp "$rsnapshot_conf" "$conf_backup"
   fi
