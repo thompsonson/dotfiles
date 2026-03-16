@@ -393,7 +393,7 @@ check_warnings() {
 
   # Zombie process warnings
   local zombie_count
-  zombie_count=$(ps -eo state 2>/dev/null | grep -c 'Z' || true)
+  zombie_count=$(ps -eo state 2>/dev/null | awk '/^Z/{n++} END{print n+0}')
   zombie_count="${zombie_count:-0}"
   if [ "$zombie_count" -ge 5 ] 2>/dev/null; then
     add_warning "critical" "$zombie_count zombie processes detected"
@@ -452,7 +452,7 @@ cmd_status() {
   # Services
   header "Services"
   if has docker; then
-    local docker_status container_count
+    local container_count
     if docker info &>/dev/null; then
       container_count=$( (docker ps -q 2>/dev/null || true) | wc -l | tr -d ' ')
       printf "  %-10s ${GREEN}running${NC} (%s containers)\n" "Docker:" "$container_count"
