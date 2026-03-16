@@ -258,14 +258,15 @@ get_top_procs_mem() {
 
 # Process state summary
 get_proc_counts() {
-  local total states running sleeping stopped zombie
+  local total
   total=$( (ps -e 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
-  states=$( (ps -eo state 2>/dev/null || true) | tail -n +2)
-  running=$(echo "$states" | grep -c 'R' || true)
-  sleeping=$(echo "$states" | grep -c 'S' || true)
-  stopped=$(echo "$states" | grep -c 'T' || true)
-  zombie=$(echo "$states" | grep -c 'Z' || true)
-  echo "$total ${running:-0} ${sleeping:-0} ${stopped:-0} ${zombie:-0}"
+  # Use awk to count states directly, avoiding SC2009 (grepping ps output)
+  local counts
+  counts=$( (ps -eo state 2>/dev/null || true) | tail -n +2 | awk '
+    /^R/{r++} /^S/{s++} /^T/{t++} /^Z/{z++}
+    END {print r+0, s+0, t+0, z+0}
+  ')
+  echo "$total $counts"
 }
 
 # Network interfaces
