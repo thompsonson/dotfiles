@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/thompsonson/dotfiles/compare/v1.0.1...v1.1.0) (2026-02-25)
+
+
+### Features
+
+* add sysmon cross-platform system health monitor ([#11](https://github.com/thompsonson/dotfiles/issues/11)) ([c2e5b9d](https://github.com/thompsonson/dotfiles/commit/c2e5b9d1e2fffca783f5752443ecbd03d9ed3169))
+
 ## [1.0.1](https://github.com/thompsonson/dotfiles/compare/v1.0.0...v1.0.1) (2026-02-05)
 
 
