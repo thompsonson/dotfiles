@@ -332,11 +332,17 @@ collect_unique_versions() {
 }
 
 # Resolve a file argument to a path relative to $HOME
+# Dies if the file is not under $HOME (snapshots only contain HOME contents)
 resolve_rel_path() {
   local target="$1"
   local abs_file
   abs_file=$(realpath "$target" 2>/dev/null || readlink -f "$target" 2>/dev/null || echo "$target")
-  echo "${abs_file#"$HOME"/}"
+  local rel="${abs_file#"$HOME"/}"
+  # If stripping $HOME/ didn't change the path, the file is outside HOME
+  if [[ "$rel" = "$abs_file" ]]; then
+    die "File must be under \$HOME: $abs_file"
+  fi
+  echo "$rel"
 }
 
 # Get the snapshot file path for the Nth unique version of a file
