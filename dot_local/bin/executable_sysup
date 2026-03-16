@@ -428,7 +428,7 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot pi)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
@@ -444,6 +444,7 @@ cmd_doctor() {
   check_path "$HOME/.oh-my-zsh" "oh-my-zsh"
   check_path "$HOME/.config/dev/config" "dev config"
   check_path "$HOME/.config/sysbak/config" "sysbak config"
+  check_path "$HOME/.pi/guard-config.json" "pi-guards config"
   check_path "$HOME/Projects" "Projects directory"
 }
 
@@ -489,6 +490,7 @@ get_version() {
     apt-get)   apt-get --version 2>/dev/null | head -1 | awk '{print $2}' ;;
     sysbak)    sysbak version 2>/dev/null ;;
     rsnapshot) rsnapshot --version 2>&1 | head -1 ;;
+    pi)        pi --version 2>/dev/null | head -1 ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
 }
