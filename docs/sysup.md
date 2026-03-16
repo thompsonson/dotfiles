@@ -9,7 +9,8 @@
 ```bash
 sysup                   # Show what's outdated (same as sysup status)
 sysup status            # Read-only: check each package manager for updates
-sysup upgrade           # Apply all updates
+sysup upgrade           # Apply all updates (uses full-upgrade for apt)
+sysup repair            # Fix broken packages and resolve dependency issues
 sysup doctor            # Check which tools are installed + versions
 sysup version           # Show sysup version
 sysup help              # Show built-in help
@@ -21,6 +22,7 @@ sysup help              # Show built-in help
 |---------|-------------|
 | `sysup` / `sysup status` | Check each package manager for available updates (read-only) |
 | `sysup upgrade` | Apply all updates across every installed package manager |
+| `sysup repair` | Fix broken packages, resolve dependencies, clean caches (with confirmation) |
 | `sysup doctor` | Report installed tools, versions, and key filesystem paths |
 | `sysup version` | Print the sysup version |
 | `sysup help` | Show the built-in help text |
@@ -32,7 +34,7 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 | Module | What it does | Platform |
 |--------|-------------|----------|
 | `brew` | Updates Homebrew formulae. On macOS, also upgrades casks. Runs `brew cleanup --prune=30` after upgrading. | All |
-| `apt` | Updates and upgrades system packages via `apt-get`. Requires `sudo`. Runs `autoremove` and `autoclean` after upgrading. | Linux/WSL |
+| `apt` | Updates and full-upgrades system packages via `apt-get dist-upgrade`. Handles dependency changes for kernels, drivers, and distros like Pop!_OS. Requires `sudo`. Runs `autoremove` and `autoclean` after upgrading. | Linux/WSL |
 | `fnm` | Checks the current Node.js version against the latest LTS. Installs and sets LTS as default on upgrade. | All |
 | `uv` | Runs `uv self update` (skipped if uv is brew-managed) and `uv tool upgrade --all`. | All |
 | `pipx` | Runs `pipx upgrade-all` to update all pipx-managed Python packages. | All |
@@ -44,6 +46,23 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 
 - **status**: Each module checks for available updates and reports them. No changes are made.
 - **upgrade**: Each module applies its updates. A summary at the end shows which modules succeeded, failed, or were skipped.
+- **repair**: Runs recovery steps for brew and apt. Prompts for confirmation before proceeding.
+
+## Repair
+
+`sysup repair` fixes broken package states without reinstalling the OS. It prompts for confirmation before running.
+
+| Manager | Steps | What it fixes |
+|---------|-------|---------------|
+| `apt` | `dpkg --configure -a` → `apt --fix-broken install` → `apt clean` → `apt autoremove` | Interrupted installs, unmet dependencies, corrupted package database, orphaned packages |
+| `brew` | `brew doctor` → `brew cleanup --prune=0` → `brew autoremove` | Stale caches, orphaned dependencies, configuration issues |
+
+### When to use repair
+
+- Software installs failing with dependency errors
+- Updates stopping halfway through
+- Package manager reporting broken packages
+- Applications failing after a system update
 
 ## Doctor
 
@@ -73,6 +92,7 @@ Each tool and path is shown with a green check or red cross indicating presence.
 ```bash
 sysup              # What needs updating?
 sysup upgrade      # Update everything
+sysup repair       # Fix broken packages
 sysup doctor       # Verify all tools are present
 ```
 
@@ -80,7 +100,7 @@ sysup doctor       # Verify all tools are present
 
 Each module follows the same pattern:
 
-1. Create two functions: `<name>_status()` and `<name>_upgrade()`
+1. Create functions: `<name>_status()`, `<name>_upgrade()`, and optionally `<name>_repair()`
 2. Gate both functions with `if ! has <tool>; then summary_skip "<name>"; return; fi`
 3. Use `summary_ok`, `summary_skip`, or `summary_fail` to report results
 4. Add calls to both functions in `cmd_status()` and `cmd_upgrade()`

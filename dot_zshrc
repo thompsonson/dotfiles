@@ -215,7 +215,7 @@ compdef _dev_completion dev 2>/dev/null
 # sysup command completion
 _sysup_completion() {
   local -a subcmds
-  subcmds=(status upgrade doctor version help)
+  subcmds=(status upgrade repair doctor version help)
   _arguments '1:command:->cmd'
   case $state in
     cmd) _describe 'command' subcmds ;;

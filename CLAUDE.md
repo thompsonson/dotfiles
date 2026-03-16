@@ -25,6 +25,7 @@ This is a chezmoi-managed dotfiles repository that supports:
 ### System Updates
 - **Check outdated**: `sysup` or `sysup status`
 - **Apply all updates**: `sysup upgrade`
+- **Fix broken packages**: `sysup repair`
 - **Verify tools**: `sysup doctor`
 
 ### System Monitoring
