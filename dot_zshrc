@@ -155,6 +155,7 @@ if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
   echo "  \033[36msysup\033[0m [status]    system updates"
   echo "  \033[36msysup doctor\033[0m      tool health check"
   echo "  \033[36msysmon\033[0m [status]   system health"
+  echo "  \033[36msysbak\033[0m [status]   backup manager"
 
   if command -v tmux >/dev/null 2>&1; then
     _sessions=$(tmux list-sessions 2>/dev/null)
@@ -233,6 +234,17 @@ _sysmon_completion() {
   esac
 }
 compdef _sysmon_completion sysmon 2>/dev/null
+
+# sysbak command completion
+_sysbak_completion() {
+  local -a subcmds
+  subcmds=(status run list diff restore warn setup doctor git-bundle config version help)
+  _arguments '1:command:->cmd'
+  case $state in
+    cmd) _describe 'command' subcmds ;;
+  esac
+}
+compdef _sysbak_completion sysbak 2>/dev/null
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

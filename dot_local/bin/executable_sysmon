@@ -401,6 +401,17 @@ check_warnings() {
   elif [ "$zombie_count" -ge 1 ] 2>/dev/null; then
     add_warning "warn" "$zombie_count zombie process(es) detected"
   fi
+
+  # Backup staleness (if sysbak is available)
+  if has sysbak; then
+    local bak_output bak_exit=0
+    bak_output=$(sysbak warn 2>/dev/null) || bak_exit=$?
+    if [ "$bak_exit" -eq 2 ]; then
+      add_warning "critical" "Backup: $(echo "$bak_output" | sed 's/\x1b\[[0-9;]*m//g' | head -1)"
+    elif [ "$bak_exit" -eq 1 ]; then
+      add_warning "warn" "Backup: $(echo "$bak_output" | sed 's/\x1b\[[0-9;]*m//g' | head -1)"
+    fi
+  fi
 }
 
 # === Subcommands ==============================================================
@@ -486,6 +497,20 @@ cmd_status() {
     printf "  %-10s ${GREEN}listening${NC}\n" "SSH:"
   else
     printf "  %-10s ${DIM}not listening${NC}\n" "SSH:"
+  fi
+
+  # Backup
+  if has sysbak; then
+    header "Backup"
+    local bak_output bak_exit=0
+    bak_output=$(sysbak warn 2>/dev/null) || bak_exit=$?
+    if [ "$bak_exit" -eq 0 ]; then
+      echo -e "  ${GREEN}✓ Backups current${NC}"
+    else
+      echo "$bak_output" | while IFS= read -r line; do
+        echo "  $line"
+      done
+    fi
   fi
 
   # Warnings

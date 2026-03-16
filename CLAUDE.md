@@ -36,6 +36,16 @@ This is a chezmoi-managed dotfiles repository that supports:
 - **Network**: `sysmon net`
 - **Health warnings**: `sysmon warn`
 
+### Backup Management
+- **Backup status**: `sysbak` or `sysbak status`
+- **Run backup**: `sysbak run [alpha|beta|gamma]`
+- **File history**: `sysbak list <file>`
+- **Diff version**: `sysbak diff <file> [version]`
+- **Restore**: `sysbak restore <file> [version]`
+- **Health check**: `sysbak warn`
+- **Diagnose**: `sysbak doctor`
+- **Git bundles**: `sysbak git-bundle`
+
 ### Development Workflow
 - **Edit files**: `chezmoi edit <file>`
 - **Add new files**: `chezmoi add <file>`
@@ -64,6 +74,10 @@ The zsh configuration uses these variables:
 ### System Maintenance
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
+
+### Backup
+- `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
+- `dot_config/sysbak/config`: Per-machine backup configuration
 
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
@@ -140,6 +154,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/dev.md`](docs/dev.md) — Dev session manager reference
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
+- [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes

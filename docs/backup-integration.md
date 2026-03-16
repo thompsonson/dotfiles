@@ -1,5 +1,7 @@
 # Backup Integration Plan
 
+> **Superseded by `sysbak` implementation.** See [`docs/sysbak.md`](sysbak.md) for the current reference.
+
 This document describes a proposal to integrate a USB rsnapshot backup manager
 into the dotfiles repository, with an extension for git-history-aware project
 backups.
