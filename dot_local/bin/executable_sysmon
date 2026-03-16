@@ -226,8 +226,8 @@ get_disk_mounts() {
   fi
 }
 
-# All disk mounts including WSL windows mounts
-get_all_disk_mounts() {
+# Non-Windows disk mounts (WSL /mnt/* mounts are handled separately in cmd_disk)
+get_disk_mounts_local() {
   if [ "$IS_MACOS" = true ]; then
     df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
   else
@@ -263,8 +263,8 @@ get_proc_counts() {
   # Use awk to count states directly, avoiding SC2009 (grepping ps output)
   local counts
   counts=$( (ps -eo state 2>/dev/null || true) | tail -n +2 | awk '
-    /^R/{r++} /^S/{s++} /^T/{t++} /^Z/{z++}
-    END {print r+0, s+0, t+0, z+0}
+    /^R/{r++} /^S/{s++} /^D/{d++} /^T/{t++} /^Z/{z++}
+    END {print r+0, s+0, d+0, t+0, z+0}
   ')
   echo "$total $counts"
 }
@@ -534,7 +534,7 @@ cmd_disk() {
     local pct
     pct=$(echo "$pct_str" | tr -d '%')
     printf "  %-14s %-10s %-10s %-6s %s\n" "$mount" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "${pct}%" "$(bar "$pct")"
-  done < <(get_all_disk_mounts)
+  done < <(get_disk_mounts_local)
 
   # WSL: show Windows mounts separately
   if [ "$IS_WSL" = true ]; then
@@ -613,11 +613,16 @@ cmd_proc() {
   header "Process Summary"
   local counts
   counts=$(get_proc_counts)
-  local total running sleeping stopped zombie
-  read -r total running sleeping stopped zombie <<< "$counts"
+  local total running sleeping disk_sleep stopped zombie
+  read -r total running sleeping disk_sleep stopped zombie <<< "$counts"
   printf "  %-12s %s\n" "Total:" "$total"
   printf "  %-12s %s\n" "Running:" "$running"
   printf "  %-12s %s\n" "Sleeping:" "$sleeping"
+  if [ "$disk_sleep" -gt 0 ] 2>/dev/null; then
+    printf "  %-12s ${YELLOW}%s${NC}\n" "Disk sleep:" "$disk_sleep"
+  else
+    printf "  %-12s %s\n" "Disk sleep:" "$disk_sleep"
+  fi
   printf "  %-12s %s\n" "Stopped:" "$stopped"
   if [ "$zombie" -gt 0 ] 2>/dev/null; then
     printf "  %-12s ${RED}%s${NC}\n" "Zombie:" "$zombie"
