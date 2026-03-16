@@ -202,20 +202,6 @@ get_memory_info() {
   fi
 }
 
-# All disk mounts including WSL windows mounts
-get_all_disk_mounts() {
-  if [ "$IS_MACOS" = true ]; then
-    df -k 2>/dev/null | awk 'NR>1 && /^\/dev\// {print $9, $3, $2, $5}' | sort
-  else
-    df -k 2>/dev/null | awk 'NR>1 {
-      dev=$1; mp=$6; used=$3; total=$2; pct=$5
-      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
-      if (total+0 == 0) next
-      print mp, used, total, pct
-    }' | sort
-  fi
-}
-
 # Primary disk mounts: consolidates APFS volumes on macOS into one line
 # Shows /System/Volumes/Data as "/" and any external/non-system mounts
 get_primary_disk_mounts() {
@@ -279,14 +265,15 @@ get_top_procs_mem() {
 
 # Process state summary
 get_proc_counts() {
-  local total states running sleeping stopped zombie
+  local total
   total=$( (ps -e 2>/dev/null || true) | tail -n +2 | wc -l | tr -d ' ')
-  states=$( (ps -eo state 2>/dev/null || true) | tail -n +2)
-  running=$(echo "$states" | grep -c 'R' || true)
-  sleeping=$(echo "$states" | grep -c 'S' || true)
-  stopped=$(echo "$states" | grep -c 'T' || true)
-  zombie=$(echo "$states" | grep -c 'Z' || true)
-  echo "$total ${running:-0} ${sleeping:-0} ${stopped:-0} ${zombie:-0}"
+  # Use awk to count states directly, avoiding SC2009 (grepping ps output)
+  local counts
+  counts=$( (ps -eo state 2>/dev/null || true) | tail -n +2 | awk '
+    /^R/{r++} /^S/{s++} /^D/{d++} /^T/{t++} /^Z/{z++}
+    END {print r+0, s+0, d+0, t+0, z+0}
+  ')
+  echo "$total $counts"
 }
 
 # Network interfaces
@@ -414,13 +401,23 @@ check_warnings() {
 
   # Zombie process warnings
   local zombie_count
-  # shellcheck disable=SC2009
-  zombie_count=$(ps -eo state 2>/dev/null | grep -c 'Z' || true)
+  zombie_count=$(ps -eo state 2>/dev/null | awk '/^Z/{n++} END{print n+0}')
   zombie_count="${zombie_count:-0}"
   if [ "$zombie_count" -ge 5 ] 2>/dev/null; then
     add_warning "critical" "$zombie_count zombie processes detected"
   elif [ "$zombie_count" -ge 1 ] 2>/dev/null; then
     add_warning "warn" "$zombie_count zombie process(es) detected"
+  fi
+
+  # Backup staleness (if sysbak is available)
+  if has sysbak; then
+    local bak_output bak_exit=0
+    bak_output=$(sysbak warn 2>/dev/null) || bak_exit=$?
+    if [ "$bak_exit" -eq 2 ]; then
+      add_warning "critical" "Backup: $(echo "$bak_output" | sed 's/\x1b\[[0-9;]*m//g' | head -1)"
+    elif [ "$bak_exit" -eq 1 ]; then
+      add_warning "warn" "Backup: $(echo "$bak_output" | sed 's/\x1b\[[0-9;]*m//g' | head -1)"
+    fi
   fi
 }
 
@@ -507,6 +504,20 @@ cmd_status() {
     printf "  %-10s ${GREEN}listening${NC}\n" "SSH:"
   else
     printf "  %-10s ${DIM}not listening${NC}\n" "SSH:"
+  fi
+
+  # Backup
+  if has sysbak; then
+    header "Backup"
+    local bak_output bak_exit=0
+    bak_output=$(sysbak warn 2>/dev/null) || bak_exit=$?
+    if [ "$bak_exit" -eq 0 ]; then
+      echo -e "  ${GREEN}✓ Backups current${NC}"
+    else
+      echo "$bak_output" | while IFS= read -r line; do
+        echo "  $line"
+      done
+    fi
   fi
 
   # Warnings
@@ -611,11 +622,16 @@ cmd_proc() {
   header "Process Summary"
   local counts
   counts=$(get_proc_counts)
-  local total running sleeping stopped zombie
-  read -r total running sleeping stopped zombie <<< "$counts"
+  local total running sleeping disk_sleep stopped zombie
+  read -r total running sleeping disk_sleep stopped zombie <<< "$counts"
   printf "  %-12s %s\n" "Total:" "$total"
   printf "  %-12s %s\n" "Running:" "$running"
   printf "  %-12s %s\n" "Sleeping:" "$sleeping"
+  if [ "$disk_sleep" -gt 0 ] 2>/dev/null; then
+    printf "  %-12s ${YELLOW}%s${NC}\n" "Disk sleep:" "$disk_sleep"
+  else
+    printf "  %-12s %s\n" "Disk sleep:" "$disk_sleep"
+  fi
   printf "  %-12s %s\n" "Stopped:" "$stopped"
   if [ "$zombie" -gt 0 ] 2>/dev/null; then
     printf "  %-12s ${RED}%s${NC}\n" "Zombie:" "$zombie"

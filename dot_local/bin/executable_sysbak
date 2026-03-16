@@ -1,0 +1,1044 @@
+#!/bin/bash
+# ============================================================================
+# sysbak - Cross-platform USB rsnapshot backup manager
+# ============================================================================
+# Manages USB-drive backups via rsnapshot with file-history browsing.
+# Lists unique file versions across snapshots (inode-deduped), diffs, and
+# restores individual files. Integrates with sysmon for staleness warnings.
+#
+# Usage: sysbak [command]
+#   sysbak              Backup dashboard (same as sysbak status)
+#   sysbak status       Drive state, snapshot counts, last backup time
+#   sysbak run [level]  Trigger rsnapshot (alpha/beta/gamma). --dry-run supported
+#   sysbak list <file>  Show unique file versions across snapshots
+#   sysbak diff <file> [version]   Diff current file vs snapshot version
+#   sysbak restore <file> [version] Restore file from snapshot
+#   sysbak warn         Staleness check (exit 0=ok, 1=warn, 2=critical)
+#   sysbak setup        One-time setup: install rsnapshot, write config/cron
+#   sysbak doctor       Diagnose configuration, device, and dependencies
+#   sysbak git-bundle   Bundle all git repos to USB drive
+#   sysbak config       Show config (--edit to open in $EDITOR)
+#   sysbak version      Show version
+#   sysbak help         Show usage text
+
+set -euo pipefail
+
+SYSBAK_VERSION="1.0.0"
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+
+if [ -t 1 ]; then
+  BOLD='\033[1m'
+  DIM='\033[2m'
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[1;36m'
+  NC='\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+die()     { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info()    { echo -e "${CYAN}$*${NC}"; }
+warn()    { echo -e "${YELLOW}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+header()  { echo -e "\n${BOLD}${BLUE}── $* ──${NC}"; }
+
+has() { command -v "$1" &>/dev/null; }
+
+# --- Platform Detection -------------------------------------------------------
+
+IS_WSL=false
+IS_MACOS=false
+# shellcheck disable=SC2034
+IS_LINUX=false
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
+  # shellcheck disable=SC2034
+  IS_WSL=true
+else
+  # shellcheck disable=SC2034
+  IS_LINUX=true
+fi
+
+# --- Configuration ------------------------------------------------------------
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sysbak"
+CONFIG_FILE="${CONFIG_DIR}/config"
+
+# Source config if it exists
+if [[ -f "$CONFIG_FILE" ]]; then
+  # shellcheck source=/dev/null
+  source "$CONFIG_FILE"
+fi
+
+# Set defaults (config values use lowercase; script uses uppercase)
+DEVICE="${device:-}"
+MOUNT_POINT="${mount_point:-/mnt/backup}"
+BACKUP_LABEL="${label:-BACKUP}"
+SNAPSHOT_ROOT="${MOUNT_POINT}/snapshots"
+GIT_BUNDLE_ROOT="${MOUNT_POINT}/git-bundles"
+STALE_WARN_HOURS="${stale_warn_hours:-25}"
+STALE_CRIT_HOURS="${stale_crit_hours:-48}"
+
+# Backup directories (array)
+if [[ -n "${backup_dirs+x}" ]]; then
+  BACKUP_DIRS=("${backup_dirs[@]}")
+else
+  BACKUP_DIRS=("$HOME/Projects" "$HOME/.local/share/chezmoi")
+fi
+
+# Exclude patterns (array)
+if [[ -n "${exclude_patterns+x}" ]]; then
+  EXCLUDE_PATTERNS=("${exclude_patterns[@]}")
+else
+  EXCLUDE_PATTERNS=("node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/")
+fi
+
+# Global flags
+DRY_RUN=false
+
+# --- Platform Abstraction Layer -----------------------------------------------
+
+check_mounted() {
+  local mnt="$1"
+  if has mountpoint; then
+    mountpoint -q "$mnt" 2>/dev/null
+  else
+    mount | grep -q " on $mnt "
+  fi
+}
+
+is_mounted() {
+  check_mounted "$MOUNT_POINT" 2>/dev/null
+}
+
+get_file_mtime() {
+  local file="$1"
+  if [ "$IS_MACOS" = true ]; then
+    stat -f '%m' "$file" 2>/dev/null
+  else
+    stat -c '%Y' "$file" 2>/dev/null
+  fi
+}
+
+get_file_mtime_human() {
+  local file="$1"
+  if [ "$IS_MACOS" = true ]; then
+    stat -f '%Sm' -t '%Y-%m-%d %H:%M:%S' "$file" 2>/dev/null
+  else
+    stat -c '%y' "$file" 2>/dev/null | cut -d'.' -f1
+  fi
+}
+
+get_file_inode() {
+  local file="$1"
+  if [ "$IS_MACOS" = true ]; then
+    stat -f '%i' "$file" 2>/dev/null
+  else
+    stat -c '%i' "$file" 2>/dev/null
+  fi
+}
+
+get_file_size() {
+  local file="$1"
+  if [ "$IS_MACOS" = true ]; then
+    stat -f '%z' "$file" 2>/dev/null
+  else
+    stat -c '%s' "$file" 2>/dev/null
+  fi
+}
+
+list_block_device() {
+  if has lsblk; then
+    lsblk -o NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT 2>/dev/null
+  elif has diskutil; then
+    diskutil list 2>/dev/null
+  fi
+}
+
+# --- Display Helpers ----------------------------------------------------------
+
+# Render a percentage bar with color coding
+bar() {
+  local pct="${1:-0}" width="${2:-16}"
+  local filled=$(( pct * width / 100 ))
+  local empty=$(( width - filled ))
+
+  local color="${GREEN}"
+  if [ "$pct" -ge 85 ]; then
+    color="${RED}"
+  elif [ "$pct" -ge 60 ]; then
+    color="${YELLOW}"
+  fi
+
+  local bar_str=""
+  local i
+  for (( i=0; i<filled; i++ )); do bar_str+="█"; done
+  for (( i=0; i<empty; i++ )); do bar_str+="░"; done
+  echo -e "${color}${bar_str}${NC}"
+}
+
+# Format bytes to human-readable
+fmt_bytes() {
+  local bytes="${1:-0}"
+  if [ "$bytes" -ge 1073741824 ]; then
+    awk "BEGIN {printf \"%.1fG\", $bytes/1073741824}"
+  elif [ "$bytes" -ge 1048576 ]; then
+    awk "BEGIN {printf \"%.1fM\", $bytes/1048576}"
+  elif [ "$bytes" -ge 1024 ]; then
+    awk "BEGIN {printf \"%.1fK\", $bytes/1024}"
+  else
+    echo "${bytes}B"
+  fi
+}
+
+# Format KB to human-readable
+fmt_kb() {
+  local kb="${1:-0}"
+  if [ "$kb" -ge 1048576 ]; then
+    awk "BEGIN {printf \"%.1fG\", $kb/1048576}"
+  elif [ "$kb" -ge 1024 ]; then
+    awk "BEGIN {printf \"%.0fM\", $kb/1024}"
+  else
+    echo "${kb}K"
+  fi
+}
+
+# --- Core Functions -----------------------------------------------------------
+
+require_config() {
+  [[ -n "$DEVICE" ]] || die "No device configured. Run 'sysbak setup' or edit $CONFIG_FILE"
+}
+
+require_mounted() {
+  is_mounted || die "Backup drive not mounted at $MOUNT_POINT"
+}
+
+# Get epoch timestamp of the most recent alpha.0 snapshot
+get_last_backup_epoch() {
+  local latest_dir=""
+  # Check alpha.0 first (most recent scheduled)
+  if [[ -d "$SNAPSHOT_ROOT/alpha.0" ]]; then
+    latest_dir="$SNAPSHOT_ROOT/alpha.0"
+  else
+    # Find any snapshot directory
+    local snap_dir
+    snap_dir=$(find "$SNAPSHOT_ROOT" -maxdepth 1 -type d -name "alpha.*" -o -name "beta.*" -o -name "gamma.*" 2>/dev/null | sort | head -1)
+    [[ -n "$snap_dir" ]] && latest_dir="$snap_dir"
+  fi
+  [[ -z "$latest_dir" ]] && echo "0" && return
+  get_file_mtime "$latest_dir"
+}
+
+# Get hours since last backup
+get_backup_age_hours() {
+  local last_epoch
+  last_epoch=$(get_last_backup_epoch)
+  if [[ "$last_epoch" -eq 0 ]]; then
+    echo "9999"
+    return
+  fi
+  local now
+  now=$(date +%s)
+  echo $(( (now - last_epoch) / 3600 ))
+}
+
+# Count snapshots at a given level
+count_snapshots() {
+  local level="$1"
+  local count=0
+  if [[ -d "$SNAPSHOT_ROOT" ]]; then
+    count=$(find "$SNAPSHOT_ROOT" -maxdepth 1 -type d -name "${level}.*" 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  echo "$count"
+}
+
+# Get latest snapshot time for a level (human-readable relative)
+get_latest_snapshot_age() {
+  local level="$1"
+  local latest_dir="$SNAPSHOT_ROOT/${level}.0"
+  if [[ ! -d "$latest_dir" ]]; then
+    echo "none"
+    return
+  fi
+  local epoch
+  epoch=$(get_file_mtime "$latest_dir")
+  local now
+  now=$(date +%s)
+  local diff_s=$(( now - epoch ))
+
+  if [ "$diff_s" -lt 3600 ]; then
+    echo "$((diff_s / 60))m ago"
+  elif [ "$diff_s" -lt 86400 ]; then
+    echo "$((diff_s / 3600))h ago"
+  else
+    echo "$((diff_s / 86400))d ago"
+  fi
+}
+
+# --- File Version Helpers (shared by list/diff/restore) -----------------------
+
+# Collect unique file versions across snapshots, deduplicated by inode.
+# Outputs lines of: "inode|epoch|size|snap_name|snap_file_path"
+# sorted by epoch descending, deduplicated by inode.
+collect_unique_versions() {
+  local rel_path="$1"
+  local -a entries=()
+
+  local snapshot_dir
+  for snapshot_dir in "$SNAPSHOT_ROOT"/alpha.* "$SNAPSHOT_ROOT"/beta.* "$SNAPSHOT_ROOT"/gamma.*; do
+    [[ -d "$snapshot_dir" ]] || continue
+    local snap_name
+    snap_name=$(basename "$snapshot_dir")
+
+    # Find the file inside this snapshot
+    local snap_file
+    snap_file=$(find "$snapshot_dir" -path "*/$rel_path" -type f 2>/dev/null | head -1)
+    [[ -z "$snap_file" ]] && continue
+
+    local inode epoch size
+    inode=$(get_file_inode "$snap_file")
+    epoch=$(get_file_mtime "$snap_file")
+    size=$(get_file_size "$snap_file")
+
+    entries+=("${inode}|${epoch}|${size}|${snap_name}|${snap_file}")
+  done
+
+  if [[ ${#entries[@]} -eq 0 ]]; then
+    return
+  fi
+
+  # Sort by epoch descending
+  local -a sorted=()
+  while IFS= read -r line; do
+    sorted+=("$line")
+  done < <(printf '%s\n' "${entries[@]}" | sort -t'|' -k2 -rn)
+
+  # Deduplicate by inode
+  local -A seen_inodes=()
+  local entry
+  for entry in "${sorted[@]}"; do
+    local inode
+    inode="${entry%%|*}"
+    if [[ -z "${seen_inodes[$inode]:-}" ]]; then
+      seen_inodes[$inode]=1
+      echo "$entry"
+    fi
+  done
+}
+
+# Resolve a file argument to a path relative to $HOME
+# Dies if the file is not under $HOME (snapshots only contain HOME contents)
+resolve_rel_path() {
+  local target="$1"
+  local abs_file
+  abs_file=$(realpath "$target" 2>/dev/null || readlink -f "$target" 2>/dev/null || echo "$target")
+  local rel="${abs_file#"$HOME"/}"
+  # If stripping $HOME/ didn't change the path, the file is outside HOME
+  if [[ "$rel" = "$abs_file" ]]; then
+    die "File must be under \$HOME: $abs_file"
+  fi
+  echo "$rel"
+}
+
+# Get the snapshot file path for the Nth unique version of a file
+get_version_path() {
+  local rel_path="$1"
+  local version_idx="$2"
+  local idx=0
+
+  while IFS='|' read -r _inode _epoch _size _snap_name snap_file; do
+    if [[ "$idx" -eq "$version_idx" ]]; then
+      echo "$snap_file"
+      return
+    fi
+    idx=$((idx + 1))
+  done < <(collect_unique_versions "$rel_path")
+}
+
+# === Subcommands ==============================================================
+
+# --- status (default) ---------------------------------------------------------
+
+cmd_status() {
+  header "Drive"
+  if [[ -n "$DEVICE" ]]; then
+    printf "  %-10s %s\n" "Device:" "$DEVICE"
+  else
+    printf "  %-10s %s\n" "Device:" "${DIM}not configured${NC}"
+  fi
+  printf "  %-10s %s\n" "Mount:" "$MOUNT_POINT"
+  printf "  %-10s %s\n" "Label:" "$BACKUP_LABEL"
+
+  if is_mounted; then
+    echo -e "  Status:    ${GREEN}mounted${NC}"
+
+    # Show disk usage
+    local usage_line
+    usage_line=$(df -k "$MOUNT_POINT" 2>/dev/null | tail -1)
+    if [[ -n "$usage_line" ]]; then
+      local used_kb total_kb pct
+      used_kb=$(echo "$usage_line" | awk '{print $3}')
+      total_kb=$(echo "$usage_line" | awk '{print $2}')
+      if [[ "$total_kb" -gt 0 ]] 2>/dev/null; then
+        pct=$(( used_kb * 100 / total_kb ))
+        printf "  %-10s %s / %s (%d%%)  %s\n" "Usage:" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "$pct" "$(bar "$pct")"
+      fi
+    fi
+  else
+    echo -e "  Status:    ${DIM}not mounted${NC}"
+  fi
+
+  header "Snapshots"
+  if is_mounted && [[ -d "$SNAPSHOT_ROOT" ]]; then
+    local alpha_count beta_count gamma_count
+    alpha_count=$(count_snapshots "alpha")
+    beta_count=$(count_snapshots "beta")
+    gamma_count=$(count_snapshots "gamma")
+
+    printf "  %-10s %s snapshot(s)" "Alpha:" "$alpha_count"
+    if [[ "$alpha_count" -gt 0 ]]; then
+      printf "  (latest: %s)" "$(get_latest_snapshot_age alpha)"
+    fi
+    echo ""
+
+    printf "  %-10s %s snapshot(s)" "Beta:" "$beta_count"
+    if [[ "$beta_count" -gt 0 ]]; then
+      printf "  (latest: %s)" "$(get_latest_snapshot_age beta)"
+    fi
+    echo ""
+
+    printf "  %-10s %s snapshot(s)" "Gamma:" "$gamma_count"
+    if [[ "$gamma_count" -gt 0 ]]; then
+      printf "  (latest: %s)" "$(get_latest_snapshot_age gamma)"
+    fi
+    echo ""
+  else
+    echo -e "  ${DIM}No snapshots available${NC}"
+  fi
+
+  header "Schedule"
+  printf "  %-10s %s\n" "Alpha:" "every 4 hours"
+  printf "  %-10s %s\n" "Beta:" "daily 03:30"
+  printf "  %-10s %s\n" "Gamma:" "weekly Sun 03:00"
+
+  # Warnings section
+  header "Warnings"
+  if [[ -z "$DEVICE" ]]; then
+    echo -e "  ${YELLOW}⚠ No device configured — run 'sysbak setup'${NC}"
+  elif ! is_mounted; then
+    echo -e "  ${DIM}Drive not mounted${NC}"
+  else
+    local age_h
+    age_h=$(get_backup_age_hours)
+    if [[ "$age_h" -ge "$STALE_CRIT_HOURS" ]]; then
+      echo -e "  ${RED}✗ Last backup ${age_h}h ago (>${STALE_CRIT_HOURS}h)${NC}"
+    elif [[ "$age_h" -ge "$STALE_WARN_HOURS" ]]; then
+      echo -e "  ${YELLOW}⚠ Last backup ${age_h}h ago (>${STALE_WARN_HOURS}h)${NC}"
+    else
+      echo -e "  ${GREEN}✓ Backups current (last: ${age_h}h ago)${NC}"
+    fi
+  fi
+}
+
+# --- run ----------------------------------------------------------------------
+
+cmd_run() {
+  local level="${1:-alpha}"
+  case "$level" in
+    alpha|beta|gamma) ;;
+    *) die "Invalid level: $level (use alpha, beta, or gamma)" ;;
+  esac
+  require_config
+  require_mounted
+
+  if [[ "$DRY_RUN" = true ]]; then
+    info "Dry run: rsnapshot -t $level"
+    rsnapshot -t "$level"
+  else
+    info "Running rsnapshot $level..."
+    if sudo rsnapshot "$level"; then
+      success "Snapshot $level completed"
+    else
+      die "rsnapshot $level failed"
+    fi
+  fi
+}
+
+# --- list (key feature: inode-deduped file history) ---------------------------
+
+cmd_list() {
+  local target_file="${1:-}"
+  [[ -z "$target_file" ]] && die "Usage: sysbak list <file>"
+
+  require_mounted
+
+  local rel_path
+  rel_path=$(resolve_rel_path "$target_file")
+
+  header "File versions: ~/$rel_path"
+
+  local -a unique_versions=()
+  local total_count=0
+
+  while IFS='|' read -r inode epoch size snap_name snap_file; do
+    unique_versions+=("${inode}|${epoch}|${size}|${snap_name}|${snap_file}")
+  done < <(collect_unique_versions "$rel_path")
+
+  # Count total snapshots containing the file (before dedup)
+  local snapshot_dir
+  for snapshot_dir in "$SNAPSHOT_ROOT"/alpha.* "$SNAPSHOT_ROOT"/beta.* "$SNAPSHOT_ROOT"/gamma.*; do
+    [[ -d "$snapshot_dir" ]] || continue
+    if find "$snapshot_dir" -path "*/$rel_path" -type f 2>/dev/null | grep -q .; then
+      total_count=$((total_count + 1))
+    fi
+  done
+
+  if [[ ${#unique_versions[@]} -eq 0 ]]; then
+    echo -e "  ${DIM}No versions found in snapshots${NC}"
+    return
+  fi
+
+  printf "  ${DIM}%-10s %-20s %-10s %s${NC}\n" "VERSION" "MODIFIED" "SIZE" "SNAPSHOT"
+  local idx=0
+  for entry in "${unique_versions[@]}"; do
+    IFS='|' read -r _inode epoch size snap_name _snap_file <<< "$entry"
+    local date_str size_str
+    # Cross-platform epoch to human date
+    if date -d "@$epoch" '+%Y-%m-%d %H:%M' &>/dev/null; then
+      date_str=$(date -d "@$epoch" '+%Y-%m-%d %H:%M')
+    elif date -r "$epoch" '+%Y-%m-%d %H:%M' &>/dev/null; then
+      date_str=$(date -r "$epoch" '+%Y-%m-%d %H:%M')
+    else
+      date_str="unknown"
+    fi
+    size_str=$(fmt_bytes "$size")
+    printf "  %-10s %-20s %-10s %s\n" "v$idx" "$date_str" "$size_str" "$snap_name"
+    idx=$((idx + 1))
+  done
+
+  echo ""
+  info "  ${#unique_versions[@]} unique version(s) found ($total_count snapshots total, deduplicated by inode)"
+}
+
+# --- diff ---------------------------------------------------------------------
+
+cmd_diff() {
+  local target_file="${1:-}"
+  local version="${2:-0}"
+  [[ -z "$target_file" ]] && die "Usage: sysbak diff <file> [version]"
+
+  require_mounted
+
+  local rel_path
+  rel_path=$(resolve_rel_path "$target_file")
+
+  local snap_file
+  snap_file=$(get_version_path "$rel_path" "$version")
+  [[ -z "$snap_file" ]] && die "Version v$version not found for ~/$rel_path"
+
+  local abs_file
+  abs_file=$(realpath "$target_file" 2>/dev/null || readlink -f "$target_file")
+
+  if [[ ! -f "$abs_file" ]]; then
+    die "Current file not found: $abs_file"
+  fi
+
+  info "Comparing v$version (snapshot) → current"
+  echo ""
+
+  if has delta; then
+    delta "$snap_file" "$abs_file"
+  else
+    diff -u "$snap_file" "$abs_file" || true
+  fi
+}
+
+# --- restore ------------------------------------------------------------------
+
+cmd_restore() {
+  local target_file="${1:-}"
+  local version="${2:-0}"
+  [[ -z "$target_file" ]] && die "Usage: sysbak restore <file> [version]"
+
+  require_mounted
+
+  local rel_path
+  rel_path=$(resolve_rel_path "$target_file")
+
+  local snap_file
+  snap_file=$(get_version_path "$rel_path" "$version")
+  [[ -z "$snap_file" ]] && die "Version v$version not found for ~/$rel_path"
+
+  local abs_file
+  abs_file=$(realpath "$target_file" 2>/dev/null || readlink -f "$target_file")
+
+  info "Restoring: $abs_file"
+  info "From:      $snap_file (v$version)"
+
+  echo -ne "  Continue? [y/N] "
+  read -r answer
+  case "$answer" in
+    [yY]|[yY][eE][sS]) ;;
+    *) info "Aborted."; return ;;
+  esac
+
+  # Back up the current file before overwriting
+  if [[ -f "$abs_file" ]]; then
+    local backup
+    backup="${abs_file}.sysbak-$(date +%Y%m%d%H%M%S)"
+    cp "$abs_file" "$backup"
+    info "Backup:    $backup"
+  fi
+
+  # Atomic restore: copy to temp file then mv to avoid corruption on interrupt
+  local tmp_file="${abs_file}.sysbak-tmp"
+  if cp "$snap_file" "$tmp_file" && mv "$tmp_file" "$abs_file"; then
+    success "Restored $abs_file from v$version"
+  else
+    rm -f "$tmp_file"
+    die "Restore failed"
+  fi
+}
+
+# --- warn (scriptable staleness check) ----------------------------------------
+
+cmd_warn() {
+  # If not configured, exit silently (no spurious warnings)
+  [[ -z "$DEVICE" ]] && exit 0
+
+  # If not mounted, exit silently (disconnected drive is normal for USB)
+  is_mounted || exit 0
+
+  local age_h
+  age_h=$(get_backup_age_hours)
+
+  if [[ "$age_h" -ge "$STALE_CRIT_HOURS" ]]; then
+    echo -e "${RED}✗ Last backup ${age_h}h ago (>${STALE_CRIT_HOURS}h)${NC}"
+    exit 2
+  elif [[ "$age_h" -ge "$STALE_WARN_HOURS" ]]; then
+    echo -e "${YELLOW}⚠ Last backup ${age_h}h ago (>${STALE_WARN_HOURS}h)${NC}"
+    exit 1
+  fi
+  exit 0
+}
+
+# --- setup (one-time configuration) -------------------------------------------
+
+cmd_setup() {
+  header "sysbak Setup"
+
+  # Step 1: Install rsnapshot
+  info "Checking rsnapshot..."
+  if has rsnapshot; then
+    success "  rsnapshot already installed"
+  else
+    info "  Installing rsnapshot..."
+    if has apt-get; then
+      sudo apt-get update -qq && sudo apt-get install -y rsnapshot
+    elif has brew; then
+      brew install rsnapshot
+    else
+      die "Install rsnapshot manually: https://rsnapshot.org"
+    fi
+    success "  rsnapshot installed"
+  fi
+
+  # Step 2: Check rsync
+  has rsync || die "rsync is required but not installed"
+
+  # Step 3: Create config directory
+  mkdir -p "$CONFIG_DIR"
+
+  # Step 4: Interactive device configuration
+  echo ""
+  info "Available block devices:"
+  list_block_device
+  echo ""
+
+  local new_device new_mount new_label
+  echo -ne "  Device path [${DEVICE:-/dev/sda1}]: "
+  read -r new_device
+  new_device="${new_device:-${DEVICE:-/dev/sda1}}"
+
+  echo -ne "  Mount point [${MOUNT_POINT}]: "
+  read -r new_mount
+  new_mount="${new_mount:-$MOUNT_POINT}"
+
+  echo -ne "  Label [${BACKUP_LABEL}]: "
+  read -r new_label
+  new_label="${new_label:-$BACKUP_LABEL}"
+
+  # Validate inputs
+  [[ "$new_device" == /dev/* ]] || die "Device must start with /dev/ (got: $new_device)"
+  [[ "$new_mount" == /* ]]     || die "Mount point must be an absolute path (got: $new_mount)"
+  [[ "$new_label" =~ ^[a-zA-Z0-9_-]+$ ]] || die "Label must be alphanumeric (got: $new_label)"
+
+  # Write config
+  cat > "$CONFIG_FILE" <<EOF
+# sysbak configuration
+device=$new_device
+mount_point=$new_mount
+label=$new_label
+
+# Backup directories
+backup_dirs=(
+    ~/Projects
+    ~/.local/share/chezmoi
+)
+
+# Staleness thresholds (hours)
+stale_warn_hours=25
+stale_crit_hours=48
+EOF
+  success "  Config written to $CONFIG_FILE"
+
+  # Step 5: Create mount point
+  if [[ ! -d "$new_mount" ]]; then
+    sudo mkdir -p "$new_mount"
+    success "  Created mount point $new_mount"
+  fi
+
+  # Step 6: Write rsnapshot.conf
+  local rsnapshot_conf="/etc/rsnapshot.conf"
+  if [[ -f "$rsnapshot_conf" ]]; then
+    local conf_backup
+    conf_backup="${rsnapshot_conf}.bak.$(date +%Y%m%d%H%M%S)"
+    info "Backing up existing $rsnapshot_conf → $conf_backup"
+    sudo cp "$rsnapshot_conf" "$conf_backup"
+  fi
+  info "Writing $rsnapshot_conf..."
+  local exclude_args=""
+  for pat in "${EXCLUDE_PATTERNS[@]}"; do
+    exclude_args="${exclude_args}exclude\t${pat}\n"
+  done
+
+  sudo tee "$rsnapshot_conf" > /dev/null <<EOF
+config_version	1.2
+snapshot_root	${new_mount}/snapshots/
+cmd_cp	/bin/cp
+cmd_rm	/bin/rm
+cmd_rsync	$(command -v rsync)
+cmd_logger	$(command -v logger)
+retain	alpha	6
+retain	beta	7
+retain	gamma	4
+verbose	2
+loglevel	3
+logfile	/var/log/rsnapshot.log
+lockfile	/var/run/rsnapshot.pid
+$(printf '%b' "$exclude_args")
+EOF
+
+  # Add backup points
+  for dir in "${BACKUP_DIRS[@]}"; do
+    # Expand ~ in directory paths
+    local expanded_dir="${dir/#\~/$HOME}"
+    if [[ -d "$expanded_dir" ]]; then
+      echo -e "backup\t${expanded_dir}/\tlocalhost/" | sudo tee -a "$rsnapshot_conf" > /dev/null
+    fi
+  done
+
+  success "  rsnapshot.conf written"
+
+  # Step 7: Platform-specific scheduling
+  if [ "$IS_MACOS" = true ]; then
+    echo ""
+    warn "  macOS detected — skipping cron setup."
+    info "  Run backups manually with: sysbak run [alpha|beta|gamma]"
+    info "  Or create a launchd plist for scheduled backups."
+  else
+    # Linux: fstab + cron
+    header "Scheduling"
+
+    # fstab entry
+    if ! grep -q "$new_mount" /etc/fstab 2>/dev/null; then
+      info "  Adding fstab entry..."
+      echo "LABEL=${new_label}  ${new_mount}  auto  noauto,user,rw  0  0" | sudo tee -a /etc/fstab > /dev/null
+      success "  fstab entry added"
+    else
+      success "  fstab entry already present"
+    fi
+
+    # Cron jobs
+    local cron_file="/etc/cron.d/sysbak"
+    info "  Writing cron jobs to $cron_file..."
+    local mountpoint_bin rsnapshot_bin
+    mountpoint_bin=$(command -v mountpoint 2>/dev/null || echo "/usr/bin/mountpoint")
+    rsnapshot_bin=$(command -v rsnapshot 2>/dev/null || echo "/usr/bin/rsnapshot")
+    sudo tee "$cron_file" > /dev/null <<EOF
+# sysbak - rsnapshot backup schedule
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Alpha: every 4 hours (if drive mounted)
+0 */4 * * *  root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} alpha
+
+# Beta: daily at 03:30 (if drive mounted)
+30 3 * * *   root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} beta
+
+# Gamma: weekly Sunday 03:00 (if drive mounted)
+0 3 * * 0    root  ${mountpoint_bin} -q ${new_mount} && ${rsnapshot_bin} gamma
+EOF
+    success "  Cron jobs written"
+  fi
+
+  echo ""
+  success "Setup complete! Run 'sysbak doctor' to verify."
+}
+
+# --- doctor -------------------------------------------------------------------
+
+cmd_doctor() {
+  local quiet=false
+  [[ "${1:-}" = "--quiet" ]] && quiet=true
+
+  local issues=0
+
+  # Configuration
+  if [[ "$quiet" = false ]]; then
+    header "Configuration"
+  fi
+  if [[ -f "$CONFIG_FILE" ]]; then
+    [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "Config file:" "$CONFIG_FILE"
+  else
+    [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Config file:" "$CONFIG_FILE (missing)"
+    issues=$((issues + 1))
+  fi
+  if [[ -n "$DEVICE" ]]; then
+    [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "Device:" "$DEVICE"
+  else
+    [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Device:" "not configured"
+    issues=$((issues + 1))
+  fi
+  [[ "$quiet" = false ]] && printf "  %-20s %s\n" "  Mount point:" "$MOUNT_POINT"
+
+  # Device
+  if [[ -n "$DEVICE" ]]; then
+    if [[ "$quiet" = false ]]; then
+      header "Device"
+    fi
+    if [[ -b "$DEVICE" ]]; then
+      [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "Block device:" "$DEVICE exists"
+    else
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Block device:" "$DEVICE not found"
+      issues=$((issues + 1))
+    fi
+    if is_mounted; then
+      [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "Mounted:" "at $MOUNT_POINT"
+      # Show disk space
+      local usage_line
+      usage_line=$(df -k "$MOUNT_POINT" 2>/dev/null | tail -1)
+      if [[ -n "$usage_line" ]] && [[ "$quiet" = false ]]; then
+        local used_kb total_kb pct
+        used_kb=$(echo "$usage_line" | awk '{print $3}')
+        total_kb=$(echo "$usage_line" | awk '{print $2}')
+        if [[ "$total_kb" -gt 0 ]] 2>/dev/null; then
+          pct=$(( used_kb * 100 / total_kb ))
+          printf "  %-20s %s / %s (%d%%)\n" "  Space:" "$(fmt_kb "$used_kb")" "$(fmt_kb "$total_kb")" "$pct"
+        fi
+      fi
+    else
+      [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Mounted:" "not mounted"
+    fi
+  fi
+
+  # Dependencies
+  if [[ "$quiet" = false ]]; then
+    header "Dependencies"
+  fi
+  for dep in rsnapshot rsync; do
+    if has "$dep"; then
+      local ver
+      case "$dep" in
+        rsnapshot) ver=$(rsnapshot --version 2>&1 | head -1) ;;
+        rsync)     ver=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}') ;;
+      esac
+      [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "$dep:" "$ver"
+    else
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "$dep:" "not installed"
+      issues=$((issues + 1))
+    fi
+  done
+
+  # Schedule (Linux only)
+  if [[ "$IS_MACOS" = false ]] && [[ "$quiet" = false ]]; then
+    header "Schedule"
+    if grep -q "$MOUNT_POINT" /etc/fstab 2>/dev/null; then
+      printf "  ${GREEN}✓${NC} %-18s %s\n" "fstab:" "entry present"
+    else
+      printf "  ${YELLOW}⚠${NC} %-18s %s\n" "fstab:" "no entry for $MOUNT_POINT"
+    fi
+    if [[ -f /etc/cron.d/sysbak ]]; then
+      printf "  ${GREEN}✓${NC} %-18s %s\n" "cron:" "/etc/cron.d/sysbak exists"
+    else
+      printf "  ${YELLOW}⚠${NC} %-18s %s\n" "cron:" "/etc/cron.d/sysbak missing"
+    fi
+  fi
+
+  # Snapshots
+  if is_mounted && [[ -d "$SNAPSHOT_ROOT" ]] && [[ "$quiet" = false ]]; then
+    header "Snapshots"
+    for level in alpha beta gamma; do
+      local count
+      count=$(count_snapshots "$level")
+      if [[ "$count" -gt 0 ]]; then
+        printf "  %-10s %s (latest: %s)\n" "${level^}:" "$count" "$(get_latest_snapshot_age "$level")"
+      else
+        printf "  %-10s %s\n" "${level^}:" "${DIM}none${NC}"
+      fi
+    done
+  fi
+
+  if [[ "$quiet" = true ]]; then
+    return $issues
+  fi
+
+  echo ""
+  if [[ $issues -eq 0 ]]; then
+    success "All checks passed"
+  else
+    warn "$issues issue(s) found"
+  fi
+  return $issues
+}
+
+# --- git-bundle ---------------------------------------------------------------
+
+cmd_git_bundle() {
+  require_mounted
+
+  mkdir -p "$GIT_BUNDLE_ROOT"
+  info "Bundling git repositories from $HOME/Projects/ ..."
+  local count=0 failed=0
+
+  while IFS= read -r git_dir; do
+    local repo_dir
+    repo_dir="$(dirname "$git_dir")"
+    local name
+    name="$(basename "$repo_dir")"
+    local bundle_path="${GIT_BUNDLE_ROOT}/${name}.bundle"
+
+    if git -C "$repo_dir" bundle create "$bundle_path" --all 2>/dev/null; then
+      printf "  ${GREEN}✓${NC} %s\n" "$name"
+      count=$((count + 1))
+    else
+      printf "  ${RED}✗${NC} %s (skipped — possibly empty repo)\n" "$name"
+      failed=$((failed + 1))
+    fi
+  done < <(find "$HOME/Projects" -maxdepth 4 -name ".git" -type d 2>/dev/null | sort)
+
+  echo ""
+  info "Bundled $count repo(s) to $GIT_BUNDLE_ROOT"
+  [[ $failed -gt 0 ]] && warn "$failed repo(s) skipped"
+}
+
+# --- config -------------------------------------------------------------------
+
+cmd_config() {
+  if [[ "${1:-}" = "--edit" ]]; then
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+      mkdir -p "$CONFIG_DIR"
+      cat > "$CONFIG_FILE" <<'EOF'
+# sysbak configuration — override per machine
+# device=/dev/sda1
+# mount_point=/mnt/backup
+# label=BACKUP
+#
+# backup_dirs=(
+#     ~/Projects
+#     ~/.local/share/chezmoi
+# )
+#
+# Staleness thresholds (hours)
+# stale_warn_hours=25
+# stale_crit_hours=48
+EOF
+    fi
+    "${EDITOR:-vi}" "$CONFIG_FILE"
+  else
+    if [[ -f "$CONFIG_FILE" ]]; then
+      cat "$CONFIG_FILE"
+    else
+      echo -e "${DIM}No config file found at $CONFIG_FILE${NC}"
+      echo -e "${DIM}Run 'sysbak setup' or 'sysbak config --edit' to create one${NC}"
+    fi
+  fi
+}
+
+# --- help / version -----------------------------------------------------------
+
+show_version() {
+  echo "sysbak $SYSBAK_VERSION"
+}
+
+show_help() {
+  cat <<'HELP'
+sysbak - Cross-platform USB rsnapshot backup manager
+
+Usage: sysbak [command]
+
+Commands:
+  status              Backup dashboard (default)
+  run [level]         Trigger rsnapshot (alpha/beta/gamma)
+  list <file>         Show unique file versions across snapshots
+  diff <file> [ver]   Diff current file vs snapshot version
+  restore <file> [v]  Restore file from snapshot version
+  warn                Staleness check (exit 0=ok, 1=warn, 2=crit)
+  setup               One-time setup: install rsnapshot, configure cron
+  doctor              Diagnose configuration and dependencies
+  git-bundle          Bundle all git repos to USB drive
+  config [--edit]     Show config or open in $EDITOR
+  version             Show sysbak version
+  help                Show this help
+
+Global flags:
+  --dry-run           Dry run mode (for 'run' command)
+
+File history (the key feature):
+  sysbak list src/main.py         Show unique versions
+  sysbak diff src/main.py 0       Diff current vs latest snapshot
+  sysbak diff src/main.py 2       Diff current vs v2
+  sysbak restore src/main.py 1    Restore from v1
+
+Config: ~/.config/sysbak/config
+Docs:   https://github.com/thompsonson/dotfiles/blob/main/docs/sysbak.md
+HELP
+}
+
+# === Main =====================================================================
+
+main() {
+  # Parse global flags
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY_RUN=true; shift ;;
+      *) break ;;
+    esac
+  done
+
+  case "${1:-}" in
+    ""|status)         cmd_status ;;
+    run)               shift; cmd_run "$@" ;;
+    list)              shift; cmd_list "$@" ;;
+    diff)              shift; cmd_diff "$@" ;;
+    restore)           shift; cmd_restore "$@" ;;
+    warn)              cmd_warn ;;
+    setup)             cmd_setup ;;
+    doctor)            shift; cmd_doctor "$@" ;;
+    git-bundle)        cmd_git_bundle ;;
+    config)            shift; cmd_config "$@" ;;
+    version|--version|-v) show_version ;;
+    help|--help|-h)    show_help ;;
+    *)                 die "Unknown command: $1 (try 'sysbak help')" ;;
+  esac
+}
+
+main "$@"

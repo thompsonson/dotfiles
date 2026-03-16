@@ -1,0 +1,15 @@
+# sysbak configuration — override per machine
+#
+# Uncomment and set for your system:
+# device=/dev/sda1
+# mount_point=/mnt/backup
+# label=BACKUP
+#
+# backup_dirs=(
+#     ~/Projects
+#     ~/.local/share/chezmoi
+# )
+#
+# Staleness thresholds (hours)
+# stale_warn_hours=25
+# stale_crit_hours=48
