@@ -1,0 +1,41 @@
+{
+  "verbose": false,
+  "scope-containment": {
+    "allowed_roots": ["~/.local/share/chezmoi", "~/.config", "~/.local"],
+    "exceptions": ["~/.zshrc", "~/.tmux.conf", "~/.p10k.zsh", "~/.gitconfig"]
+  },
+  "command-policy": {
+    "rules": [
+      {
+        "pattern": "cp.*dot_",
+        "replacement": "chezmoi add <file>",
+        "reason": "Use chezmoi to track new files"
+      },
+      {
+        "pattern": "ln -s.*dot_",
+        "replacement": "chezmoi add --template <file>",
+        "reason": "Chezmoi manages symlinks"
+      }
+    ]
+  },
+  "protected-paths": {
+    "rules": [
+      {
+        "glob": "~/.zshrc",
+        "source": "dot_zshrc in chezmoi source",
+        "reason": "Managed by chezmoi — edit the source"
+      },
+      {
+        "glob": "~/.config/Code/User/settings.json",
+        "source": "dot_config/Code/User/settings.json.tmpl",
+        "reason": "Templated by chezmoi"
+      }
+    ]
+  },
+  "git-safety": {
+    "force_push": "block",
+    "main_branch_commit": "warn"
+  },
+  "secrets": true,
+  "destructive-op": true
+}

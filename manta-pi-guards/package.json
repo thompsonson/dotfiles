@@ -1,0 +1,43 @@
+{
+  "name": "@manta/pi-guards",
+  "version": "0.1.0",
+  "description": "Generic guard library for Pi extensions — deterministic tool-call interception",
+  "type": "module",
+  "main": "dist/lib/evaluator.js",
+  "types": "dist/lib/evaluator.d.ts",
+  "bin": {
+    "pi-audit": "dist/bin/pi-audit.js"
+  },
+  "exports": {
+    ".": "./dist/lib/evaluator.js",
+    "./matchers/*": "./dist/lib/matchers/*.js",
+    "./instrumentation": "./dist/lib/instrumentation.js",
+    "./shell-ast": "./dist/lib/shell-ast.js",
+    "./types": "./dist/lib/types.js",
+    "./handler": "./dist/extensions/guard-handler.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc --noEmit",
+    "pi-audit": "node dist/bin/pi-audit.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "minimatch": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist/"
+  ],
+  "license": "MIT"
+}

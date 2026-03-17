@@ -269,6 +269,14 @@ if command -v fnm >/dev/null 2>&1; then
   
   echo "Node.js version: $(node --version)"
   echo "npm version: $(npm --version)"
+
+  # Install Pi agent framework (for pi-guards)
+  if ! command -v pi >/dev/null 2>&1; then
+    echo 'Installing Pi agent framework'
+    npm install -g @anthropic/pi 2>/dev/null || echo "Pi not yet available on npm — install manually when released"
+  else
+    echo 'Pi already installed'
+  fi
 else
   echo 'fnm not found - Node.js installation skipped'
 fi

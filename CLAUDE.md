@@ -86,6 +86,10 @@ The zsh configuration uses these variables:
 - `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
+### Pi Agent Guards
+- `dot_pi/settings.json`: Pi package configuration (references @manta/pi-guards)
+- `dot_pi/guard-config.json`: Dotfiles-specific guard rules (scope-containment, command-policy, protected-paths, git-safety, secrets, destructive-op)
+
 ### Editor Configuration
 - `dot_claude/settings.json`: Claude Code configuration
 - `dot_config/Code/User/settings.json.tmpl`: VS Code settings with cross-platform templates
@@ -106,6 +110,7 @@ The `dev` command provides persistent tmux sessions for multi-device development
 dev                     # Interactive picker (fzf or numbered fallback)
 dev <project>           # Create or attach to session for <project>
 dev claude <project>    # Force claude+shell layout (vertical split)
+dev pi <project>        # Force pi+shell layout (vertical split)
 dev detach              # Detach from current tmux session
 dev kill <name>         # Kill a session
 dev kill-all            # Kill all sessions (with confirmation)
@@ -126,6 +131,7 @@ Format: `project=layout[:path][@host]` — `:path` for custom directories, `@hos
 ### Layouts
 - **default**: Single shell pane in the project directory
 - **claude**: Vertical split with `claude` (left) and shell (right)
+- **pi**: Vertical split with `pi` agent (left) and shell (right)
 
 ### Project Discovery
 Projects are auto-discovered from `~/Projects/` (up to 3 levels deep). Any directory containing `.git` is treated as a project.
