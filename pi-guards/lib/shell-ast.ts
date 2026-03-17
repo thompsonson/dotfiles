@@ -36,6 +36,9 @@ export async function extractCommands(
 ): Promise<ParsedCommand[]> {
   if (!input || !input.trim()) return [];
 
+  // Null bytes can't appear in valid shell commands and may indicate injection
+  if (input.includes("\0")) return [];
+
   try {
     const segments = splitCommands(input);
     return segments
@@ -118,6 +121,10 @@ function splitCommands(input: string): string[] {
 
     current += ch;
   }
+
+  // Reject malformed input that could hide commands
+  if (escaped) throw new Error("trailing backslash");
+  if (inSingle || inDouble) throw new Error("unclosed quote");
 
   if (current.trim()) {
     segments.push(current);
