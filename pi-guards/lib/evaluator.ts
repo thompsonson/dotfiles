@@ -75,7 +75,7 @@ export async function evaluateGuards(
           `  - better-sqlite3 native module mismatch — run 'npm rebuild better-sqlite3'\n` +
           `  - sh-syntax WASM failed to load — check Node.js version (requires ≥18)\n` +
           `  - Permission denied on path resolution — check filesystem permissions\n` +
-          `Report this if it persists: https://github.com/mantatech/pi-guards/issues`,
+          `Report this if it persists: https://github.com/thompsonson/pi-guards/issues`,
       };
 
       // Log the failure itself so it appears in audit trail

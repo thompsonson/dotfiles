@@ -87,7 +87,7 @@ The zsh configuration uses these variables:
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
 ### Pi Agent Guards
-- `dot_pi/settings.json`: Pi package configuration (references @manta/pi-guards)
+- `dot_pi/settings.json`: Pi package configuration (references @thompsonson/pi-guards)
 - `dot_pi/guard-config.json`: Dotfiles-specific guard rules (scope-containment, command-policy, protected-paths, git-safety, secrets, destructive-op)
 
 ### Editor Configuration

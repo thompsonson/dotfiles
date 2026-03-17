@@ -1,5 +1,5 @@
 {
-  "name": "@manta/pi-guards",
+  "name": "@thompsonson/pi-guards",
   "version": "0.1.0",
   "description": "Generic guard library for Pi extensions — deterministic tool-call interception",
   "type": "module",
