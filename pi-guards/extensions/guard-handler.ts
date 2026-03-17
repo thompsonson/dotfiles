@@ -45,7 +45,9 @@ interface PiExtension {
 }
 
 function loadGuardConfig(repoRoot?: string): GuardConfig | null {
+  const envConfig = process.env.PI_GUARD_CONFIG;
   const searchPaths = [
+    envConfig ?? null,
     repoRoot ? join(repoRoot, ".pi", "guard-config.json") : null,
     join(process.cwd(), ".pi", "guard-config.json"),
   ].filter(Boolean) as string[];
@@ -75,13 +77,15 @@ function extractContent(input: Record<string, unknown>): string | undefined {
   return (input.content ?? input.new_string) as string | undefined;
 }
 
-// Track attempt numbers per session+tool combination
-const attemptCounters = new Map<string, number>();
+// Track attempt numbers per session, isolated so session_end cleanup is O(1)
+const attemptCounters = new Map<string, Map<string, number>>();
 
 function getAttemptNumber(sessionId: string, toolCall: string, key: string): number {
-  const mapKey = `${sessionId}:${toolCall}:${key}`;
-  const current = (attemptCounters.get(mapKey) ?? 0) + 1;
-  attemptCounters.set(mapKey, current);
+  if (!attemptCounters.has(sessionId)) attemptCounters.set(sessionId, new Map());
+  const session = attemptCounters.get(sessionId)!;
+  const mapKey = `${toolCall}:${key}`;
+  const current = (session.get(mapKey) ?? 0) + 1;
+  session.set(mapKey, current);
   return current;
 }
 
@@ -100,7 +104,7 @@ export function registerGuardHandler(pi: PiExtension): void {
 
   pi.on("session_end", (ctx: ExtensionContext) => {
     endSession(ctx.sessionId);
-    attemptCounters.clear();
+    attemptCounters.delete(ctx.sessionId);
   });
 
   pi.on(
