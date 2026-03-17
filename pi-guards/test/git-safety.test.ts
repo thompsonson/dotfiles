@@ -68,4 +68,33 @@ describe("git-safety guard", () => {
     const result = matchGitSafety(bashCtx("npm install"), config);
     expect(result.verdict).toBe("pass");
   });
+
+  it("documents known false positive: commit message mentioning 'main'", () => {
+    // This is a known heuristic limitation — the guard triggers on
+    // "main" in the commit message, not on the actual branch name
+    const result = matchGitSafety(
+      bashCtx('git commit -m "fix main function"'),
+      config
+    );
+    expect(result.verdict).toBe("warn");
+    expect(result.rule_matched).toBe("main-branch-commit");
+  });
+
+  it("verifies force-push feedback text", () => {
+    const result = matchGitSafety(
+      bashCtx("git push --force origin main"),
+      config
+    );
+    expect(result.feedback_given).toContain("force push");
+    expect(result.feedback_given).toContain("overwrite");
+  });
+
+  it("verifies rebase feedback text", () => {
+    const result = matchGitSafety(
+      bashCtx("git rebase origin/main"),
+      config
+    );
+    expect(result.feedback_given).toContain("rebasing");
+    expect(result.feedback_given).toContain("collaborators");
+  });
 });

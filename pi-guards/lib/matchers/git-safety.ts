@@ -43,8 +43,11 @@ export function matchGitSafety(
     config.main_branch_commit &&
     /\bgit\s+commit\b/.test(cmd)
   ) {
-    // This is a heuristic — checking if the command mentions main/master
-    // In practice, the guard-handler should check the current branch
+    // HEURISTIC LIMITATION: This only checks if the command text mentions
+    // "main" or "master" (e.g., in commit messages). It cannot detect whether
+    // the current git branch is actually main/master. A proper branch check
+    // would require running `git branch --show-current` in the guard-handler
+    // and passing it as context. Known false positive: `git commit -m "fix main function"`.
     if (/\b(main|master)\b/.test(cmd)) {
       return makeResult(
         config.main_branch_commit,

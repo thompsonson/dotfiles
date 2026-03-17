@@ -78,4 +78,45 @@ describe("protected-paths guard", () => {
     const result = matchProtectedPaths(ctx, config);
     expect(result.verdict).toBe("pass");
   });
+
+  it("blocks paths with tilde expansion", () => {
+    const homeConfig: ProtectedPathsConfig = {
+      rules: [
+        {
+          glob: process.env.HOME + "/.ssh/**",
+          source: "manual SSH config",
+        },
+      ],
+    };
+    const result = matchProtectedPaths(
+      writeCtx("~/.ssh/authorized_keys"),
+      homeConfig
+    );
+    expect(result.verdict).toBe("block");
+  });
+
+  it("blocks paths with double slashes", () => {
+    const result = matchProtectedPaths(
+      writeCtx("project//dist//bundle.js"),
+      config
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("**/dist/**");
+  });
+
+  it("normalizes tilde in path for matching", () => {
+    const homeConfig: ProtectedPathsConfig = {
+      rules: [
+        {
+          glob: process.env.HOME + "/protected/**",
+          source: "protected source",
+        },
+      ],
+    };
+    const result = matchProtectedPaths(
+      writeCtx("~/protected/file.txt"),
+      homeConfig
+    );
+    expect(result.verdict).toBe("block");
+  });
 });

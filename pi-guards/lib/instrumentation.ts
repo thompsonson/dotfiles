@@ -7,6 +7,7 @@ const DB_DIR = join(process.env.HOME ?? "~", ".pi");
 const DB_PATH = join(DB_DIR, "guard-audit.db");
 
 let db: Database.Database | null = null;
+let droppedEventCount = 0;
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS guard_events (
@@ -56,6 +57,11 @@ export function setDb(newDb: Database.Database): void {
 
 export function resetDb(): void {
   db = null;
+  droppedEventCount = 0;
+}
+
+export function getDroppedEventCount(): number {
+  return droppedEventCount;
 }
 
 export function emitGuardEvent(event: Partial<GuardEvent> & { guard_id: string; session_id: string; tool_call: string; verdict: "pass" | "block" | "warn" }): void {
@@ -82,8 +88,9 @@ export function emitGuardEvent(event: Partial<GuardEvent> & { guard_id: string; 
         path: event.path ?? null,
         content_hash: event.content_hash ?? null,
       });
-  } catch {
-    // Silent fail — instrumentation must never break the guard
+  } catch (err) {
+    droppedEventCount++;
+    if (process.env.DEBUG) console.error("[pi-guards] emitGuardEvent failed:", err);
   }
 }
 
@@ -102,8 +109,9 @@ export function incrementToolCalls(session_id: string): void {
         `UPDATE sessions SET total_tool_calls = total_tool_calls + 1 WHERE session_id = ?`
       )
       .run(session_id);
-  } catch {
-    /* silent — instrumentation must never break the guard */
+  } catch (err) {
+    droppedEventCount++;
+    if (process.env.DEBUG) console.error("[pi-guards] incrementToolCalls failed:", err);
   }
 }
 
@@ -118,8 +126,9 @@ export function startSession(
         `INSERT OR IGNORE INTO sessions (session_id, repo, model) VALUES (?, ?, ?)`
       )
       .run(session_id, repo ?? null, model ?? null);
-  } catch {
-    /* silent */
+  } catch (err) {
+    droppedEventCount++;
+    if (process.env.DEBUG) console.error("[pi-guards] startSession failed:", err);
   }
 }
 
@@ -130,7 +139,8 @@ export function endSession(session_id: string): void {
         `UPDATE sessions SET ended_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE session_id = ?`
       )
       .run(session_id);
-  } catch {
-    /* silent */
+  } catch (err) {
+    droppedEventCount++;
+    if (process.env.DEBUG) console.error("[pi-guards] endSession failed:", err);
   }
 }

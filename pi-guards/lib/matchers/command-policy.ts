@@ -9,7 +9,7 @@ export function matchBannedCommand(
   config: CommandPolicyConfig
 ): GuardResult {
   for (const rule of config.rules) {
-    const regex = new RegExp(escapeRegex(rule.pattern));
+    const regex = new RegExp("\\b" + escapeRegex(rule.pattern) + "\\b");
 
     if (regex.test(command)) {
       return {

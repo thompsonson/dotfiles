@@ -38,6 +38,27 @@ describe("matchBannedCommand", () => {
     const result = matchBannedCommand("npm install", config);
     expect(result.verdict).toBe("pass");
   });
+
+  it("does not match partial command names", () => {
+    // "my-docker-compose-helper" should not match "docker compose"
+    // because word boundaries prevent partial matches
+    const result = matchBannedCommand("my-docker-compose-helper up", config);
+    expect(result.verdict).toBe("pass");
+  });
+
+  it("verifies feedback text contains replacement", () => {
+    const result = matchBannedCommand("docker compose up -d", config);
+    expect(result.verdict).toBe("block");
+    expect(result.feedback_given).toContain("install_manta_platform.sh");
+    expect(result.feedback_given).toContain("instead");
+  });
+
+  it("does not match embedded patterns", () => {
+    // "docker builder prune" contains "docker build" as a substring
+    // but with word boundaries, "docker build" won't match "docker builder"
+    const result = matchBannedCommand("docker builder prune", config);
+    expect(result.verdict).toBe("pass");
+  });
 });
 
 describe("matchCommandPolicy", () => {

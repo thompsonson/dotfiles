@@ -7,6 +7,7 @@ import {
   incrementToolCalls,
   setDb,
   resetDb,
+  getDroppedEventCount,
 } from "../lib/instrumentation.js";
 
 describe("instrumentation", () => {
@@ -138,5 +139,22 @@ describe("instrumentation", () => {
       .prepare("SELECT * FROM guard_events WHERE session_id = ?")
       .all("sess-6");
     expect(rows).toHaveLength(2);
+  });
+
+  it("increments droppedEventCount on DB failure", () => {
+    // Close the DB to force errors
+    db.close();
+    const before = getDroppedEventCount();
+    emitGuardEvent({
+      session_id: "sess-fail",
+      guard_id: "test",
+      tool_call: "bash",
+      verdict: "pass",
+    });
+    expect(getDroppedEventCount()).toBe(before + 1);
+
+    // Re-open for cleanup
+    db = new Database(":memory:");
+    setDb(db);
   });
 });

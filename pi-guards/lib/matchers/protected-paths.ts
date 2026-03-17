@@ -11,13 +11,20 @@ export function matchProtectedPaths(
     return { verdict: "pass" };
   }
 
+  // Normalize path: expand ~ and collapse double slashes
+  let normalizedPath = ctx.path;
+  if (normalizedPath.startsWith("~/")) {
+    normalizedPath = (process.env.HOME ?? "") + normalizedPath.slice(1);
+  }
+  normalizedPath = normalizedPath.replace(/\/\/+/g, "/");
+
   for (const rule of config.rules) {
     // Expand ~ in glob for matching
     const glob = rule.glob.startsWith("~/")
       ? rule.glob.replace("~", process.env.HOME ?? "")
       : rule.glob;
 
-    if (minimatch(ctx.path, glob)) {
+    if (minimatch(normalizedPath, glob)) {
       const reason = rule.reason ? ` ${rule.reason}` : "";
       return {
         verdict: "block",

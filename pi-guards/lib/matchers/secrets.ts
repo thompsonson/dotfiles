@@ -30,8 +30,9 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; type: string }> = [
   },
 ];
 
-// For .env files: flag values over 40 chars that look like secrets
-const ENV_HIGH_ENTROPY = /^[A-Z_]+=.{40,}$/m;
+// For .env files: flag values over 32 chars that look like secrets
+// Accepts lowercase var names (e.g., api_key=...) not just UPPER_CASE
+const ENV_HIGH_ENTROPY = /^[A-Za-z_][A-Za-z0-9_]*=.{32,}$/m;
 
 // Bash commands that read sensitive file types
 const SENSITIVE_FILE_PATTERNS = [

@@ -121,6 +121,46 @@ describe("secrets guard", () => {
     expect(result.verdict).toBe("pass");
   });
 
+  it("blocks lowercase var names in .env files", () => {
+    const result = matchSecrets(
+      writeCtx(
+        "api_key=a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6",
+        ".env"
+      ),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("high-entropy-env-value");
+  });
+
+  it("blocks 32-char values in .env files", () => {
+    const result = matchSecrets(
+      writeCtx(
+        "TOKEN=abcdefghijklmnopqrstuvwxyz012345",
+        ".env"
+      ),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("high-entropy-env-value");
+  });
+
+  it("passes empty content in .env files", () => {
+    const result = matchSecrets(
+      writeCtx("", ".env"),
+      true
+    );
+    expect(result.verdict).toBe("pass");
+  });
+
+  it("passes short values in .env files", () => {
+    const result = matchSecrets(
+      writeCtx("DEBUG=true", ".env"),
+      true
+    );
+    expect(result.verdict).toBe("pass");
+  });
+
   it("never includes raw content in result (only hash)", () => {
     const secretContent = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAK...";
     const result = matchSecrets(writeCtx(secretContent), true);
