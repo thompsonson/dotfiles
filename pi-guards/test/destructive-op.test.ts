@@ -1,6 +1,29 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { matchDestructiveOp } from "../lib/matchers/destructive-op.js";
 import type { ToolCallContext } from "../lib/types.js";
+
+// Mock fs for deterministic cross-platform behavior
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn((p: string) => {
+      // /tmp and /var/tmp always exist in our test world
+      if (p === "/tmp" || p.startsWith("/tmp/")) return true;
+      if (p === "/var/tmp" || p.startsWith("/var/tmp/")) return true;
+      if (p === "/private/var/tmp" || p.startsWith("/private/var/tmp/")) return true;
+      if (p === "/" || p === "/home" || p === "/Users") return true;
+      return false;
+    }),
+    realpathSync: vi.fn((p: string) => {
+      // Simulate macOS /var/tmp → /private/var/tmp
+      if (p === "/var/tmp" || p.startsWith("/var/tmp")) {
+        return p.replace("/var/tmp", "/private/var/tmp");
+      }
+      return p;
+    }),
+  };
+});
 
 function ctx(command: string): ToolCallContext {
   return {
@@ -75,5 +98,63 @@ describe("destructive-op guard", () => {
     );
     // echo is the command, not rm
     expect(result.verdict).toBe("pass");
+  });
+
+  // --- Path normalization tests ---
+
+  it("blocks /bin/rm -rf (absolute path to rm)", async () => {
+    const result = await matchDestructiveOp(
+      ctx("/bin/rm -rf ~/projects"),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("rm-rf-unsafe-target");
+  });
+
+  it("blocks /usr/bin/rm -rf (absolute path to rm)", async () => {
+    const result = await matchDestructiveOp(
+      ctx("/usr/bin/rm -rf ~/projects"),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("rm-rf-unsafe-target");
+  });
+
+  // --- Indirect execution tests ---
+
+  it("blocks bash -c 'rm -rf ~/projects'", async () => {
+    const result = await matchDestructiveOp(
+      ctx('bash -c "rm -rf ~/projects"'),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("rm-rf-unsafe-target");
+  });
+
+  it("blocks sh -c 'rm -rf ~/projects'", async () => {
+    const result = await matchDestructiveOp(
+      ctx('sh -c "rm -rf ~/projects"'),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("rm-rf-unsafe-target");
+  });
+
+  it("warns on eval with dynamic command", async () => {
+    const result = await matchDestructiveOp(
+      ctx('eval "$DYNAMIC_CMD"'),
+      true
+    );
+    expect(result.verdict).toBe("warn");
+    expect(result.rule_matched).toBe("indirect-execution");
+  });
+
+  it("blocks rm -rf /tmp/../etc (path traversal resolves outside safe dirs)", async () => {
+    const result = await matchDestructiveOp(
+      ctx("rm -rf /tmp/../etc"),
+      true
+    );
+    expect(result.verdict).toBe("block");
+    expect(result.rule_matched).toBe("rm-rf-unsafe-target");
   });
 });
