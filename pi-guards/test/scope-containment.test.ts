@@ -1,9 +1,31 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   isWithinScope,
   matchScopeContainment,
 } from "../lib/matchers/scope-containment.js";
 import type { ToolCallContext, ScopeContainmentConfig } from "../lib/types.js";
+
+// Mock fs for deterministic cross-platform behavior
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return {
+    ...actual,
+    existsSync: vi.fn((p: string) => {
+      if (p === "/tmp" || p.startsWith("/tmp/")) return true;
+      if (p === "/var/tmp" || p.startsWith("/var/tmp/")) return true;
+      if (p === "/private/var/tmp" || p.startsWith("/private/var/tmp/")) return true;
+      if (p === "/" || p === "/home" || p === "/home/user" || p === "/home/user/project") return true;
+      if (p === "/etc" || p === "/etc/special" || p === "/etc/passwd" || p === "/etc/shadow") return true;
+      return false;
+    }),
+    realpathSync: vi.fn((p: string) => {
+      if (typeof p === "string" && (p === "/var/tmp" || p.startsWith("/var/tmp"))) {
+        return p.replace("/var/tmp", "/private/var/tmp");
+      }
+      return p;
+    }),
+  };
+});
 
 describe("isWithinScope", () => {
   it("allows paths within allowed roots", () => {
