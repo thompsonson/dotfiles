@@ -434,7 +434,7 @@ cmd_doctor() {
   done
 
   header "Modern CLI Replacements"
-  local tools_cli=(eza bat fd rg delta btop zoxide jq)
+  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar)
   for tool in "${tools_cli[@]}"; do
     check_tool "$tool"
   done
@@ -445,14 +445,35 @@ cmd_doctor() {
   check_path "$HOME/.config/dev/config" "dev config"
   check_path "$HOME/.config/sysbak/config" "sysbak config"
   check_path "$HOME/Projects" "Projects directory"
+
+  # Linux-specific daemon health
+  if [ "$IS_LINUX" = true ] && has pop-upgrade; then
+    header "Linux Daemon Health"
+    local pu_pid pu_cpu
+    pu_pid=$(pgrep -x pop-upgrade 2>/dev/null | head -1)
+    if [ -n "$pu_pid" ]; then
+      pu_cpu=$(ps -p "$pu_pid" -o %cpu= 2>/dev/null | tr -d ' ')
+      if awk "BEGIN {exit !($pu_cpu > 5)}"; then
+        echo -e "  ${YELLOW}⚠${NC}  pop-upgrade  ${YELLOW}${pu_cpu}% CPU (stuck? sudo systemctl restart pop-upgrade)${NC}"
+      else
+        echo -e "  ${GREEN}✓${NC}  pop-upgrade  ${GREEN}idle (${pu_cpu}% CPU)${NC}"
+      fi
+    else
+      echo -e "  ${DIM}-${NC}  pop-upgrade  ${DIM}not running${NC}"
+    fi
+  fi
 }
 
 check_tool() {
   local tool="$1"
   if has "$tool"; then
     local version
-    version=$(get_version "$tool")
-    printf "  ${GREEN}✓${NC} %-14s %s\n" "$tool" "$version"
+    version=$(get_version "$tool" 2>/dev/null) || true
+    if [ -n "$version" ]; then
+      printf "  ${GREEN}✓${NC} %-14s %s\n" "$tool" "$version"
+    else
+      printf "  ${YELLOW}⚠${NC} %-14s %s\n" "$tool" "installed (version unavailable)"
+    fi
   else
     printf "  ${RED}✗${NC} %-14s %s\n" "$tool" "not installed"
   fi
@@ -489,6 +510,8 @@ get_version() {
     apt-get)   apt-get --version 2>/dev/null | head -1 | awk '{print $2}' ;;
     sysbak)    sysbak version 2>/dev/null ;;
     rsnapshot) rsnapshot --version 2>&1 | head -1 ;;
+    sensors)   sensors -v 2>/dev/null | awk '{print $3}' ;;
+    sar)       sar -V 2>/dev/null | awk '{print $3}' ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
 }

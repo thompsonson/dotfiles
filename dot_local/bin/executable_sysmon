@@ -257,6 +257,22 @@ get_top_procs_cpu() {
   ps -eo pid,user,%cpu,%mem,comm 2>/dev/null | sort -k3 -rn | awk -v n="$count" 'NR<=n'
 }
 
+# Linux-only: returns integer °C from lm-sensors, or empty string if unavailable
+get_cpu_temp() {
+  [ "$IS_LINUX" = true ] || return
+  has sensors || return
+  # AMD k10temp uses Tctl, Intel coretemp uses "Package id 0"
+  sensors 2>/dev/null | awk '
+    /^Tctl:|^Package id 0:/ {
+      if (match($0, /\+[0-9]+/)) {
+        val = substr($0, RSTART+1, RLENGTH-1)+0
+        if (val > t) t = val
+      }
+    }
+    END { if (t > 0) print t }
+  '
+}
+
 # Top processes by memory: prints "pid user cpu% mem% rss command"
 get_top_procs_mem() {
   local count="${1:-5}"
@@ -352,6 +368,45 @@ add_warning() {
   fi
 }
 
+check_temps() {
+  [ "$IS_LINUX" = true ] || return
+  local cpu_temp
+  cpu_temp=$(get_cpu_temp)
+  [ -n "$cpu_temp" ] || return
+  if [ "$cpu_temp" -ge 90 ]; then
+    add_warning "critical" "CPU temperature at ${cpu_temp}°C (threshold 90°C)"
+  elif [ "$cpu_temp" -ge 75 ]; then
+    add_warning "warn" "CPU temperature at ${cpu_temp}°C (threshold 75°C)"
+  fi
+}
+
+check_cpu_hogs() {
+  [ "$IS_LINUX" = true ] || return
+  local clk_tck
+  clk_tck=$(getconf CLK_TCK 2>/dev/null || echo "100")
+
+  while read -r pid user cpu _mem comm; do
+    [ -n "$cpu" ] || continue
+    # Any process >50% CPU right now
+    if awk "BEGIN {exit !($cpu >= 50)}"; then
+      add_warning "warn" "Process '$comm' (PID $pid, $user) using ${cpu}% CPU"
+      continue
+    fi
+    # Root daemons >10% CPU with >1h accumulated time (runaway pattern)
+    if [ "$user" = "root" ] && awk "BEGIN {exit !($cpu >= 10)}"; then
+      if [ -f "/proc/$pid/stat" ]; then
+        local utime stime cpu_hours
+        utime=$(awk '{print $14}' "/proc/$pid/stat" 2>/dev/null || echo 0)
+        stime=$(awk '{print $15}' "/proc/$pid/stat" 2>/dev/null || echo 0)
+        cpu_hours=$(( (utime + stime) / clk_tck / 3600 ))
+        if [ "$cpu_hours" -ge 1 ]; then
+          add_warning "warn" "Root daemon '$comm' (PID $pid) using ${cpu}% CPU, ${cpu_hours}h accumulated (consider: sudo systemctl restart $comm)"
+        fi
+      fi
+    fi
+  done < <(get_top_procs_cpu 10)
+}
+
 check_warnings() {
   WARN_COUNT=0
   CRIT_COUNT=0
@@ -409,6 +464,9 @@ check_warnings() {
     add_warning "warn" "$zombie_count zombie process(es) detected"
   fi
 
+  check_temps
+  check_cpu_hogs
+
   # Backup staleness (if sysbak is available)
   if has sysbak; then
     local bak_output bak_exit=0
@@ -436,6 +494,14 @@ cmd_status() {
   local cores
   cores=$(get_cpu_count)
   printf "  %-10s %s  (%s cores)\n" "Load:" "$(get_load_avg)" "$cores"
+  local cpu_temp
+  cpu_temp=$(get_cpu_temp)
+  if [ -n "$cpu_temp" ]; then
+    local temp_color="${GREEN}"
+    [ "$cpu_temp" -ge 75 ] && temp_color="${YELLOW}"
+    [ "$cpu_temp" -ge 90 ] && temp_color="${RED}"
+    printf "  %-10s ${temp_color}%s°C${NC}\n" "CPU temp:" "$cpu_temp"
+  fi
 
   # Memory
   header "Memory"
@@ -762,6 +828,8 @@ HEALTH CHECKS (sysmon warn)
   Swap usage          warn >50%, critical >80%
   Load average        warn >cores, critical >cores×2
   Zombie processes    warn >0, critical >5
+  CPU temperature     warn >75°C, critical >90°C (Linux, requires lm-sensors)
+  CPU hogs            warn if any process >50% CPU, or root daemon >10% CPU for >1h
 
 EXAMPLES
   sysmon              # Quick health dashboard
