@@ -259,8 +259,8 @@ get_top_procs_cpu() {
 
 # Linux-only: returns integer °C from lm-sensors, or empty string if unavailable
 get_cpu_temp() {
-  [ "$IS_LINUX" = true ] || return
-  has sensors || return
+  [ "$IS_LINUX" = true ] || return 0
+  has sensors || return 0
   # AMD k10temp uses Tctl, Intel coretemp uses "Package id 0"
   sensors 2>/dev/null | awk '
     /^Tctl:|^Package id 0:/ {
@@ -369,10 +369,10 @@ add_warning() {
 }
 
 check_temps() {
-  [ "$IS_LINUX" = true ] || return
+  [ "$IS_LINUX" = true ] || return 0
   local cpu_temp
   cpu_temp=$(get_cpu_temp)
-  [ -n "$cpu_temp" ] || return
+  [ -n "$cpu_temp" ] || return 0
   if [ "$cpu_temp" -ge 90 ]; then
     add_warning "critical" "CPU temperature at ${cpu_temp}°C (threshold 90°C)"
   elif [ "$cpu_temp" -ge 75 ]; then
@@ -381,7 +381,7 @@ check_temps() {
 }
 
 check_cpu_hogs() {
-  [ "$IS_LINUX" = true ] || return
+  [ "$IS_LINUX" = true ] || return 0
   local clk_tck
   clk_tck=$(getconf CLK_TCK 2>/dev/null || echo "100")
 
