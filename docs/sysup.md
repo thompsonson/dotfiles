@@ -73,8 +73,8 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 | Group | Tools checked |
 |-------|--------------|
 | Package Managers | brew, apt-get, chezmoi, fnm, node, npm, uv, pipx |
-| Development Tools | git, zsh, tmux, fzf, docker, python3, poetry, just, gh, curl |
-| Modern CLI Replacements | eza, bat, fd, rg, delta, btop, zoxide, jq |
+| Development Tools | git, zsh, tmux, fzf, docker, python3, poetry, just, gh, curl, sysbak, rsnapshot |
+| Modern CLI Replacements | eza, bat, fd, rg, delta, btop, zoxide, jq, sensors, sar |
 
 ### Key paths
 
@@ -83,9 +83,14 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 | `~/.tmux/plugins/tpm` | Tmux Plugin Manager |
 | `~/.oh-my-zsh` | Oh My Zsh framework |
 | `~/.config/dev/config` | Dev session manager config |
+| `~/.config/sysbak/config` | Backup manager config |
 | `~/Projects` | Project discovery directory |
 
-Each tool and path is shown with a green check or red cross indicating presence.
+Each tool and path is shown with a green check (✓), yellow warning (⚠ installed but version unavailable), or red cross (✗ not installed).
+
+### Linux Daemon Health
+
+On Linux, if `pop-upgrade` is installed (Pop!_OS), `sysup doctor` adds a **Linux Daemon Health** section showing whether the daemon is running and its current CPU usage. A daemon using >5% CPU is flagged as potentially stuck.
 
 ## Typical Workflow
 

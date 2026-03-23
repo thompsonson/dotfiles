@@ -35,32 +35,50 @@ sysmon help             # Show built-in help
 
 The default `sysmon` / `sysmon status` command shows a single-screen overview:
 
-- **System** — hostname, platform, uptime, load average with core count
+- **System** — hostname, platform, uptime, load average with core count, CPU temperature (Linux only, requires `lm-sensors`)
 - **Memory** — RAM and swap usage with color-coded percentage bars
 - **Disk** — mount points with usage bars (WSL filters out `/mnt/*` Windows mounts)
 - **Top Processes** — top 5 processes by CPU usage
 - **Services** — Docker status, tmux session count, SSH listener status
+- **Backup** — backup staleness summary (if `sysbak` is installed)
 - **Warnings** — health alerts or "No warnings"
 
 Percentage bars are color-coded: green (<60%), yellow (60-85%), red (>85%).
+
+The CPU temperature line is colour-coded: green (<75°C), yellow (75-89°C), red (≥90°C). It is silently omitted if `sensors` is not installed.
 
 ## Health Checks (warn)
 
 `sysmon warn` is designed for scripting. It outputs only warnings and uses exit codes:
 
-| Check | Warning | Critical |
-|-------|---------|----------|
-| Disk usage | >85% | >95% |
-| RAM usage | >80% | >95% |
-| Swap usage | >50% | >80% |
-| Load average | > core count | > 2× core count |
-| Zombie processes | > 0 | > 5 |
+| Check | Warning | Critical | Platform |
+|-------|---------|----------|----------|
+| Disk usage | >85% | >95% | All |
+| RAM usage | >80% | >95% | All |
+| Swap usage | >50% | >80% | All |
+| Load average | > core count | > 2× core count | All |
+| Zombie processes | > 0 | > 5 | All |
+| CPU temperature | ≥75°C | ≥90°C | Linux (requires `lm-sensors`) |
+| CPU hog — any process | >50% CPU | — | Linux |
+| CPU hog — root daemon | >10% CPU for >1h accumulated | — | Linux |
+| Backup staleness | stale | critical | All (requires `sysbak`) |
 
 Exit codes: `0` = all healthy, `1` = warnings present, `2` = critical issues.
+
+Temperature and CPU hog checks are silently skipped if `sensors` is not installed or on non-Linux platforms.
 
 ### Welcome message integration
 
 When `sysmon` is installed, the shell welcome message automatically displays any health warnings on login. This surfaces disk-full or high-memory situations immediately on SSH connection.
+
+## Dependencies
+
+| Feature | Dependency | Install |
+|---------|-----------|---------|
+| CPU temperature | `lm-sensors` | `sudo apt install lm-sensors` (added to Linux packages) |
+| Historical metrics | `sysstat` (provides `sar`) | `sudo apt install sysstat` (added to Linux packages) |
+
+`lm-sensors` supports AMD (`k10temp` / `Tctl`) and Intel (`coretemp` / `Package id 0`) CPUs. All sensor features fail gracefully if the package is absent.
 
 ## Cross-Platform Support
 
@@ -74,6 +92,8 @@ When `sysmon` is installed, the shell welcome message automatically displays any
 | Processes | `ps -eo` (BSD) | `ps -eo` (GNU) |
 | Interfaces | `ifconfig` | `ip addr` |
 | Listening ports | `lsof -i -P -n` | `ss -tlnp` |
+| CPU temperature | — | `sensors` (lm-sensors) |
+| CPU hog detection | — | `/proc/[pid]/stat` |
 
 WSL-specific: the `disk` subcommand shows Windows mounts (`/mnt/c`, `/mnt/d`) in a separate section. The default `status` view filters them out.
 
