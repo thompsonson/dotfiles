@@ -1,0 +1,38 @@
+# LiteLLM Proxy Configuration
+# https://docs.litellm.ai/docs/proxy/configs
+#
+# API keys are read from environment variables via os.environ/.
+# Set them in ~/.config/litellm/env or export them in your shell.
+
+model_list:
+  # Anthropic
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # OpenAI
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Ollama (local)
+  - model_name: llama3
+    litellm_params:
+      model: ollama/llama3
+      api_base: http://localhost:11434
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false

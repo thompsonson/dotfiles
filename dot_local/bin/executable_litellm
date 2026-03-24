@@ -1,0 +1,543 @@
+#!/bin/bash
+# ============================================================================
+# litellm - LiteLLM proxy wrapper
+# ============================================================================
+# Manages a LiteLLM proxy server that provides a unified OpenAI-compatible
+# API endpoint for multiple LLM providers (Anthropic, OpenAI, Ollama, etc.).
+#
+# Usage: litellm [command]
+#   litellm              Show proxy status (same as litellm status)
+#   litellm start        Start the proxy server (foreground)
+#   litellm status       Show whether the proxy is running
+#   litellm stop         Stop the proxy server
+#   litellm restart      Restart the proxy server
+#   litellm config       Show configuration file
+#   litellm models       List configured models
+#   litellm setup        Install litellm and create default config
+#   litellm help         Show usage text
+
+set -euo pipefail
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+
+if [ -t 1 ]; then
+  BOLD='\033[1m'
+  DIM='\033[2m'
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[1;36m'
+  NC='\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+die()     { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info()    { echo -e "${CYAN}$*${NC}"; }
+warn()    { echo -e "${YELLOW}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+header()  { echo -e "\n${BOLD}${BLUE}── $* ──${NC}"; }
+
+has() { command -v "$1" &>/dev/null; }
+
+# --- Platform Detection -------------------------------------------------------
+
+IS_WSL=false
+IS_MACOS=false
+IS_LINUX=false
+
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
+  IS_WSL=true
+else
+  IS_LINUX=true
+fi
+
+# --- Configuration ------------------------------------------------------------
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/litellm"
+CONFIG_FILE="$CONFIG_DIR/config.yaml"
+ENV_FILE="$CONFIG_DIR/env"
+DEFAULT_PORT="${LITELLM_PORT:-4000}"
+DEFAULT_HOST="${LITELLM_HOST:-0.0.0.0}"
+LAUNCHD_LABEL="com.user.litellm-proxy"
+LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+
+# --- Port Detection -----------------------------------------------------------
+
+# Check if a process is listening on the configured port
+is_port_listening() {
+  if [ "$IS_MACOS" = true ]; then
+    lsof -i ":$DEFAULT_PORT" -P -n 2>/dev/null | grep -q LISTEN
+  else
+    ss -tln 2>/dev/null | grep -q ":${DEFAULT_PORT} "
+  fi
+}
+
+# Get PID of process on the configured port
+get_port_pid() {
+  if [ "$IS_MACOS" = true ]; then
+    lsof -i ":$DEFAULT_PORT" -P -n -t 2>/dev/null | head -1
+  else
+    ss -tlnp 2>/dev/null | awk -v port=":${DEFAULT_PORT} " '$4 ~ port {match($0,/pid=([0-9]+)/,m); print m[1]}' | head -1
+  fi
+}
+
+# === Subcommands ==============================================================
+
+# --- start --------------------------------------------------------------------
+
+cmd_start() {
+  local service_mode=false
+  for arg in "$@"; do
+    case "$arg" in
+      --service) service_mode=true ;;
+    esac
+  done
+
+  has litellm || die "litellm not found. Run 'litellm setup' to install."
+  [ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE\nRun 'litellm setup' to create default config."
+
+  if is_port_listening; then
+    local pid
+    pid=$(get_port_pid)
+    die "Port $DEFAULT_PORT already in use (PID ${pid:-unknown}). Run 'litellm stop' first."
+  fi
+
+  if [ "$service_mode" = false ]; then
+    info "Starting LiteLLM proxy on ${DEFAULT_HOST}:${DEFAULT_PORT}"
+    echo -e "${DIM}Config: $CONFIG_FILE${NC}"
+    echo -e "${DIM}Press Ctrl+C to stop${NC}"
+    echo ""
+  fi
+
+  exec litellm --config "$CONFIG_FILE" --port "$DEFAULT_PORT" --host "$DEFAULT_HOST"
+}
+
+# --- status -------------------------------------------------------------------
+
+cmd_status() {
+  header "LiteLLM Proxy"
+
+  # Binary
+  if has litellm; then
+    local version
+    version=$(litellm --version 2>/dev/null | head -1 || echo "unknown")
+    printf "  %-12s ${GREEN}installed${NC} (%s)\n" "Binary:" "$version"
+  else
+    printf "  %-12s ${RED}not installed${NC}\n" "Binary:"
+  fi
+
+  # Config
+  if [ -f "$CONFIG_FILE" ]; then
+    printf "  %-12s %s\n" "Config:" "$CONFIG_FILE"
+  else
+    printf "  %-12s ${DIM}not found${NC}\n" "Config:"
+  fi
+
+  # Port
+  printf "  %-12s %s\n" "Port:" "$DEFAULT_PORT"
+
+  # Process
+  if is_port_listening; then
+    local pid
+    pid=$(get_port_pid)
+    printf "  %-12s ${GREEN}listening${NC} (PID %s)\n" "Status:" "${pid:-?}"
+  else
+    printf "  %-12s ${DIM}stopped${NC}\n" "Status:"
+  fi
+
+  # Service manager
+  if [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+    if has systemctl; then
+      local svc_state
+      svc_state=$(systemctl --user is-active litellm-proxy 2>/dev/null || echo "inactive")
+      local svc_enabled
+      svc_enabled=$(systemctl --user is-enabled litellm-proxy 2>/dev/null || echo "disabled")
+      printf "  %-12s %s (%s)\n" "Service:" "$svc_state" "$svc_enabled"
+    fi
+  elif [ "$IS_MACOS" = true ]; then
+    if [ -f "$LAUNCHD_PLIST" ]; then
+      if launchctl list "$LAUNCHD_LABEL" &>/dev/null; then
+        printf "  %-12s ${GREEN}loaded${NC}\n" "LaunchAgent:"
+      else
+        printf "  %-12s ${DIM}unloaded${NC}\n" "LaunchAgent:"
+      fi
+    else
+      printf "  %-12s ${DIM}not installed${NC}\n" "LaunchAgent:"
+    fi
+  fi
+
+  # Models
+  if [ -f "$CONFIG_FILE" ]; then
+    local model_count
+    model_count=$(awk '/model_name:/' "$CONFIG_FILE" | wc -l | tr -d ' ')
+    printf "  %-12s %s configured\n" "Models:" "$model_count"
+  fi
+}
+
+# --- stop ---------------------------------------------------------------------
+
+cmd_stop() {
+  # Try service manager first
+  if [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+    if has systemctl; then
+      local svc_state
+      svc_state=$(systemctl --user is-active litellm-proxy 2>/dev/null || echo "inactive")
+      if [ "$svc_state" = "active" ]; then
+        info "Stopping via systemd..."
+        systemctl --user stop litellm-proxy
+        success "Stopped litellm-proxy service"
+        return 0
+      fi
+    fi
+  elif [ "$IS_MACOS" = true ]; then
+    if [ -f "$LAUNCHD_PLIST" ] && launchctl list "$LAUNCHD_LABEL" &>/dev/null; then
+      info "Stopping via launchd..."
+      launchctl unload "$LAUNCHD_PLIST"
+      success "Stopped litellm-proxy LaunchAgent"
+      return 0
+    fi
+  fi
+
+  # Fall back to kill by port
+  if is_port_listening; then
+    local pid
+    pid=$(get_port_pid)
+    if [ -n "$pid" ]; then
+      info "Stopping PID $pid on port $DEFAULT_PORT..."
+      kill "$pid"
+      success "Stopped litellm proxy (PID $pid)"
+    else
+      die "Cannot determine PID for port $DEFAULT_PORT"
+    fi
+  else
+    warn "LiteLLM proxy is not running on port $DEFAULT_PORT"
+  fi
+}
+
+# --- restart ------------------------------------------------------------------
+
+cmd_restart() {
+  # Try service manager first
+  if [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+    if has systemctl; then
+      local svc_state
+      svc_state=$(systemctl --user is-active litellm-proxy 2>/dev/null || echo "inactive")
+      if [ "$svc_state" = "active" ]; then
+        info "Restarting via systemd..."
+        systemctl --user restart litellm-proxy
+        success "Restarted litellm-proxy service"
+        return 0
+      fi
+    fi
+  elif [ "$IS_MACOS" = true ]; then
+    if [ -f "$LAUNCHD_PLIST" ] && launchctl list "$LAUNCHD_LABEL" &>/dev/null; then
+      info "Restarting via launchd..."
+      launchctl unload "$LAUNCHD_PLIST"
+      launchctl load "$LAUNCHD_PLIST"
+      success "Restarted litellm-proxy LaunchAgent"
+      return 0
+    fi
+  fi
+
+  # Manual restart
+  if is_port_listening; then
+    cmd_stop
+    sleep 1
+  fi
+  cmd_start "$@"
+}
+
+# --- config -------------------------------------------------------------------
+
+cmd_config() {
+  case "${1:-}" in
+    --edit)
+      [ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE\nRun 'litellm setup' to create default config."
+      "${EDITOR:-vi}" "$CONFIG_FILE"
+      ;;
+    --validate)
+      [ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE"
+      if python3 -c "import yaml; yaml.safe_load(open('$CONFIG_FILE'))" 2>/dev/null; then
+        success "Config is valid YAML"
+      else
+        die "Config is not valid YAML: $CONFIG_FILE"
+      fi
+      ;;
+    "")
+      if [ -f "$CONFIG_FILE" ]; then
+        echo -e "${DIM}# $CONFIG_FILE${NC}"
+        cat "$CONFIG_FILE"
+      else
+        die "Config not found: $CONFIG_FILE\nRun 'litellm setup' to create default config."
+      fi
+      ;;
+    *)
+      die "Unknown config option: $1 (try --edit or --validate)"
+      ;;
+  esac
+}
+
+# --- models -------------------------------------------------------------------
+
+cmd_models() {
+  [ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE"
+  header "Configured Models"
+  awk '/model_name:/ {print "  " $2}' "$CONFIG_FILE"
+}
+
+# --- setup --------------------------------------------------------------------
+
+cmd_setup() {
+  header "LiteLLM Setup"
+
+  # Install litellm
+  if has litellm; then
+    local version
+    version=$(litellm --version 2>/dev/null | head -1 || echo "unknown")
+    success "litellm already installed ($version)"
+  else
+    if has uv; then
+      info "Installing litellm via uv..."
+      uv tool install 'litellm[proxy]'
+      success "litellm installed"
+    elif has pip3; then
+      info "Installing litellm via pip3..."
+      pip3 install --user 'litellm[proxy]'
+      success "litellm installed"
+    else
+      die "Neither uv nor pip3 found. Install uv first: brew install uv"
+    fi
+  fi
+
+  # Create config directory
+  if [ ! -d "$CONFIG_DIR" ]; then
+    mkdir -p "$CONFIG_DIR"
+    success "Created $CONFIG_DIR"
+  fi
+
+  # Create default config if missing
+  if [ ! -f "$CONFIG_FILE" ]; then
+    cat > "$CONFIG_FILE" << 'YAML'
+# LiteLLM Proxy Configuration
+# https://docs.litellm.ai/docs/proxy/configs
+#
+# API keys are read from environment variables via os.environ/.
+# Set them in ~/.config/litellm/env or export them in your shell.
+
+model_list:
+  # Anthropic
+  - model_name: claude-sonnet
+    litellm_params:
+      model: anthropic/claude-sonnet-4-20250514
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: claude-haiku
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  # OpenAI
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+
+  - model_name: gpt-4o-mini
+    litellm_params:
+      model: openai/gpt-4o-mini
+      api_key: os.environ/OPENAI_API_KEY
+
+  # Ollama (local)
+  - model_name: llama3
+    litellm_params:
+      model: ollama/llama3
+      api_base: http://localhost:11434
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+YAML
+    success "Created default config: $CONFIG_FILE"
+  else
+    success "Config already exists: $CONFIG_FILE"
+  fi
+
+  # Create env file template if missing
+  if [ ! -f "$ENV_FILE" ]; then
+    cat > "$ENV_FILE" << 'ENV'
+# LiteLLM environment variables
+# Uncomment and set your API keys:
+# ANTHROPIC_API_KEY=sk-ant-...
+# OPENAI_API_KEY=sk-...
+ENV
+    chmod 600 "$ENV_FILE"
+    success "Created env template: $ENV_FILE"
+    warn "Edit $ENV_FILE to add your API keys"
+  else
+    success "Env file already exists: $ENV_FILE"
+  fi
+
+  # Enable service
+  if [ "$IS_LINUX" = true ] || [ "$IS_WSL" = true ]; then
+    if has systemctl; then
+      local svc_file="$HOME/.config/systemd/user/litellm-proxy.service"
+      if [ -f "$svc_file" ]; then
+        systemctl --user daemon-reload
+        systemctl --user enable litellm-proxy
+        success "Enabled systemd user service"
+        info "Start with: systemctl --user start litellm-proxy"
+      else
+        warn "Service file not found: $svc_file"
+        info "Run 'chezmoi apply' to deploy the service file"
+      fi
+    fi
+  elif [ "$IS_MACOS" = true ]; then
+    if [ ! -f "$LAUNCHD_PLIST" ]; then
+      mkdir -p "$(dirname "$LAUNCHD_PLIST")"
+      cat > "$LAUNCHD_PLIST" << PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>${LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>${HOME}/.local/bin/litellm</string>
+    <string>start</string>
+    <string>--service</string>
+  </array>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>${HOME}/.local/share/litellm/proxy.log</string>
+  <key>StandardErrorPath</key>
+  <string>${HOME}/.local/share/litellm/proxy.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>${HOME}/.local/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+</dict>
+</plist>
+PLIST
+      mkdir -p "$HOME/.local/share/litellm"
+      success "Created LaunchAgent: $LAUNCHD_PLIST"
+      info "Load with: launchctl load $LAUNCHD_PLIST"
+    else
+      success "LaunchAgent already exists"
+    fi
+  fi
+
+  echo ""
+  success "Setup complete!"
+  info "Next steps:"
+  echo "  1. Edit API keys: \$EDITOR $ENV_FILE"
+  echo "  2. Edit models:   litellm config --edit"
+  echo "  3. Start proxy:   litellm start"
+}
+
+# --- help ---------------------------------------------------------------------
+
+show_help() {
+  cat << 'EOF'
+litellm - LiteLLM proxy wrapper
+
+USAGE
+  litellm              Show proxy status (same as litellm status)
+  litellm start        Start the proxy server (foreground)
+  litellm status       Show whether the proxy is running
+  litellm stop         Stop the proxy server
+  litellm restart      Restart the proxy server
+  litellm config       Show configuration file
+  litellm models       List configured models
+  litellm setup        Install litellm and create default config
+  litellm version      Show litellm version
+  litellm help         Show this help
+
+OPTIONS
+  litellm start --service    Suppress interactive messaging (for systemd/launchd)
+  litellm config --edit      Open config in $EDITOR
+  litellm config --validate  Check config YAML syntax
+
+CONFIGURATION
+  Config:  ~/.config/litellm/config.yaml
+  Env:     ~/.config/litellm/env (API keys)
+  Port:    $LITELLM_PORT (default 4000)
+  Host:    $LITELLM_HOST (default 0.0.0.0)
+
+SERVICE MANAGEMENT
+  Linux:   systemctl --user {start,stop,enable,disable} litellm-proxy
+  macOS:   launchctl {load,unload} ~/Library/LaunchAgents/com.user.litellm-proxy.plist
+
+EXAMPLES
+  litellm setup              # First-time install and configure
+  litellm start              # Start proxy in foreground
+  litellm models             # See configured models
+  litellm config --edit      # Edit model configuration
+  curl localhost:4000/v1/models  # Test the API endpoint
+EOF
+}
+
+# --- version ------------------------------------------------------------------
+
+show_version() {
+  if has litellm; then
+    litellm --version 2>/dev/null | head -1
+  else
+    echo "litellm not installed"
+  fi
+}
+
+# === Main =====================================================================
+
+main() {
+  case "${1:-}" in
+    ""|status)
+      cmd_status
+      ;;
+    start)
+      shift
+      cmd_start "$@"
+      ;;
+    stop)
+      cmd_stop
+      ;;
+    restart)
+      shift
+      cmd_restart "$@"
+      ;;
+    config)
+      shift
+      cmd_config "$@"
+      ;;
+    models)
+      cmd_models
+      ;;
+    setup)
+      cmd_setup
+      ;;
+    version|--version|-v)
+      show_version
+      ;;
+    help|--help|-h)
+      show_help
+      ;;
+    *)
+      die "Unknown command: $1 (try 'litellm help')"
+      ;;
+  esac
+}
+
+main "$@"

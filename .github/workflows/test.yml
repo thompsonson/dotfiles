@@ -40,6 +40,9 @@ jobs:
       - name: Shellcheck - sysbak
         run: shellcheck -x -s bash dot_local/bin/executable_sysbak
 
+      - name: Shellcheck - litellm
+        run: shellcheck -x -s bash dot_local/bin/executable_litellm
+
       - name: Shellcheck - run_once scripts
         run: |
           for script in run_once_*.sh; do
@@ -64,6 +67,9 @@ jobs:
 
       - name: Syntax - sysbak
         run: bash -n dot_local/bin/executable_sysbak
+
+      - name: Syntax - litellm
+        run: bash -n dot_local/bin/executable_litellm
 
       # Template validation
       - name: Templates - validate all
@@ -102,6 +108,9 @@ jobs:
       - name: Shellcheck - sysbak
         run: shellcheck -x -s bash dot_local/bin/executable_sysbak
 
+      - name: Shellcheck - litellm
+        run: shellcheck -x -s bash dot_local/bin/executable_litellm
+
       # Syntax checks (zsh is pre-installed on macOS)
       - name: Syntax - zshrc
         run: zsh -n dot_zshrc
@@ -117,6 +126,9 @@ jobs:
 
       - name: Syntax - sysbak
         run: bash -n dot_local/bin/executable_sysbak
+
+      - name: Syntax - litellm
+        run: bash -n dot_local/bin/executable_litellm
 
       # Template validation
       - name: Templates - validate all

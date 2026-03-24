@@ -572,6 +572,24 @@ cmd_status() {
     printf "  %-10s ${DIM}not listening${NC}\n" "SSH:"
   fi
 
+  if has litellm; then
+    local litellm_listening=false
+    if [ "$IS_MACOS" = true ]; then
+      if lsof -i :4000 -P -n 2>/dev/null | grep -q LISTEN; then
+        litellm_listening=true
+      fi
+    else
+      if ss -tln 2>/dev/null | grep -q ':4000 '; then
+        litellm_listening=true
+      fi
+    fi
+    if [ "$litellm_listening" = true ]; then
+      printf "  %-10s ${GREEN}listening${NC} (port 4000)\n" "LiteLLM:"
+    else
+      printf "  %-10s ${DIM}stopped${NC}\n" "LiteLLM:"
+    fi
+  fi
+
   # Backup
   if has sysbak; then
     header "Backup"
