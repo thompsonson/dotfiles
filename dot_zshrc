@@ -156,6 +156,7 @@ if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
   echo "  \033[36msysup doctor\033[0m      tool health check"
   echo "  \033[36msysmon\033[0m [status]   system health"
   echo "  \033[36msysbak\033[0m [status]   backup manager"
+  echo "  \033[36mlitellm\033[0m [start]    LLM proxy (port 4000)"
 
   if command -v tmux >/dev/null 2>&1; then
     _sessions=$(tmux list-sessions 2>/dev/null)
@@ -245,6 +246,17 @@ _sysbak_completion() {
   esac
 }
 compdef _sysbak_completion sysbak 2>/dev/null
+
+# litellm command completion
+_litellm_completion() {
+  local -a subcmds
+  subcmds=(start status stop restart config models setup version help)
+  _arguments '1:command:->cmd'
+  case $state in
+    cmd) _describe 'command' subcmds ;;
+  esac
+}
+compdef _litellm_completion litellm 2>/dev/null
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
