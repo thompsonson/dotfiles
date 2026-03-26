@@ -157,6 +157,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/litellm.md`](docs/litellm.md) — LiteLLM proxy wrapper reference
+- [`docs/litellm-supply-chain-incident.md`](docs/litellm-supply-chain-incident.md) — LiteLLM supply chain attack incident response (pop-mini)
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
