@@ -3,8 +3,8 @@
 **Date:** 2026-03-24
 **Affected machine:** pop-mini
 **Symptom:** Machine crash while running LiteLLM proxy
-**Initial hypothesis:** Compromised litellm PyPI packages (versions 1.82.7 and 1.82.8)
-**Actual root cause:** OOM from starting litellm on a memory-saturated system (see [triage report](litellm-crash-triage-2026-03-25.md))
+**Suspected cause:** Compromised litellm PyPI packages (versions 1.82.7 and 1.82.8)
+**Triage outcome:** OOM confirmed as proximate cause; supply chain attack not confirmed but cannot be excluded (see [triage report](litellm-crash-triage-2026-03-25.md))
 
 ## What happened
 
@@ -40,7 +40,7 @@ Collected data is encrypted with a hardcoded 4096-bit RSA public key (AES-256-CB
 ### Stage 4 — Fork bomb (bug in malware)
 Version 1.82.8 added a `litellm_init.pth` file that triggers on every Python interpreter startup. The child process re-triggers the `.pth`, creating an exponential fork bomb.
 
-> **Note:** Post-crash triage on 2026-03-26 found **no evidence** that the supply chain attack affected pop-mini. The crash was caused by OOM from starting litellm on an already memory-saturated system. No malicious artifacts (`.pth` file, backdoor, exfiltration traces) were found, and litellm was not installed via `uv tool`. See the full [triage report](litellm-crash-triage-2026-03-25.md).
+> **Note (2026-03-26 triage):** Post-crash triage found no persistent artifacts from the supply chain attack on pop-mini. OOM was the proximate cause. However, the PID controller rejections and rapid swap spike are signals consistent with a fork bomb, the `uv run` cache was not inspected for a cached compromised version, and stages 1–2 of the malware leave no persistent traces by design. The supply chain attack **cannot be excluded**. Credential rotation should be treated as required. See the full [triage report](litellm-crash-triage-2026-03-25.md).
 
 ## pop-mini triage checklist
 

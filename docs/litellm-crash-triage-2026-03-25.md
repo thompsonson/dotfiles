@@ -4,12 +4,12 @@
 **Date of triage:** 2026-03-26
 **Machine:** pop-mini (System76, Pop!_OS 22.04, 29.1G RAM, 16 cores)
 **Uptime at crash:** 11d 13h
+**Verdict:** OOM was the proximate cause; supply chain attack **not confirmed but cannot be excluded**
 
 ## Summary
 
-Running `litellm` on pop-mini caused a cascading OOM that hard-crashed the machine.
-Post-crash triage found **no evidence of the supply chain attack** (litellm 1.82.7/1.82.8).
-The crash was caused by starting a heavy Python process on an already memory-saturated system.
+Running `litellm` on pop-mini caused a cascading failure that hard-crashed the machine.
+Post-crash triage found **no persistent artifacts** from the supply chain attack (litellm 1.82.7/1.82.8), but several signals remain ambiguous and the triage has inherent blind spots. Credential rotation should be treated as necessary regardless of root cause attribution.
 
 ## Crash timeline (from journalctl and sysmon output)
 
@@ -53,7 +53,7 @@ The crash was caused by starting a heavy Python process on an already memory-sat
 
 ## Triage checks (2026-03-26)
 
-All supply chain attack indicators checked **negative**:
+All persistent supply chain attack indicators checked **negative**:
 
 | Check | Command | Result |
 |-------|---------|--------|
@@ -64,45 +64,55 @@ All supply chain attack indicators checked **negative**:
 | Malicious domain references | `grep -r "models.litellm.cloud" ~/.local ~/.config /tmp` | **None** |
 | Suspicious containers | `docker ps -a \| grep "node-setup"` | **None** |
 | SSH authorized_keys | `cat ~/.ssh/authorized_keys` | **3 keys, all recognized** (2x ed25519 thompsonson@gmail.com, 1x rsa localhost) |
+| **uv run cache** | **NOT CHECKED** | See [gaps](#triage-gaps) below |
 
-## Root cause determination
+## Analysis
 
-**The crash was a plain OOM, not a supply chain attack.**
+### What supports the OOM theory
 
-LiteLLM is not even installed on pop-mini — the `litellm` command in the dotfiles wrapper script would have failed at the `has litellm` check. The most likely scenario is that `litellm` was invoked via `uv run` or a similar one-shot mechanism that downloaded and ran it without persistent installation.
+The system was genuinely overloaded: 75% RAM, 3 Claude sessions, Docker, LeStash, 11 days uptime. Starting a heavy Python process (litellm + FastAPI + provider SDKs) on a system with ~7GB free RAM could plausibly tip it into swap thrashing, especially with LUKS encryption overhead and swappiness at 180.
 
-### Why it crashed
+### What doesn't fit a simple OOM
 
-1. System already at 75% RAM with 3 Claude Code sessions (~300MB+ each), Docker, and LeStash
-2. Starting a Python process that loads litellm + all proxy dependencies consumed several GB
-3. With only ~7GB free RAM, the system began aggressive swapping
-4. Encrypted disk I/O (LUKS/kcryptd) made swap thrashing extremely slow
-5. High swappiness (180) meant the kernel kept swapping instead of killing processes
-6. Total memory demand exceeded RAM + swap → fork failures → system lockup → hard crash
+1. **The PID controller rejections are suspicious.** `cgroup: fork rejected by pids controller` means the cgroup hit its **process count limit**, not its memory limit. A normal OOM triggers the OOM killer (which selects and kills processes). PID exhaustion is a different failure mode — and it's exactly what a fork bomb produces. The triage found no OOM killer messages but didn't adequately explain why the PID controller fired instead. This is the more interesting signal.
 
-### Why it was NOT the supply chain attack
+2. **7.4GB swap jump in 10 seconds is extreme for one process.** Even a heavy Python process loading litellm + all dependencies might consume 1–2GB. A 7.4GB spike in a 10-second window is more consistent with **many processes spawning simultaneously**. The initial draft claimed "gradual swap climb over minutes" but the actual data shows a massive spike in one 10-second window followed by cascading failure — that pattern is not inconsistent with a fork bomb.
 
-- No malicious artifacts found (no `.pth`, no backdoor, no systemd service)
-- No references to `models.litellm.cloud`
-- LiteLLM is not installed via `uv tool` — the compromised package scenario requires an installed version
-- The memory exhaustion pattern (gradual swap climb over minutes) is inconsistent with a fork bomb (which would exhaust PIDs in seconds)
-- SSH authorized_keys contains only recognized keys
+3. **How was litellm actually invoked?** LiteLLM is not installed via `uv tool`, and the wrapper script would fail at the `has litellm` check. It was most likely invoked via `uv run` or similar one-shot mechanism. But `uv run` caches downloaded packages in a **different location** than `uv tool`. If litellm was first `uv run`'d on March 24 (during the 3-hour attack window), a cached compromised version could have been reused on March 25.
 
-## Recommendations
+### Triage gaps
 
-These are tracked in [issue #24](https://github.com/thompsonson/dotfiles/issues/24):
+- **`uv run` cache not checked.** The triage searched `~/.cache/uv` and `~/.local/lib` for `litellm_init.pth` but did not inspect the `uv run` cache for a cached compromised litellm package version. This is the most significant blind spot.
+- **Post-reboot evidence is inherently incomplete.** The malware's credential harvest (stage 1) and exfiltration (stage 2) are designed to complete quickly and leave minimal persistent traces. A hard crash destroys volatile evidence (process memory, open network connections, /proc state). The absence of stage 3 persistence files only means stage 3 didn't complete — it does not mean stages 1–2 didn't execute.
+- **No network logs.** We have no packet captures or firewall logs to confirm or deny connections to `models.litellm.cloud`. The `grep` search only covers files on disk, not historical network activity.
 
-1. **Default `litellm` (no args) to `status`** — align with `sysup`, `sysmon`, `sysbak`
-2. **Add memory limits to `litellm start`** — use `systemd-run --scope -p MemoryMax=4G` or similar
-3. **Pre-flight memory check** — refuse to start if available RAM is below a threshold
-4. **Run as a systemd user service** with `MemoryMax=4G` and `OOMPolicy=stop`
+## Verdict
+
+**OOM was the proximate cause of the crash** — the system was genuinely overloaded and the memory exhaustion narrative is plausible.
+
+**The supply chain attack cannot be ruled out.** The PID controller rejections and the 7.4GB/10s swap spike are signals that are more consistent with process proliferation (fork bomb) than a single heavy process. The `uv run` cache was not inspected for a cached compromised version. Stages 1–2 of the malware (credential harvest and exfiltration) leave no persistent artifacts by design.
+
+**Credential rotation should be treated as necessary, not optional.** This is the safe call regardless of root cause attribution. See the rotation checklist in [`litellm-supply-chain-incident.md`](litellm-supply-chain-incident.md#credential-rotation-required).
+
+## Outstanding actions
+
+### Immediate (do now)
+
+- [ ] **Check the `uv run` cache** for a cached litellm package and its version — this is the key missing evidence
+- [ ] **Rotate all credentials** per the checklist in the incident doc — treat as required, not precautionary
+- [ ] **Check Anthropic/OpenAI billing dashboards** for unauthorized usage since March 24
+
+### Tracked in [issue #24](https://github.com/thompsonson/dotfiles/issues/24)
+
+- [ ] Default `litellm` (no args) to `status` — align with `sysup`, `sysmon`, `sysbak`
+- [ ] Add memory limits to `litellm start` — use `systemd-run --scope -p MemoryMax=4G`
+- [ ] Pre-flight memory check — refuse to start if available RAM is below a threshold
+- [ ] Run as a systemd user service with `MemoryMax=4G` and `OOMPolicy=stop`
 
 ## Relationship to supply chain branch
 
-The `claude/check-litellm-version-62ZM5` branch added version pinning and compromised-version detection. These are **still valuable as defense-in-depth** even though the supply chain attack was not the cause of this specific crash:
+The `claude/check-litellm-version-62ZM5` branch added version pinning and compromised-version detection. These remain valuable as defense-in-depth:
 
 - Version pinning prevents accidentally pulling a compromised future release
 - The blocked version check provides an early warning if a bad version is ever installed
-- The incident response document serves as a reference for future supply chain events
-
-However, the incident doc (`litellm-supply-chain-incident.md`) should be updated to note that the pop-mini crash was **not** caused by the supply chain attack.
+- The incident response document and credential rotation checklist are **actionable now**
