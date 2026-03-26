@@ -64,7 +64,7 @@ All persistent supply chain attack indicators checked **negative**:
 | Malicious domain references | `grep -r "models.litellm.cloud" ~/.local ~/.config /tmp` | **None** |
 | Suspicious containers | `docker ps -a \| grep "node-setup"` | **None** |
 | SSH authorized_keys | `cat ~/.ssh/authorized_keys` | **3 keys, all recognized** (2x ed25519 thompsonson@gmail.com, 1x rsa localhost) |
-| **uv run cache** | **NOT CHECKED** | See [gaps](#triage-gaps) below |
+| uv cache (all subdirs) | `find ~/.cache/uv -path "*litellm*"` | **Completely empty** — no wheels, sdists, builds, envs, or metadata. Cache was either purged or litellm was never run via uv. |
 
 ## Analysis
 
@@ -82,9 +82,10 @@ The system was genuinely overloaded: 75% RAM, 3 Claude sessions, Docker, LeStash
 
 ### Triage gaps
 
-- **`uv run` cache not checked.** The triage searched `~/.cache/uv` and `~/.local/lib` for `litellm_init.pth` but did not inspect the `uv run` cache for a cached compromised litellm package version. This is the most significant blind spot.
+- **`uv` cache is empty — inconclusive.** A full search of all `~/.cache/uv` subdirectories (wheels-v5, wheels-v6, archive-v0, builds-v0, environments-v2, simple-v17–v20, sdists-v9) found **zero litellm artifacts**. This means either (a) the cache was purged (manually or by hard-reboot corruption), or (b) litellm was never run via `uv` on this machine. Either way, we cannot determine which version was used. The evidence gap remains open.
 - **Post-reboot evidence is inherently incomplete.** The malware's credential harvest (stage 1) and exfiltration (stage 2) are designed to complete quickly and leave minimal persistent traces. A hard crash destroys volatile evidence (process memory, open network connections, /proc state). The absence of stage 3 persistence files only means stage 3 didn't complete — it does not mean stages 1–2 didn't execute.
 - **No network logs.** We have no packet captures or firewall logs to confirm or deny connections to `models.litellm.cloud`. The `grep` search only covers files on disk, not historical network activity.
+- **How was litellm invoked?** With no `uv tool` installation and an empty `uv` cache, the invocation method is unknown. Possibilities: `uv run` (cache since cleared), `pip run`, direct `python -m litellm`, or Docker. Without knowing the invocation method, we cannot determine which version was used.
 
 ## Verdict
 
@@ -98,7 +99,7 @@ The system was genuinely overloaded: 75% RAM, 3 Claude sessions, Docker, LeStash
 
 ### Immediate (do now)
 
-- [ ] **Check the `uv run` cache** for a cached litellm package and its version — this is the key missing evidence
+- [x] **Check the `uv run` cache** — entire `~/.cache/uv` is clean of litellm artifacts. Inconclusive: cache was either purged or litellm was never run via uv. Version used cannot be determined.
 - [ ] **Rotate all credentials** per the checklist in the incident doc — treat as required, not precautionary
 - [ ] **Check Anthropic/OpenAI billing dashboards** for unauthorized usage since March 24
 
