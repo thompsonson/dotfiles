@@ -3,7 +3,8 @@
 **Date:** 2026-03-24
 **Affected machine:** pop-mini
 **Symptom:** Machine crash while running LiteLLM proxy
-**Root cause:** Compromised litellm PyPI packages (versions 1.82.7 and 1.82.8)
+**Initial hypothesis:** Compromised litellm PyPI packages (versions 1.82.7 and 1.82.8)
+**Actual root cause:** OOM from starting litellm on a memory-saturated system (see [triage report](litellm-crash-triage-2026-03-25.md))
 
 ## What happened
 
@@ -37,7 +38,9 @@ Collected data is encrypted with a hardcoded 4096-bit RSA public key (AES-256-CB
 - Installs a persistent backdoor at `~/.config/sysmon/sysmon.py` with a systemd user service (both on remote nodes and the local machine)
 
 ### Stage 4 — Fork bomb (bug in malware)
-Version 1.82.8 added a `litellm_init.pth` file that triggers on every Python interpreter startup. The child process re-triggers the `.pth`, creating an exponential fork bomb. **This is what crashed pop-mini** — the crash was actually the discovery mechanism.
+Version 1.82.8 added a `litellm_init.pth` file that triggers on every Python interpreter startup. The child process re-triggers the `.pth`, creating an exponential fork bomb.
+
+> **Note:** Post-crash triage on 2026-03-26 found **no evidence** that the supply chain attack affected pop-mini. The crash was caused by OOM from starting litellm on an already memory-saturated system. No malicious artifacts (`.pth` file, backdoor, exfiltration traces) were found, and litellm was not installed via `uv tool`. See the full [triage report](litellm-crash-triage-2026-03-25.md).
 
 ## pop-mini triage checklist
 

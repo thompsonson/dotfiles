@@ -158,6 +158,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/litellm.md`](docs/litellm.md) — LiteLLM proxy wrapper reference
 - [`docs/litellm-supply-chain-incident.md`](docs/litellm-supply-chain-incident.md) — LiteLLM supply chain attack incident response (pop-mini)
+- [`docs/litellm-crash-triage-2026-03-25.md`](docs/litellm-crash-triage-2026-03-25.md) — LiteLLM OOM crash triage on pop-mini (supply chain attack ruled out)
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
