@@ -612,7 +612,7 @@ fi
 if command -v uv >/dev/null 2>&1; then
   echo 'Installing LiteLLM proxy'
   if ! command -v litellm >/dev/null 2>&1; then
-    uv tool install 'litellm[proxy]' || echo "Failed to install LiteLLM - continuing..."
+    uv tool install 'litellm[proxy]==1.82.6' || echo "Failed to install LiteLLM - continuing..."
   else
     echo 'LiteLLM already installed'
   fi

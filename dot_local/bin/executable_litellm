@@ -65,7 +65,49 @@ ENV_FILE="$CONFIG_DIR/env"
 DEFAULT_PORT="${LITELLM_PORT:-4000}"
 DEFAULT_HOST="${LITELLM_HOST:-0.0.0.0}"
 LAUNCHD_LABEL="com.user.litellm-proxy"
+
+# Pin litellm version — versions 1.82.7 and 1.82.8 were compromised in a supply
+# chain attack (March 24, 2026). Always pin to a known-safe version.
+# See: https://docs.litellm.ai/blog/security-update-march-2026
+LITELLM_VERSION="1.82.6"
+LITELLM_BLOCKED_VERSIONS="1.82.7|1.82.8"
 LAUNCHD_PLIST="$HOME/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+
+# --- Version Safety -----------------------------------------------------------
+
+# Check if the installed litellm version is known-compromised
+check_litellm_version() {
+  if ! has litellm; then
+    return 0
+  fi
+  local version
+  version=$(litellm --version 2>/dev/null | head -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+  if echo "$version" | grep -qE "^(${LITELLM_BLOCKED_VERSIONS})$"; then
+    echo ""
+    echo -e "  ${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${RED}║  CRITICAL: litellm ${version} is a COMPROMISED version!        ║${NC}"
+    echo -e "  ${RED}║  This version was part of a supply chain attack.            ║${NC}"
+    echo -e "  ${RED}║                                                              ║${NC}"
+    echo -e "  ${RED}║  Immediately:                                                ║${NC}"
+    echo -e "  ${RED}║    1. Remove it: uv tool uninstall litellm                   ║${NC}"
+    echo -e "  ${RED}║    2. Purge cache: rm -rf ~/.cache/uv                        ║${NC}"
+    echo -e "  ${RED}║    3. Check for backdoor: ls ~/.config/sysmon/sysmon.py      ║${NC}"
+    echo -e "  ${RED}║    4. Rotate ALL credentials on this machine                 ║${NC}"
+    echo -e "  ${RED}║    5. Reinstall: litellm setup                               ║${NC}"
+    echo -e "  ${RED}║                                                              ║${NC}"
+    echo -e "  ${RED}║  See: https://docs.litellm.ai/blog/security-update-march-2026║${NC}"
+    echo -e "  ${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    return 1
+  fi
+  # Also check for the malicious .pth file
+  if find "$(python3 -c 'import site; print(site.getusersitepackages())' 2>/dev/null)" -name "litellm_init.pth" 2>/dev/null | grep -q .; then
+    echo -e "  ${RED}WARNING: Found litellm_init.pth — malicious persistence file from supply chain attack!${NC}"
+    echo -e "  ${RED}Remove it immediately and rotate all credentials.${NC}"
+    return 1
+  fi
+  return 0
+}
 
 # --- Port Detection -----------------------------------------------------------
 
@@ -100,6 +142,7 @@ cmd_start() {
   done
 
   has litellm || die "litellm not found. Run 'litellm setup' to install."
+  check_litellm_version || die "Refusing to start a compromised litellm version. See above."
   [ -f "$CONFIG_FILE" ] || die "Config not found: $CONFIG_FILE\nRun 'litellm setup' to create default config."
 
   if is_port_listening; then
@@ -128,6 +171,7 @@ cmd_status() {
     local version
     version=$(litellm --version 2>/dev/null | head -1 || echo "unknown")
     printf "  %-12s ${GREEN}installed${NC} (%s)\n" "Binary:" "$version"
+    check_litellm_version || true
   else
     printf "  %-12s ${RED}not installed${NC}\n" "Binary:"
   fi
@@ -303,13 +347,13 @@ cmd_setup() {
     success "litellm already installed ($version)"
   else
     if has uv; then
-      info "Installing litellm via uv..."
-      uv tool install 'litellm[proxy]'
-      success "litellm installed"
+      info "Installing litellm via uv (pinned to ${LITELLM_VERSION})..."
+      uv tool install "litellm[proxy]==${LITELLM_VERSION}"
+      success "litellm installed (${LITELLM_VERSION})"
     elif has pip3; then
-      info "Installing litellm via pip3..."
-      pip3 install --user 'litellm[proxy]'
-      success "litellm installed"
+      info "Installing litellm via pip3 (pinned to ${LITELLM_VERSION})..."
+      pip3 install --user "litellm[proxy]==${LITELLM_VERSION}"
+      success "litellm installed (${LITELLM_VERSION})"
     else
       die "Neither uv nor pip3 found. Install uv first: brew install uv"
     fi
