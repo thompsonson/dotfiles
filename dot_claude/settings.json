@@ -1,5 +1,9 @@
 {
   "includeCoAuthoredBy": false,
+  "statusLine": {
+    "type": "command",
+    "command": "sh ~/.claude/statusline-command.sh"
+  },
   "permissions": {
     "allow": [
       "Bash(find:*)",
