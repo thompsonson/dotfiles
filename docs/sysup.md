@@ -11,6 +11,7 @@ sysup                   # Show what's outdated (same as sysup status)
 sysup status            # Read-only: check each package manager for updates
 sysup upgrade           # Apply all updates (uses full-upgrade for apt)
 sysup repair            # Fix broken packages and resolve dependency issues
+sysup clean             # Clear package manager and tool caches
 sysup doctor            # Check which tools are installed + versions
 sysup version           # Show sysup version
 sysup help              # Show built-in help
@@ -23,6 +24,7 @@ sysup help              # Show built-in help
 | `sysup` / `sysup status` | Check each package manager for available updates (read-only) |
 | `sysup upgrade` | Apply all updates across every installed package manager |
 | `sysup repair` | Fix broken packages, resolve dependencies, clean caches (with confirmation) |
+| `sysup clean` | Clear package manager and tool caches to free disk space |
 | `sysup doctor` | Report installed tools, versions, and key filesystem paths |
 | `sysup version` | Print the sysup version |
 | `sysup help` | Show the built-in help text |
@@ -64,6 +66,21 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 - Package manager reporting broken packages
 - Applications failing after a system update
 
+## Clean
+
+`sysup clean` clears package manager and tool caches to free disk space. It shows the size of each cache before cleaning and reports how much space was freed.
+
+| Tool | Command | What it clears |
+|------|---------|----------------|
+| `uv` | `uv cache clean` | Downloaded Python packages and wheels |
+| `brew` | `brew cleanup --prune=0` | Old formula versions and stale downloads |
+| `pip` | `pip cache purge` | Cached pip downloads |
+| `npm` | `npm cache clean --force` | Cached npm packages |
+| `docker` | `docker builder prune -a -f` | Build cache only (images/containers untouched) |
+| `go` | `go clean -modcache` | Downloaded Go modules |
+
+Each tool is skipped if not installed. A total freed summary is shown at the end.
+
 ## Doctor
 
 `sysup doctor` reports system information, installed tools with versions, and key filesystem paths.
@@ -97,6 +114,7 @@ On Linux, if `pop-upgrade` is installed (Pop!_OS), `sysup doctor` adds a **Linux
 ```bash
 sysup              # What needs updating?
 sysup upgrade      # Update everything
+sysup clean        # Free disk space from caches
 sysup repair       # Fix broken packages
 sysup doctor       # Verify all tools are present
 ```

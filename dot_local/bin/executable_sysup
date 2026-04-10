@@ -11,6 +11,7 @@
 #   sysup upgrade      Apply all updates
 #   sysup repair       Fix broken packages and resolve dependency issues
 #   sysup doctor       Check which tools are installed + versions
+#   sysup clean        Clear package manager and tool caches
 #   sysup help         Show usage text
 
 set -euo pipefail
@@ -350,6 +351,112 @@ chezmoi_upgrade() {
   fi
 }
 
+# === Cache Cleanup Modules ====================================================
+
+# Human-readable size
+human_size() {
+  local bytes="$1"
+  if [ "$bytes" -ge 1073741824 ]; then
+    awk "BEGIN {printf \"%.1fG\", $bytes/1073741824}"
+  elif [ "$bytes" -ge 1048576 ]; then
+    awk "BEGIN {printf \"%.0fM\", $bytes/1048576}"
+  elif [ "$bytes" -ge 1024 ]; then
+    awk "BEGIN {printf \"%.0fK\", $bytes/1024}"
+  else
+    echo "${bytes}B"
+  fi
+}
+
+# Get directory size in bytes (0 if missing)
+dir_bytes() {
+  if [ -d "$1" ]; then
+    /usr/bin/du -sb "$1" 2>/dev/null | awk '{print $1}'
+  else
+    echo 0
+  fi
+}
+
+clean_uv() {
+  if ! has uv; then return; fi
+  local before
+  before=$(dir_bytes "$HOME/.cache/uv")
+  [ "$before" -eq 0 ] && return
+  info "  uv cache ($(human_size "$before"))..."
+  uv cache clean 2>/dev/null
+  local after
+  after=$(dir_bytes "$HOME/.cache/uv")
+  local freed=$((before - after))
+  success "    Freed $(human_size "$freed")"
+}
+
+clean_brew() {
+  if ! has brew; then return; fi
+  local before
+  before=$(dir_bytes "$HOME/.cache/Homebrew")
+  [ "$before" -eq 0 ] && return
+  info "  Homebrew cache ($(human_size "$before"))..."
+  brew cleanup --prune=0 2>/dev/null
+  local after
+  after=$(dir_bytes "$HOME/.cache/Homebrew")
+  local freed=$((before - after))
+  success "    Freed $(human_size "$freed")"
+}
+
+clean_pip() {
+  if ! has pip3 && ! has pip; then return; fi
+  local before
+  before=$(dir_bytes "$HOME/.cache/pip")
+  [ "$before" -eq 0 ] && return
+  info "  pip cache ($(human_size "$before"))..."
+  if has pip3; then
+    pip3 cache purge 2>/dev/null
+  else
+    pip cache purge 2>/dev/null
+  fi
+  local after
+  after=$(dir_bytes "$HOME/.cache/pip")
+  local freed=$((before - after))
+  success "    Freed $(human_size "$freed")"
+}
+
+clean_npm() {
+  if ! has npm; then return; fi
+  local cache_dir
+  cache_dir=$(npm config get cache 2>/dev/null || echo "$HOME/.npm")
+  local before
+  before=$(dir_bytes "$cache_dir")
+  [ "$before" -eq 0 ] && return
+  info "  npm cache ($(human_size "$before"))..."
+  npm cache clean --force 2>/dev/null
+  local after
+  after=$(dir_bytes "$cache_dir")
+  local freed=$((before - after))
+  success "    Freed $(human_size "$freed")"
+}
+
+clean_docker() {
+  if ! has docker; then return; fi
+  # Only clean build cache — images/containers are managed by the user
+  local before
+  before=$(docker system df --format '{{.Size}}' 2>/dev/null | tail -1 || echo "0B")
+  info "  Docker build cache..."
+  docker builder prune -a -f 2>/dev/null || true
+  success "    Build cache cleared"
+}
+
+clean_go() {
+  if ! has go; then return; fi
+  local before
+  before=$(dir_bytes "$(go env GOMODCACHE 2>/dev/null || echo '/nonexistent')")
+  [ "$before" -eq 0 ] && return
+  info "  Go module cache ($(human_size "$before"))..."
+  go clean -modcache 2>/dev/null
+  local after
+  after=$(dir_bytes "$(go env GOMODCACHE 2>/dev/null || echo '/nonexistent')")
+  local freed=$((before - after))
+  success "    Freed $(human_size "$freed")"
+}
+
 # === Subcommands ==============================================================
 
 # --- status (default) ---------------------------------------------------------
@@ -403,6 +510,44 @@ cmd_repair() {
   brew_repair
   apt_repair
   print_summary
+}
+
+# --- clean --------------------------------------------------------------------
+
+cmd_clean() {
+  info "Cleaning package manager and tool caches..."
+
+  # Calculate total before
+  local total_before=0
+  for dir in "$HOME/.cache/uv" "$HOME/.cache/Homebrew" "$HOME/.cache/pip" "$HOME/.npm"; do
+    local s
+    s=$(dir_bytes "$dir")
+    total_before=$((total_before + s))
+  done
+
+  header "Cache Cleanup"
+  clean_uv
+  clean_brew
+  clean_pip
+  clean_npm
+  clean_docker
+  clean_go
+
+  # Calculate total after
+  local total_after=0
+  for dir in "$HOME/.cache/uv" "$HOME/.cache/Homebrew" "$HOME/.cache/pip" "$HOME/.npm"; do
+    local s
+    s=$(dir_bytes "$dir")
+    total_after=$((total_after + s))
+  done
+
+  local total_freed=$((total_before - total_after))
+  echo ""
+  if [ "$total_freed" -gt 0 ]; then
+    success "Total freed: $(human_size "$total_freed") (excludes Docker)"
+  else
+    success "Caches already clean"
+  fi
 }
 
 # --- doctor -------------------------------------------------------------------
@@ -539,6 +684,7 @@ USAGE
   sysup status       Read-only: show what's outdated
   sysup upgrade      Apply all updates (uses full-upgrade for apt)
   sysup repair       Fix broken packages and resolve dependency issues
+  sysup clean        Clear package manager and tool caches
   sysup doctor       Check which tools are installed + versions
   sysup version      Show sysup version
   sysup help         Show this help
@@ -558,6 +704,14 @@ REPAIR (sysup repair)
                      apt clean, apt autoremove
   brew               brew doctor, brew cleanup, brew autoremove
 
+CLEAN (sysup clean)
+  uv                 uv cache clean
+  brew               brew cleanup --prune=0
+  pip                pip cache purge
+  npm                npm cache clean --force
+  docker             docker builder prune (build cache only)
+  go                 go clean -modcache
+
 EXAMPLES
   sysup              # Quick check: what needs updating?
   sysup upgrade      # Update everything
@@ -569,7 +723,7 @@ EOF
 # --- version ------------------------------------------------------------------
 
 show_version() {
-  echo "sysup 1.1.0"
+  echo "sysup 1.2.0"
 }
 
 # === Main =====================================================================
@@ -584,6 +738,9 @@ main() {
       ;;
     repair|fix)
       cmd_repair
+      ;;
+    clean)
+      cmd_clean
       ;;
     doctor)
       cmd_doctor
