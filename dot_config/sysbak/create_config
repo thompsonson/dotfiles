@@ -10,6 +10,16 @@
 #     ~/.local/share/chezmoi
 # )
 #
+# Exclude patterns — defaults cover node_modules, __pycache__, caches, .git/objects.
+# When /nix/store exists, the script also auto-appends the Nix store + caches
+# (they're reproducible from flake.lock). Override here only if you need to
+# customise; setting this replaces the defaults entirely, so include Nix yourself:
+# exclude_patterns=(
+#     "node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/"
+#     # Nix — reproducible from flake.lock, never back up the store
+#     "/nix/store" "/nix/var" "~/.cache/nix" "~/.local/state/nix"
+# )
+#
 # Staleness thresholds (hours)
 # stale_warn_hours=25
 # stale_crit_hours=48
