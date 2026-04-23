@@ -99,6 +99,11 @@ if [[ -n "${exclude_patterns+x}" ]]; then
   EXCLUDE_PATTERNS=("${exclude_patterns[@]}")
 else
   EXCLUDE_PATTERNS=("node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/")
+  # Nix store is fully reproducible from flake.lock — never back it up.
+  # Auto-append when Nix is present so default backups don't balloon.
+  if [[ -d /nix/store ]]; then
+    EXCLUDE_PATTERNS+=("/nix/store" "/nix/var" "$HOME/.cache/nix" "$HOME/.local/state/nix")
+  fi
 fi
 
 # Global flags
@@ -880,6 +885,27 @@ cmd_doctor() {
       printf "  ${GREEN}✓${NC} %-18s %s\n" "cron:" "/etc/cron.d/sysbak exists"
     else
       printf "  ${YELLOW}⚠${NC} %-18s %s\n" "cron:" "/etc/cron.d/sysbak missing"
+    fi
+  fi
+
+  # Exclude patterns
+  if [[ "$quiet" = false ]]; then
+    header "Exclude patterns"
+    printf "  %-20s %d patterns\n" "  Total:" "${#EXCLUDE_PATTERNS[@]}"
+    if [[ -d /nix/store ]]; then
+      local nix_excluded=false
+      for pat in "${EXCLUDE_PATTERNS[@]}"; do
+        if [[ "$pat" = "/nix/store" ]] || [[ "$pat" = "/nix/store/" ]]; then
+          nix_excluded=true
+          break
+        fi
+      done
+      if [[ "$nix_excluded" = true ]]; then
+        printf "  ${GREEN}✓${NC} %-18s %s\n" "Nix store:" "excluded"
+      else
+        printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Nix store:" "/nix/store is present but NOT excluded — backups will balloon"
+        issues=$((issues + 1))
+      fi
     fi
   fi
 
