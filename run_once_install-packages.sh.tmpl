@@ -21,7 +21,9 @@
      "sqlite"
      "gh"
      "just"
-     "shellcheck" -}}
+     "shellcheck"
+     "kubectl"
+     "cmake" -}}
 
 {{ $modernCli := list
      "bat"
@@ -35,7 +37,13 @@
      "duf"
      "hyperfine"
      "procs"
-     "dust" -}}
+     "dust"
+     "git-lfs"
+     "pandoc"
+     "ffmpeg"
+     "yt-dlp"
+     "p7zip"
+     "yq" -}}
 
 {{ $macosSpecific := list 
      "python" 
@@ -68,9 +76,9 @@ is_wsl() {
 {{ if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
 echo '🐧 Installing Linux packages'
 
-{{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" "lm-sensors" "sysstat" -}}
-{{ $linuxWithDocker := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" "lm-sensors" "sysstat" -}}
-{{ $linuxWithoutDocker := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" "lm-sensors" "sysstat" -}}
+{{ $linuxSpecific := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" "lm-sensors" "sysstat" "mosquitto" "mosquitto-clients" "libasound2-dev" -}}
+{{ $linuxWithDocker := list "python3" "python3-pip" "fontconfig" "docker.io" "openssh-client" "docker-compose-plugin" "gpg" "lm-sensors" "sysstat" "mosquitto" "mosquitto-clients" "libasound2-dev" -}}
+{{ $linuxWithoutDocker := list "python3" "python3-pip" "fontconfig" "openssh-client" "gpg" "lm-sensors" "sysstat" "mosquitto" "mosquitto-clients" "libasound2-dev" -}}
 {{ $sudo := "sudo " -}}
 {{ if eq .chezmoi.username "root" -}}
 {{   $sudo = "" -}}
@@ -250,9 +258,9 @@ echo '   Or: eval "$(~/.linuxbrew/bin/brew shellenv)"'
 install_brew_packages {{ $allBrewPackages | join " " }}
 {{ else -}}
 # Install modern CLI tools via apt for non-amd64 architectures
-install_apt_packages bat fd-find ncdu tmux duf hyperfine
-# Note: eza, delta, httpie, procs, dust may need alternative installation methods on ARM
-# Some of these may not be available on older Ubuntu/Debian versions
+install_apt_packages bat fd-find ncdu tmux duf hyperfine git-lfs pandoc ffmpeg p7zip-full
+# Note: eza, delta, httpie, procs, dust, yt-dlp, yq, kubectl, cmake may need alternative
+# installation methods on ARM. Some of these may not be available on older Ubuntu/Debian versions.
 {{ end -}}
 
 # Set up fnm and install Node.js (after Homebrew packages are installed)
