@@ -70,7 +70,6 @@ run_lint() {
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
         "$REPO_DIR/dot_local/bin/executable_sysbak"
-        "$REPO_DIR/dot_local/bin/executable_litellm"
     )
 
     # Add run_once scripts (only pure shell, not .tmpl - Go templates confuse shellcheck)
@@ -121,7 +120,6 @@ run_syntax() {
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
         "$REPO_DIR/dot_local/bin/executable_sysbak"
-        "$REPO_DIR/dot_local/bin/executable_litellm"
     )
 
     for script in "${scripts[@]}"; do
