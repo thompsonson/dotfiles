@@ -15,13 +15,22 @@ default); opt-in on macOS by flipping the flag in `~/.config/chezmoi/chezmoi.tom
 
 ```bash
 cd my-project
-devenv init                    # scaffolds devenv.nix + devenv.yaml + .envrc
+devenv init                    # scaffolds devenv.nix + devenv.yaml + .gitignore
+echo 'use devenv' > .envrc     # devenv 2.x does not create this automatically
 direnv allow                   # one-time per project — lets direnv auto-activate
 ```
 
 Subsequent `cd` into the project auto-loads the environment via direnv. Edit
 `devenv.nix` to add packages, services, scripts, processes. See the
 [devenv documentation](https://devenv.sh/) for the full schema.
+
+### About `use devenv`
+
+`use devenv` is a helper function defined in `~/.config/direnv/direnvrc`
+(installed by the bootstrap script via `devenv direnvrc`). Direnv's stdlib
+does not ship this function, so without the direnvrc file, `.envrc` files
+fail with `use_devenv: command not found` — a single red line that easily
+scrolls off. If you see that, re-run `chezmoi apply` and open a new shell.
 
 ## Why this channel (not apt/brew)
 
