@@ -608,16 +608,6 @@ else
   echo "Try: brew install uv"
 fi
 
-# Install LiteLLM proxy (requires uv)
-if command -v uv >/dev/null 2>&1; then
-  echo 'Installing LiteLLM proxy'
-  if ! command -v litellm >/dev/null 2>&1; then
-    uv tool install 'litellm[proxy]' || echo "Failed to install LiteLLM - continuing..."
-  else
-    echo 'LiteLLM already installed'
-  fi
-fi
-
 # Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")

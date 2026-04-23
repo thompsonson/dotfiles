@@ -75,7 +75,6 @@ The zsh configuration uses these variables:
 ### System Maintenance
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
-- `dot_local/bin/executable_litellm`: LiteLLM proxy wrapper (start, stop, status, config, models, setup)
 
 ### Backup
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
@@ -157,7 +156,6 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
-- [`docs/litellm.md`](docs/litellm.md) — LiteLLM proxy wrapper reference
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes

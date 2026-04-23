@@ -573,7 +573,7 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot litellm)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
@@ -589,7 +589,6 @@ cmd_doctor() {
   check_path "$HOME/.oh-my-zsh" "oh-my-zsh"
   check_path "$HOME/.config/dev/config" "dev config"
   check_path "$HOME/.config/sysbak/config" "sysbak config"
-  check_path "$HOME/.config/litellm/config.yaml" "litellm config"
   check_path "$HOME/Projects" "Projects directory"
 
   # Linux-specific daemon health
@@ -656,7 +655,6 @@ get_version() {
     apt-get)   apt-get --version 2>/dev/null | head -1 | awk '{print $2}' ;;
     sysbak)    sysbak version 2>/dev/null ;;
     rsnapshot) rsnapshot --version 2>&1 | head -1 ;;
-    litellm)   litellm --version 2>/dev/null | head -1 ;;
     sensors)   sensors -v 2>/dev/null | awk '{print $3}' ;;
     sar)       sar -V 2>/dev/null | awk '{print $3}' ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
