@@ -567,13 +567,13 @@ cmd_doctor() {
   echo "  User:     $(whoami)"
 
   header "Package Managers"
-  local tools_pm=(brew apt-get chezmoi fnm node npm uv pipx)
+  local tools_pm=(brew apt-get chezmoi fnm node npm uv pipx nix)
   for tool in "${tools_pm[@]}"; do
     check_tool "$tool"
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs devenv direnv)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
@@ -661,6 +661,9 @@ get_version() {
     ffmpeg)    ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}' ;;
     git-lfs)   git-lfs version 2>/dev/null | awk '{print $1}' ;;
     yq)        yq --version 2>/dev/null | awk '{print $NF}' ;;
+    nix)       nix --version 2>/dev/null | awk '{print $NF}' ;;
+    devenv)    devenv version 2>/dev/null | awk '{print $NF}' ;;
+    direnv)    direnv --version 2>/dev/null ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
 }

@@ -1,0 +1,50 @@
+#!/bin/bash
+# Nix + devenv bootstrap. Gated on install_nix data flag (default false if unset).
+{{- $installNix := false -}}
+{{- if hasKey . "install_nix" -}}{{- $installNix = .install_nix -}}{{- end }}
+{{ if not $installNix -}}
+exit 0
+{{ end -}}
+
+set -euo pipefail
+
+echo '❄️  Nix + devenv bootstrap'
+
+# Install Nix via Determinate Systems installer (handles systemd-resolved,
+# enables flakes by default, clean uninstall path).
+if ! command -v nix >/dev/null 2>&1 \
+   && ! [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  echo '  Installing Nix (Determinate Systems installer)'
+  curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+    | sh -s -- install --no-confirm
+else
+  echo '  Nix already installed — skipping'
+fi
+
+# Source nix env for the current session so subsequent steps can call nix.
+if [ -f /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh ]; then
+  # shellcheck source=/dev/null
+  . /nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh
+elif [ -f "$HOME/.nix-profile/etc/profile.d/nix.sh" ]; then
+  # shellcheck source=/dev/null
+  . "$HOME/.nix-profile/etc/profile.d/nix.sh"
+fi
+
+# Ensure user-level flakes config. Belt-and-suspenders: DetSys enables this in
+# /etc/nix/nix.conf, but keep a user-level entry so the flag is explicit even
+# if someone swaps installers later.
+mkdir -p "$HOME/.config/nix"
+if ! grep -q 'experimental-features' "$HOME/.config/nix/nix.conf" 2>/dev/null; then
+  echo 'experimental-features = nix-command flakes' >> "$HOME/.config/nix/nix.conf"
+  echo '  Enabled flakes in ~/.config/nix/nix.conf'
+fi
+
+# Install devenv via nix profile.
+if command -v nix >/dev/null 2>&1 && ! command -v devenv >/dev/null 2>&1; then
+  echo '  Installing devenv'
+  nix profile install nixpkgs#devenv
+else
+  echo '  devenv already installed — skipping'
+fi
+
+echo '✅ Nix bootstrap complete. Open a new shell to pick up nix + direnv hooks.'

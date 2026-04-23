@@ -156,6 +156,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
+- [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 
 ## When Making Changes
