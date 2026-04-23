@@ -6,3 +6,4 @@
 
 [data]
     osid = {{ $osID | quote }}
+    install_nix = {{ if eq .chezmoi.os "linux" }}true{{ else }}false{{ end }}
