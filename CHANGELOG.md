@@ -1,5 +1,32 @@
 # Changelog
 
+## [1.2.0](https://github.com/thompsonson/dotfiles/compare/v1.1.0...v1.2.0) (2026-04-23)
+
+
+### Features
+
+* add Claude Code statusline with context and rate limit display ([bcc9a71](https://github.com/thompsonson/dotfiles/commit/bcc9a713db6bafe5911014e6d375f5bc0106d10f))
+* add commonly-used base packages to install script ([#39](https://github.com/thompsonson/dotfiles/issues/39)) ([640588c](https://github.com/thompsonson/dotfiles/commit/640588cc898b5aeea3a1615f5054e1b1536ae0a1)), closes [#35](https://github.com/thompsonson/dotfiles/issues/35)
+* add LiteLLM proxy as a managed service ([#21](https://github.com/thompsonson/dotfiles/issues/21)) ([#23](https://github.com/thompsonson/dotfiles/issues/23)) ([a3ccae7](https://github.com/thompsonson/dotfiles/commit/a3ccae7530ef8982c7cda0da9fb114e0ed8f08e2))
+* add sysmon, sysbak, and sysup repair ([#14](https://github.com/thompsonson/dotfiles/issues/14)) ([3cd8df3](https://github.com/thompsonson/dotfiles/commit/3cd8df3db6d3c7950dff23743912eaceeb44fbd0))
+* CPU temperature, CPU hog, and pop-upgrade monitoring ([#17](https://github.com/thompsonson/dotfiles/issues/17)) ([#18](https://github.com/thompsonson/dotfiles/issues/18)) ([dac4a5a](https://github.com/thompsonson/dotfiles/commit/dac4a5ac5143761413d6103b1af9d42a1c81d94a))
+* **nix:** Nix + devenv bootstrap (Linux-first, opt-in on macOS) ([#40](https://github.com/thompsonson/dotfiles/issues/40)) ([0cc8653](https://github.com/thompsonson/dotfiles/commit/0cc8653d0e3f6015c3692c0aa4e9a80e65546811))
+* **sysbak:** auto-exclude /nix/store from backups when Nix is present ([#43](https://github.com/thompsonson/dotfiles/issues/43)) ([5b75139](https://github.com/thompsonson/dotfiles/commit/5b7513941c8fa37d63b16c1a26cc2da79fa7224c))
+* **sysup:** add clean subcommand to free disk space from caches ([760d594](https://github.com/thompsonson/dotfiles/commit/760d594e5504dd55a68ff2ec35e884e7047b4dda))
+
+
+### Bug Fixes
+
+* **doctor:** repair two version-capture bugs in sysbak + sysup ([#48](https://github.com/thompsonson/dotfiles/issues/48)) ([40b243f](https://github.com/thompsonson/dotfiles/commit/40b243fac84abc86197307ca4956933ab3630aba))
+* **nix:** install devenv direnvrc so `use devenv` in .envrc works ([#46](https://github.com/thompsonson/dotfiles/issues/46)) ([f727494](https://github.com/thompsonson/dotfiles/commit/f727494c042a5a4234bd6171d8f2614d41c7f62b))
+* **sysbak:** use create_ prefix for machine-specific config ([aae8f2e](https://github.com/thompsonson/dotfiles/commit/aae8f2efde59cb011e096ba575acddc3344fddf7))
+
+
+### Documentation
+
+* add pi-agent-policy.md — workflow and trust model definition for pi-guards ([cd75c10](https://github.com/thompsonson/dotfiles/commit/cd75c10b92b7b78892d402ecd2c8262dfbcb4b43))
+* update sysmon and sysup docs for temperature, CPU hog, and doctor changes ([c5a54b4](https://github.com/thompsonson/dotfiles/commit/c5a54b4bf7d92f5d8a9185b71377db5c572f11fa))
+
 ## [1.1.0](https://github.com/thompsonson/dotfiles/compare/v1.0.1...v1.1.0) (2026-02-25)
 
 
