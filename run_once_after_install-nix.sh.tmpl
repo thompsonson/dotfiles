@@ -47,4 +47,21 @@ else
   echo '  devenv already installed — skipping'
 fi
 
+# Install devenv's direnv integration so `use devenv` in .envrc works.
+# direnv's stdlib doesn't ship `use_devenv`; devenv provides it via the
+# `devenv direnvrc` subcommand. Install if missing; refresh if ours
+# (detected by the anchored `export DEVENV_DIRENVRC_VERSION=` line — a
+# public contract at the top of `devenv direnvrc` output); leave alone
+# if a user-custom direnvrc exists.
+if command -v devenv >/dev/null 2>&1; then
+  direnvrc_path="$HOME/.config/direnv/direnvrc"
+  mkdir -p "$HOME/.config/direnv"
+  if [ ! -f "$direnvrc_path" ] || grep -qE '^[[:space:]]*export DEVENV_DIRENVRC_VERSION=' "$direnvrc_path"; then
+    devenv direnvrc > "$direnvrc_path"
+    echo "  Installed devenv direnvrc -> $direnvrc_path"
+  else
+    echo "  existing custom direnvrc at $direnvrc_path -> skipping"
+  fi
+fi
+
 echo '✅ Nix bootstrap complete. Open a new shell to pick up nix + direnv hooks.'
