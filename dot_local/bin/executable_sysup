@@ -573,13 +573,13 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
 
   header "Modern CLI Replacements"
-  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar)
+  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar yq pandoc ffmpeg yt-dlp)
   for tool in "${tools_cli[@]}"; do
     check_tool "$tool"
   done
@@ -657,6 +657,10 @@ get_version() {
     rsnapshot) rsnapshot --version 2>&1 | head -1 ;;
     sensors)   sensors -v 2>/dev/null | awk '{print $3}' ;;
     sar)       sar -V 2>/dev/null | awk '{print $3}' ;;
+    kubectl)   kubectl version --client 2>/dev/null | head -1 | awk '{print $3}' ;;
+    ffmpeg)    ffmpeg -version 2>/dev/null | head -1 | awk '{print $3}' ;;
+    git-lfs)   git-lfs version 2>/dev/null | awk '{print $1}' ;;
+    yq)        yq --version 2>/dev/null | awk '{print $NF}' ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
 }
