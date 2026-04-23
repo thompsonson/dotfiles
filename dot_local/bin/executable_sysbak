@@ -863,8 +863,10 @@ cmd_doctor() {
     if has "$dep"; then
       local ver
       case "$dep" in
-        rsnapshot) ver=$(rsnapshot --version 2>&1 | head -1) ;;
-        rsync)     ver=$(rsync --version 2>/dev/null | head -1 | awk '{print $3}') ;;
+        # awk 'NR==1 ... exit' reads and exits after line 1 — avoids SIGPIPE
+        # that `cmd | head -1` triggers on long-output commands under pipefail.
+        rsnapshot) ver=$(rsnapshot --version 2>&1 | awk 'NR==1 {print; exit}') ;;
+        rsync)     ver=$(rsync --version 2>/dev/null | awk 'NR==1 {print $3; exit}') ;;
       esac
       [[ "$quiet" = false ]] && printf "  ${GREEN}✓${NC} %-18s %s\n" "$dep:" "$ver"
     else

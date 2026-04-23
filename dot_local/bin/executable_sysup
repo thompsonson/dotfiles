@@ -662,7 +662,7 @@ get_version() {
     git-lfs)   git-lfs version 2>/dev/null | awk '{print $1}' ;;
     yq)        yq --version 2>/dev/null | awk '{print $NF}' ;;
     nix)       nix --version 2>/dev/null | awk '{print $NF}' ;;
-    devenv)    devenv version 2>/dev/null | awk '{print $NF}' ;;
+    devenv)    devenv version 2>/dev/null | awk '{print $2}' ;;
     direnv)    direnv --version 2>/dev/null ;;
     *)         "$tool" --version 2>/dev/null | head -1 ;;
   esac
