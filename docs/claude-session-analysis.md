@@ -167,7 +167,48 @@ appearing in **both** models are clean signals for style comparison.
 
 ---
 
-## 4. Privacy note
+## 4. Thinking blocks — what's stored and what isn't
+
+### Thinking content is redacted on disk
+
+Extended thinking blocks (`type: "thinking"`) are stored as placeholders: only
+a `signature` hash is written, the actual reasoning text is wiped before saving.
+
+```json
+{ "type": "thinking", "signature": "ErUv...", "thinking": "" }
+```
+
+This means the JSONL files record *that* thinking happened and *how often*, but
+not *what* was thought. You can count invocations; you cannot read the reasoning.
+
+### Thinking invocation rate by model
+
+| Model | Text blocks | Text median (words) | Think blocks | Think % |
+|---|---:|---:|---:|---:|
+| opus-4-5 | 189 | 12 | 9 | 4.5% |
+| haiku-4-5 | 4,959 | 13 | 0 | 0% |
+| sonnet-4-5 | 216 | 16 | 0 | 0% |
+| sonnet-4-6 | 197 | 17 | 8 | 3.9% |
+| **opus-4-6** | 8,112 | **21** | 1,049 | **11.5%** |
+| **opus-4-7** | 1,283 | **51** | 1,762 | **57.9%** |
+
+Thinking switched on from 2026-03-25 when opus-4-6 became the primary model.
+Invocation volume spiked on 2026-04-12 (228 in one day, still opus-4-6) then
+jumped again from 2026-04-21 when opus-4-7 took over.
+
+### Internalising reasoning made visible output longer, not shorter
+
+The intuition "hidden thinking = more concise visible replies" is wrong in
+practice. Opus 4-7 writes **51-word median visible responses** vs 4-6's **21
+words** — 2.4× longer — while also invoking thinking nearly 6× more often.
+
+The thinking is additive, not a replacement for visible explanation. 4-7 both
+thinks more (hidden) and says more (visible). What it drops is the *narration*
+("Now let me check…", "Let me also look at…") — style, not volume.
+
+---
+
+## 5. Privacy note
 
 Session JSONL files contain the full text of every prompt you sent and every
 response Claude generated, including file contents pasted as context and
