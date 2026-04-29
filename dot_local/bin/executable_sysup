@@ -579,7 +579,7 @@ cmd_doctor() {
   done
 
   header "Modern CLI Replacements"
-  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar yq pandoc ffmpeg yt-dlp)
+  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar yq pandoc ffmpeg yt-dlp codeburn)
   for tool in "${tools_cli[@]}"; do
     check_tool "$tool"
   done

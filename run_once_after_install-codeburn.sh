@@ -10,5 +10,5 @@ if ! command -v npm >/dev/null 2>&1; then
 fi
 
 echo 'Installing codeburn from thompsonson/codeburn...'
-npm install -g thompsonson/codeburn#v0.9.1-thompsonson.2
+npm install -g thompsonson/codeburn#v0.9.1-thompsonson.3
 echo "codeburn installed: $(codeburn --version 2>/dev/null || echo 'unknown version')"
