@@ -638,6 +638,9 @@ cmd_warn() {
 # --- setup (one-time configuration) -------------------------------------------
 
 cmd_setup() {
+  local yes=0
+  [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]] && yes=1
+
   header "sysbak Setup"
 
   # Step 1: Install rsnapshot
@@ -662,24 +665,31 @@ cmd_setup() {
   # Step 3: Create config directory
   mkdir -p "$CONFIG_DIR"
 
-  # Step 4: Interactive device configuration
+  # Step 4: Device configuration
   echo ""
   info "Available block devices:"
   list_block_device
   echo ""
 
   local new_device new_mount new_label
-  echo -ne "  Device path [${DEVICE:-/dev/sda1}]: "
-  read -r new_device
-  new_device="${new_device:-${DEVICE:-/dev/sda1}}"
+  if [[ "$yes" -eq 1 ]]; then
+    new_device="${DEVICE:-/dev/sda1}"
+    new_mount="${MOUNT_POINT}"
+    new_label="${BACKUP_LABEL}"
+    info "  Using defaults: device=$new_device  mount=$new_mount  label=$new_label"
+  else
+    echo -ne "  Device path [${DEVICE:-/dev/sda1}]: "
+    read -r new_device
+    new_device="${new_device:-${DEVICE:-/dev/sda1}}"
 
-  echo -ne "  Mount point [${MOUNT_POINT}]: "
-  read -r new_mount
-  new_mount="${new_mount:-$MOUNT_POINT}"
+    echo -ne "  Mount point [${MOUNT_POINT}]: "
+    read -r new_mount
+    new_mount="${new_mount:-$MOUNT_POINT}"
 
-  echo -ne "  Label [${BACKUP_LABEL}]: "
-  read -r new_label
-  new_label="${new_label:-$BACKUP_LABEL}"
+    echo -ne "  Label [${BACKUP_LABEL}]: "
+    read -r new_label
+    new_label="${new_label:-$BACKUP_LABEL}"
+  fi
 
   # Validate inputs
   [[ "$new_device" == /dev/* ]] || die "Device must start with /dev/ (got: $new_device)"
@@ -1082,7 +1092,7 @@ main() {
     diff)              shift; cmd_diff "$@" ;;
     restore)           shift; cmd_restore "$@" ;;
     warn)              cmd_warn ;;
-    setup)             cmd_setup ;;
+    setup)             shift; cmd_setup "$@" ;;
     doctor)            shift; cmd_doctor "$@" ;;
     git-bundle)        cmd_git_bundle ;;
     config)            shift; cmd_config "$@" ;;
