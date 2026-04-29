@@ -686,47 +686,6 @@ cmd_setup() {
   [[ "$new_mount" == /* ]]     || die "Mount point must be an absolute path (got: $new_mount)"
   [[ "$new_label" =~ ^[a-zA-Z0-9_-]+$ ]] || die "Label must be alphanumeric (got: $new_label)"
 
-  # Write config — preserve existing backup_dirs / exclude_patterns / staleness
-  # thresholds when they were set in the loaded config. Without this, re-running
-  # `sysbak setup` would silently reset customizations to defaults.
-  {
-    echo "# sysbak configuration"
-    echo "device=$new_device"
-    echo "mount_point=$new_mount"
-    echo "label=$new_label"
-    echo
-    echo "# Backup directories"
-    echo "backup_dirs=("
-    if [[ -n "${backup_dirs+x}" ]]; then
-      for d in "${BACKUP_DIRS[@]}"; do
-        # Quote $HOME and escape ~ so the replacement isn't re-tilde-expanded.
-        printf '    %s\n' "${d/#"$HOME"/\~}"
-      done
-    else
-      # Literal ~ is intentional: it's emitted into the config file and
-      # tilde-expanded when that file is sourced on the next sysbak run.
-      # shellcheck disable=SC2088
-      printf '    %s\n' '~/Projects' '~/.local/share/chezmoi'
-    fi
-    echo ")"
-    # Only emit exclude_patterns if user customized it — otherwise leave unset so
-    # defaults (including auto-Nix detection at load time) keep applying.
-    if [[ -n "${exclude_patterns+x}" ]]; then
-      echo
-      echo "# Exclude patterns"
-      echo "exclude_patterns=("
-      for p in "${EXCLUDE_PATTERNS[@]}"; do
-        printf '    "%s"\n' "$p"
-      done
-      echo ")"
-    fi
-    echo
-    echo "# Staleness thresholds (hours)"
-    echo "stale_warn_hours=$STALE_WARN_HOURS"
-    echo "stale_crit_hours=$STALE_CRIT_HOURS"
-  } > "$CONFIG_FILE"
-  success "  Config written to $CONFIG_FILE"
-
   # Step 5: Create mount point
   if [[ ! -d "$new_mount" ]]; then
     sudo mkdir -p "$new_mount"
@@ -775,6 +734,47 @@ EOF
   done
 
   success "  rsnapshot.conf written"
+
+  # Write config after sudo succeeds — preserves existing backup_dirs /
+  # exclude_patterns / staleness thresholds. Writing here (not before sudo)
+  # ensures a failed sudo password prompt does not clobber the user's config.
+  {
+    echo "# sysbak configuration"
+    echo "device=$new_device"
+    echo "mount_point=$new_mount"
+    echo "label=$new_label"
+    echo
+    echo "# Backup directories"
+    echo "backup_dirs=("
+    if [[ -n "${backup_dirs+x}" ]]; then
+      for d in "${BACKUP_DIRS[@]}"; do
+        # Quote $HOME and escape ~ so the replacement isn't re-tilde-expanded.
+        printf '    %s\n' "${d/#"$HOME"/\~}"
+      done
+    else
+      # Literal ~ is intentional: it's emitted into the config file and
+      # tilde-expanded when that file is sourced on the next sysbak run.
+      # shellcheck disable=SC2088
+      printf '    %s\n' '~/Projects' '~/.local/share/chezmoi'
+    fi
+    echo ")"
+    # Only emit exclude_patterns if user customized it — otherwise leave unset so
+    # defaults (including auto-Nix detection at load time) keep applying.
+    if [[ -n "${exclude_patterns+x}" ]]; then
+      echo
+      echo "# Exclude patterns"
+      echo "exclude_patterns=("
+      for p in "${EXCLUDE_PATTERNS[@]}"; do
+        printf '    "%s"\n' "$p"
+      done
+      echo ")"
+    fi
+    echo
+    echo "# Staleness thresholds (hours)"
+    echo "stale_warn_hours=$STALE_WARN_HOURS"
+    echo "stale_crit_hours=$STALE_CRIT_HOURS"
+  } > "$CONFIG_FILE"
+  success "  Config written to $CONFIG_FILE"
 
   # Step 7: Platform-specific scheduling
   if [ "$IS_MACOS" = true ]; then
