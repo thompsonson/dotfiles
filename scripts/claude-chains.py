@@ -10,6 +10,8 @@ Usage:
     python3 scripts/claude-chains.py --since 30
     python3 scripts/claude-chains.py --project atomicguard --since 7
     python3 scripts/claude-chains.py --output /tmp/chains-7d.jsonl
+    python3 scripts/claude-chains.py --html /tmp/chains.html
+    python3 scripts/claude-chains.py --markdown /tmp/chains.md
     python3 scripts/claude-chains.py --summary-only
 """
 
@@ -18,35 +20,30 @@ import json
 import sys
 import time
 from collections import Counter
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 CLAUDE_DIR = Path.home() / ".claude" / "projects"
-OUTPUT_DIR = Path("output")
 
 _BASH_WRAPPERS = {"sudo", "env", "time", "nice", "nohup", "watch"}
 
 
 def bash_label(command: str) -> str:
-    """Return the effective command name from a Bash input.command string."""
     if not command:
         return "_shell"
     words = command.split()
     for word in words:
         if word in _BASH_WRAPPERS:
             continue
-        # Skip env VAR=value tokens
         if "=" in word and not word.startswith("-"):
             continue
         if word.startswith("$") or word.startswith("{"):
             return "_shell"
-        # Strip path prefix: /usr/bin/git -> git
         return Path(word).name or "_shell"
     return "_shell"
 
 
 def extract_tool_label(block: dict) -> str:
-    """Return a label for a tool_use block."""
     name = block.get("name", "")
     if name == "Bash":
         cmd = block.get("input", {}).get("command", "")
@@ -55,9 +52,8 @@ def extract_tool_label(block: dict) -> str:
 
 
 def parse_session(path: Path) -> dict | None:
-    """Parse a session JSONL file into a sequence record. Returns None on error."""
     turns: list[dict] = []
-    session_id = path.stem  # filename without .jsonl
+    session_id = path.stem
 
     try:
         with open(path) as f:
@@ -73,7 +69,6 @@ def parse_session(path: Path) -> dict | None:
                 if obj.get("type") != "assistant":
                     continue
 
-                # Timestamp is top-level on the record
                 ts = obj.get("timestamp", "")
                 uuid = obj.get("uuid", "")
                 content = obj.get("message", {}).get("content", [])
@@ -112,7 +107,6 @@ def parse_session(path: Path) -> dict | None:
 
 
 def discover_sessions(since_days: int, project: str | None) -> list[Path]:
-    """Return .jsonl session files modified within since_days, optionally filtered by project."""
     if not CLAUDE_DIR.exists():
         return []
 
@@ -135,18 +129,183 @@ def ngrams(stream: list[str], n: int) -> list[tuple[str, ...]]:
     return [tuple(stream[i : i + n]) for i in range(len(stream) - n + 1)]
 
 
-def summarise(records: list[dict], top_n: int = 20) -> None:
+def compute_ngrams(records: list[dict], top_n: int = 20) -> list[tuple[tuple, int]]:
     counts: Counter = Counter()
     for rec in records:
         flat = [t for turn in rec["sequence"] for t in turn["tools"]]
         for n in (2, 3, 4):
             counts.update(ngrams(flat, n))
+    return counts.most_common(top_n)
 
+
+def project_stats(records: list[dict]) -> list[tuple[str, int, int]]:
+    """Return (project_key, session_count, turn_count) sorted by sessions desc."""
+    by_project: dict[str, list[int]] = {}
+    for rec in records:
+        pk = rec["project_key"]
+        by_project.setdefault(pk, []).append(rec["turns"])
+    return sorted(
+        [(pk, len(turns), sum(turns)) for pk, turns in by_project.items()],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+
+
+def summarise(records: list[dict], top_n: int = 20) -> None:
+    top = compute_ngrams(records, top_n)
     print(f"\nTop {top_n} tool n-grams (size 2–4) across {len(records)} sessions:\n")
     print(f"  {'Count':>6}  Pattern")
     print(f"  {'------':>6}  -------")
-    for pattern, count in counts.most_common(top_n):
+    for pattern, count in top:
         print(f"  {count:>6}  {' → '.join(pattern)}")
+
+
+def write_html(records: list[dict], path: Path, since_days: int) -> None:
+    top = compute_ngrams(records, 20)
+    stats = project_stats(records)
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    labels_js = json.dumps([" → ".join(p) for p, _ in top])
+    counts_js = json.dumps([c for _, c in top])
+    proj_labels_js = json.dumps([pk.replace("-home-mt-Projects-", "").replace("-home-mt-", "") for pk, _, _ in stats])
+    proj_sessions_js = json.dumps([s for _, s, _ in stats])
+    proj_turns_js = json.dumps([t for _, _, t in stats])
+
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude Code Tool Chains</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<style>
+  body {{ font-family: system-ui, sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 24px; }}
+  h1 {{ font-size: 1.4rem; margin-bottom: 4px; }}
+  .meta {{ color: #8b949e; font-size: 0.85rem; margin-bottom: 32px; }}
+  .grid {{ display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }}
+  .card {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }}
+  .card h2 {{ font-size: 1rem; margin: 0 0 16px; color: #e6edf3; }}
+  canvas {{ max-height: 420px; }}
+  table {{ width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 12px; }}
+  th {{ text-align: left; color: #8b949e; border-bottom: 1px solid #30363d; padding: 6px 8px; }}
+  td {{ padding: 5px 8px; border-bottom: 1px solid #21262d; }}
+  .num {{ text-align: right; font-variant-numeric: tabular-nums; }}
+</style>
+</head>
+<body>
+<h1>Claude Code Tool Chains</h1>
+<p class="meta">Last {since_days} days &middot; {len(records)} sessions &middot; generated {generated}</p>
+<div class="grid">
+  <div class="card" style="grid-column: 1 / -1;">
+    <h2>Top 20 Tool N-grams (size 2–4)</h2>
+    <canvas id="ngram"></canvas>
+  </div>
+  <div class="card">
+    <h2>Sessions by Project</h2>
+    <canvas id="proj"></canvas>
+  </div>
+  <div class="card">
+    <h2>N-gram Table</h2>
+    <table>
+      <tr><th>Pattern</th><th class="num">Count</th></tr>
+      {''.join(f'<tr><td>{" → ".join(p)}</td><td class="num">{c}</td></tr>' for p, c in top)}
+    </table>
+  </div>
+</div>
+<script>
+const ngLabels = {labels_js};
+const ngCounts = {counts_js};
+const projLabels = {proj_labels_js};
+const projSessions = {proj_sessions_js};
+const projTurns = {proj_turns_js};
+
+new Chart(document.getElementById('ngram'), {{
+  type: 'bar',
+  data: {{
+    labels: ngLabels,
+    datasets: [{{ label: 'Occurrences', data: ngCounts,
+      backgroundColor: 'rgba(88,166,255,0.7)', borderRadius: 4 }}]
+  }},
+  options: {{
+    indexAxis: 'y',
+    plugins: {{ legend: {{ display: false }} }},
+    scales: {{
+      x: {{ grid: {{ color: '#21262d' }}, ticks: {{ color: '#8b949e' }} }},
+      y: {{ grid: {{ display: false }}, ticks: {{ color: '#e6edf3', font: {{ family: 'monospace' }} }} }}
+    }}
+  }}
+}});
+
+new Chart(document.getElementById('proj'), {{
+  type: 'bar',
+  data: {{
+    labels: projLabels,
+    datasets: [
+      {{ label: 'Sessions', data: projSessions, backgroundColor: 'rgba(63,185,80,0.7)', borderRadius: 4 }},
+      {{ label: 'Turns', data: projTurns, backgroundColor: 'rgba(210,153,34,0.5)', borderRadius: 4 }}
+    ]
+  }},
+  options: {{
+    plugins: {{ legend: {{ labels: {{ color: '#8b949e' }} }} }},
+    scales: {{
+      x: {{ grid: {{ color: '#21262d' }}, ticks: {{ color: '#8b949e', font: {{ family: 'monospace', size: 11 }} }}, maxRotation: 45 }},
+      y: {{ grid: {{ color: '#21262d' }}, ticks: {{ color: '#8b949e' }} }}
+    }}
+  }}
+}});
+</script>
+</body>
+</html>"""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(html + "\n")
+    print(f"HTML:     {path}")
+
+
+def write_markdown(records: list[dict], path: Path, since_days: int) -> None:
+    top = compute_ngrams(records, 20)
+    stats = project_stats(records)
+    generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Mermaid xychart-beta supports up to ~10 bars cleanly
+    top10 = top[:10]
+    mermaid_labels = [f'"{" → ".join(p)}"' for p, _ in top10]
+    mermaid_counts = [str(c) for _, c in top10]
+
+    lines = [
+        "# Claude Code Tool Chains",
+        "",
+        f"_Last {since_days} days · {len(records)} sessions · generated {generated}_",
+        "",
+        "## Top 10 N-grams",
+        "",
+        "```mermaid",
+        "xychart-beta horizontal",
+        f'    x-axis [{", ".join(mermaid_labels)}]',
+        f'    bar [{", ".join(mermaid_counts)}]',
+        "```",
+        "",
+        "## Full Top 20 N-gram Table",
+        "",
+        "| Pattern | Count |",
+        "|---------|------:|",
+    ]
+    for pattern, count in top:
+        lines.append(f"| `{' → '.join(pattern)}` | {count} |")
+
+    lines += [
+        "",
+        "## Sessions by Project",
+        "",
+        "| Project | Sessions | Turns |",
+        "|---------|--------:|------:|",
+    ]
+    for pk, sessions, turns in stats:
+        short = pk.replace("-home-mt-Projects-", "").replace("-home-mt-", "")
+        lines.append(f"| `{short}` | {sessions} | {turns} |")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + "\n")
+    print(f"Markdown: {path}")
 
 
 def main() -> None:
@@ -157,8 +316,12 @@ def main() -> None:
                         help="Filter by substring of encoded project dir name")
     parser.add_argument("--output", metavar="FILE",
                         help="Write per-session JSONL to this path")
+    parser.add_argument("--html", metavar="FILE",
+                        help="Write self-contained HTML visualisation to this path")
+    parser.add_argument("--markdown", metavar="FILE",
+                        help="Write GitHub-renderable Mermaid markdown to this path")
     parser.add_argument("--summary-only", action="store_true",
-                        help="Print n-gram summary only (ignores --output)")
+                        help="Print n-gram summary only (ignores --output/--html/--markdown)")
     args = parser.parse_args()
 
     paths = discover_sessions(args.since, args.project)
@@ -176,13 +339,18 @@ def main() -> None:
         print("No tool-call sequences found in selected sessions.", file=sys.stderr)
         sys.exit(1)
 
-    if not args.summary_only and args.output:
-        out_path = Path(args.output)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(out_path, "w") as f:
-            for rec in records:
-                f.write(json.dumps(rec) + "\n")
-        print(f"Wrote {len(records)} session records to {out_path}")
+    if not args.summary_only:
+        if args.output:
+            out_path = Path(args.output)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_path, "w") as f:
+                for rec in records:
+                    f.write(json.dumps(rec) + "\n")
+            print(f"JSONL:    {out_path}")
+        if args.html:
+            write_html(records, Path(args.html), args.since)
+        if args.markdown:
+            write_markdown(records, Path(args.markdown), args.since)
 
     summarise(records)
 
