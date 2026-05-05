@@ -13,6 +13,7 @@ Usage:
     python3 scripts/claude-chains.py --html /tmp/chains.html
     python3 scripts/claude-chains.py --markdown /tmp/chains.md
     python3 scripts/claude-chains.py --summary-only
+    python3 scripts/claude-chains.py --subcommands --summary-only
 """
 
 import argparse
@@ -27,11 +28,28 @@ CLAUDE_DIR = Path.home() / ".claude" / "projects"
 
 _BASH_WRAPPERS = {"sudo", "env", "time", "nice", "nohup", "watch"}
 
+# CLIs where subcommands carry workflow signal.
+# Value = number of words to keep (including the CLI name itself).
+# gh needs 3: `gh run watch`, `gh pr create`, `gh issue list`
+_SUBCOMMAND_DEPTH: dict[str, int] = {
+    "gh": 3,
+    "git": 2,
+    "uv": 2,
+    "docker": 2,
+    "just": 2,
+    "chezmoi": 2,
+    "systemctl": 2,
+    "kubectl": 2,
+    "cargo": 2,
+    "npm": 2,
+}
 
-def bash_label(command: str) -> str:
+
+def bash_label(command: str, subcommands: bool = False) -> str:
     if not command:
         return "_shell"
     words = command.split()
+    effective: list[str] = []
     for word in words:
         if word in _BASH_WRAPPERS:
             continue
@@ -39,19 +57,55 @@ def bash_label(command: str) -> str:
             continue
         if word.startswith("$") or word.startswith("{"):
             return "_shell"
-        return Path(word).name or "_shell"
-    return "_shell"
+        if word.startswith("#"):
+            return "_shell"
+        effective.append(Path(word).name if not effective else word)
+        if not effective:
+            continue
+        break
+    if not effective:
+        return "_shell"
+
+    cli = effective[0]
+    if not subcommands or cli not in _SUBCOMMAND_DEPTH:
+        return cli
+
+    # Collect up to depth words, stopping at flags
+    depth = _SUBCOMMAND_DEPTH[cli]
+    parts = [cli]
+    remaining = [w for w in words[words.index(command.split()[0]) + 1:] if w]
+    # Re-derive from original words after wrappers
+    raw_words = command.split()
+    idx = 0
+    # Skip wrappers/env-vars to find CLI position
+    for i, w in enumerate(raw_words):
+        if w in _BASH_WRAPPERS:
+            continue
+        if "=" in w and not w.startswith("-"):
+            continue
+        idx = i
+        break
+    for w in raw_words[idx + 1:]:
+        if len(parts) >= depth:
+            break
+        if w.startswith("-"):
+            break
+        if "=" in w and not w.startswith("-"):
+            break
+        parts.append(w)
+
+    return " ".join(parts)
 
 
-def extract_tool_label(block: dict) -> str:
+def extract_tool_label(block: dict, subcommands: bool = False) -> str:
     name = block.get("name", "")
     if name == "Bash":
         cmd = block.get("input", {}).get("command", "")
-        return bash_label(cmd)
+        return bash_label(cmd, subcommands)
     return name
 
 
-def parse_session(path: Path) -> dict | None:
+def parse_session(path: Path, subcommands: bool = False) -> dict | None:
     turns: list[dict] = []
     session_id = path.stem
 
@@ -77,9 +131,10 @@ def parse_session(path: Path) -> dict | None:
                     continue
 
                 tool_labels = [
-                    extract_tool_label(b)
+                    label
                     for b in content
                     if isinstance(b, dict) and b.get("type") == "tool_use"
+                    and (label := extract_tool_label(b, subcommands)) != "_shell"
                 ]
 
                 if not tool_labels:
@@ -322,6 +377,8 @@ def main() -> None:
                         help="Write GitHub-renderable Mermaid markdown to this path")
     parser.add_argument("--summary-only", action="store_true",
                         help="Print n-gram summary only (ignores --output/--html/--markdown)")
+    parser.add_argument("--subcommands", action="store_true",
+                        help="Expand Bash labels to include subcommands (e.g. 'git commit', 'gh run watch')")
     args = parser.parse_args()
 
     paths = discover_sessions(args.since, args.project)
@@ -331,7 +388,7 @@ def main() -> None:
 
     records = []
     for p in paths:
-        rec = parse_session(p)
+        rec = parse_session(p, subcommands=args.subcommands)
         if rec:
             records.append(rec)
 
