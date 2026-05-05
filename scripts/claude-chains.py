@@ -34,7 +34,7 @@ _BASH_WRAPPERS = {"sudo", "env", "time", "nice", "nohup", "watch"}
 _SUBCOMMAND_DEPTH: dict[str, int] = {
     "gh": 3,
     "git": 2,
-    "uv": 2,
+    "uv": 2,       # uv sync, uv add, uv lock — uv run handled by _TRANSPARENT_RUNNERS
     "docker": 2,
     "just": 2,
     "chezmoi": 2,
@@ -42,6 +42,21 @@ _SUBCOMMAND_DEPTH: dict[str, int] = {
     "kubectl": 2,
     "cargo": 2,
     "npm": 2,
+}
+
+# CLIs that act as transparent runners: `uv run python` → label is `python`.
+# The word after the subcommand becomes the effective label.
+_TRANSPARENT_RUNNERS: dict[str, str] = {
+    "uv": "run",    # uv run <cmd> → <cmd>
+}
+
+# Normalise variant spellings to a canonical label.
+_LABEL_ALIASES: dict[str, str] = {
+    "python3": "python",
+    "python3.10": "python",
+    "python3.11": "python",
+    "python3.12": "python",
+    "python3.13": "python",
 }
 
 
@@ -67,30 +82,39 @@ def bash_label(command: str, subcommands: bool = False) -> str:
         return "_shell"
 
     cli = effective[0]
-    if not subcommands or cli not in _SUBCOMMAND_DEPTH:
-        return cli
+
+    if not subcommands:
+        return _LABEL_ALIASES.get(cli, cli)
+
+    # Transparent runners: `uv run python` → `python`
+    if cli in _TRANSPARENT_RUNNERS:
+        trigger = _TRANSPARENT_RUNNERS[cli]
+        raw_words = command.split()
+        idx = next(
+            (i for i, w in enumerate(raw_words) if w not in _BASH_WRAPPERS and "=" not in w),
+            0,
+        )
+        tail = [w for w in raw_words[idx + 1:] if not w.startswith("-") and "=" not in w]
+        if tail and tail[0] == trigger and len(tail) > 1:
+            inner = Path(tail[1]).name
+            return _LABEL_ALIASES.get(inner, inner)
+        # Fall through to depth-based logic (uv sync, uv add, etc.)
+
+    if cli not in _SUBCOMMAND_DEPTH:
+        return _LABEL_ALIASES.get(cli, cli)
 
     # Collect up to depth words, stopping at flags
     depth = _SUBCOMMAND_DEPTH[cli]
     parts = [cli]
-    remaining = [w for w in words[words.index(command.split()[0]) + 1:] if w]
-    # Re-derive from original words after wrappers
     raw_words = command.split()
-    idx = 0
-    # Skip wrappers/env-vars to find CLI position
-    for i, w in enumerate(raw_words):
-        if w in _BASH_WRAPPERS:
-            continue
-        if "=" in w and not w.startswith("-"):
-            continue
-        idx = i
-        break
+    idx = next(
+        (i for i, w in enumerate(raw_words) if w not in _BASH_WRAPPERS and "=" not in w),
+        0,
+    )
     for w in raw_words[idx + 1:]:
         if len(parts) >= depth:
             break
-        if w.startswith("-"):
-            break
-        if "=" in w and not w.startswith("-"):
+        if w.startswith("-") or ("=" in w and not w.startswith("-")):
             break
         parts.append(w)
 
@@ -184,7 +208,7 @@ def ngrams(stream: list[str], n: int) -> list[tuple[str, ...]]:
     return [tuple(stream[i : i + n]) for i in range(len(stream) - n + 1)]
 
 
-def compute_ngrams(records: list[dict], top_n: int = 20) -> list[tuple[tuple, int]]:
+def compute_ngrams(records: list[dict], top_n: int = 50) -> list[tuple[tuple, int]]:
     counts: Counter = Counter()
     for rec in records:
         flat = [t for turn in rec["sequence"] for t in turn["tools"]]
@@ -206,7 +230,7 @@ def project_stats(records: list[dict]) -> list[tuple[str, int, int]]:
     )
 
 
-def summarise(records: list[dict], top_n: int = 20) -> None:
+def summarise(records: list[dict], top_n: int = 50) -> None:
     top = compute_ngrams(records, top_n)
     print(f"\nTop {top_n} tool n-grams (size 2–4) across {len(records)} sessions:\n")
     print(f"  {'Count':>6}  Pattern")
