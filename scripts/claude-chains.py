@@ -75,8 +75,6 @@ def bash_label(command: str, subcommands: bool = False) -> str:
         if word.startswith("#"):
             return "_shell"
         effective.append(Path(word).name if not effective else word)
-        if not effective:
-            continue
         break
     if not effective:
         return "_shell"
