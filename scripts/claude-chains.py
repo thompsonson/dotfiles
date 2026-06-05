@@ -3,7 +3,8 @@
 Extract tool-call sequences from Claude Code session JSONL files.
 
 Discovers ~/.claude/projects/**/*.jsonl, parses assistant turns, and emits
-per-session JSONL with ordered tool sequences. Prints a top-20 n-gram summary.
+per-session JSONL with ordered tool sequences. Prints a top-N n-gram summary
+annotated with subcommand expansions, re-ranked by strongest specific signal.
 
 Usage:
     python3 scripts/claude-chains.py
@@ -13,7 +14,7 @@ Usage:
     python3 scripts/claude-chains.py --html /tmp/chains.html
     python3 scripts/claude-chains.py --markdown /tmp/chains.md
     python3 scripts/claude-chains.py --summary-only
-    python3 scripts/claude-chains.py --subcommands --summary-only
+    python3 scripts/claude-chains.py --no-subcommands --summary-only
 """
 
 import argparse
@@ -131,7 +132,8 @@ def extract_tool_label(block: dict, subcommands: bool = False) -> str:
     return name
 
 
-def parse_session(path: Path, subcommands: bool = False) -> dict | None:
+def parse_session(path: Path) -> dict | None:
+    """Parse a session file, storing both flat and subcommand labels per tool call."""
     turns: list[dict] = []
     session_id = path.stem
 
@@ -156,17 +158,20 @@ def parse_session(path: Path, subcommands: bool = False) -> dict | None:
                 if not isinstance(content, list):
                     continue
 
-                tool_labels = [
-                    label
-                    for b in content
-                    if isinstance(b, dict) and b.get("type") == "tool_use"
-                    and (label := extract_tool_label(b, subcommands)) != "_shell"
-                ]
+                tools = []
+                for b in content:
+                    if not isinstance(b, dict) or b.get("type") != "tool_use":
+                        continue
+                    flat = extract_tool_label(b, subcommands=False)
+                    if flat == "_shell":
+                        continue
+                    sub = extract_tool_label(b, subcommands=True)
+                    tools.append({"flat": flat, "sub": sub})
 
-                if not tool_labels:
+                if not tools:
                     continue
 
-                turns.append({"ts": ts, "uuid": uuid[:8], "tools": tool_labels})
+                turns.append({"ts": ts, "uuid": uuid[:8], "tools": tools})
 
     except OSError:
         return None
@@ -187,37 +192,50 @@ def parse_session(path: Path, subcommands: bool = False) -> dict | None:
     }
 
 
-def discover_sessions(since_days: int, project: str | None) -> list[Path]:
-    if not CLAUDE_DIR.exists():
-        return []
+def _flat_stream(rec: dict) -> list[str]:
+    return [t["flat"] for turn in rec["sequence"] for t in turn["tools"]
+            if t["flat"] not in _NGRAM_NOISE]
 
-    cutoff = time.time() - since_days * 86400
-    paths = []
 
-    for project_dir in CLAUDE_DIR.iterdir():
-        if not project_dir.is_dir():
-            continue
-        if project and project not in project_dir.name:
-            continue
-        for f in project_dir.glob("*.jsonl"):
-            if f.stat().st_mtime >= cutoff:
-                paths.append(f)
-
-    return sorted(paths)
+def _sub_stream(rec: dict) -> list[str]:
+    return [t["sub"] for turn in rec["sequence"] for t in turn["tools"]
+            if t["flat"] not in _NGRAM_NOISE]
 
 
 def ngrams(stream: list[str], n: int) -> list[tuple[str, ...]]:
-    return [tuple(stream[i : i + n]) for i in range(len(stream) - n + 1)]
+    return [tuple(stream[i: i + n]) for i in range(len(stream) - n + 1)]
 
 
 def compute_ngrams(records: list[dict], top_n: int = 50) -> list[tuple[tuple, int]]:
     counts: Counter = Counter()
     for rec in records:
-        flat = [t for turn in rec["sequence"] for t in turn["tools"]
-                if t not in _NGRAM_NOISE]
+        flat = _flat_stream(rec)
         for n in (2, 3, 4):
             counts.update(ngrams(flat, n))
     return counts.most_common(top_n)
+
+
+def expand_ngrams(
+    records: list[dict],
+    flat_patterns: list[tuple],
+    top_k: int = 3,
+) -> dict[tuple, list[tuple[tuple, int]]]:
+    """For each flat pattern, find the top-k subcommand expansions."""
+    pattern_set = set(flat_patterns)
+    n_sizes = {len(p) for p in flat_patterns}
+    expansion_counts: dict[tuple, Counter] = {p: Counter() for p in flat_patterns}
+
+    for rec in records:
+        flat = _flat_stream(rec)
+        sub = _sub_stream(rec)
+        for n in n_sizes:
+            for i in range(len(flat) - n + 1):
+                flat_gram = tuple(flat[i: i + n])
+                if flat_gram in pattern_set:
+                    sub_gram = tuple(sub[i: i + n])
+                    expansion_counts[flat_gram][sub_gram] += 1
+
+    return {p: counter.most_common(top_k) for p, counter in expansion_counts.items()}
 
 
 def project_stats(records: list[dict]) -> list[tuple[str, int, int]]:
@@ -233,13 +251,52 @@ def project_stats(records: list[dict]) -> list[tuple[str, int, int]]:
     )
 
 
-def summarise(records: list[dict], top_n: int = 50) -> None:
-    top = compute_ngrams(records, top_n)
-    print(f"\nTop {top_n} tool n-grams (size 2–4) across {len(records)} sessions:\n")
-    print(f"  {'Count':>6}  Pattern")
-    print(f"  {'------':>6}  -------")
-    for pattern, count in top:
-        print(f"  {count:>6}  {' → '.join(pattern)}")
+def summarise(records: list[dict], top_n: int = 50, show_expansions: bool = True, top_k: int = 3) -> None:
+    # Compute more than needed so re-ranking doesn't clip good patterns
+    candidates = compute_ngrams(records, top_n * 3)
+
+    if not show_expansions:
+        print(f"\nTop {top_n} tool n-grams (size 2–4) across {len(records)} sessions:\n")
+        print(f"  {'Count':>6}  Pattern")
+        print(f"  {'------':>6}  -------")
+        for pattern, count in candidates[:top_n]:
+            print(f"  {count:>6}  {' → '.join(pattern)}")
+        return
+
+    flat_patterns = [p for p, _ in candidates]
+    expansions = expand_ngrams(records, flat_patterns, top_k)
+
+    def rank_key(item: tuple) -> int:
+        p, flat_count = item
+        exps = expansions.get(p, [])
+        # Re-rank by the strongest specific expansion count.
+        # For non-Bash patterns (Edit, Read etc.) the expansion equals the flat pattern,
+        # so its count == flat_count and relative order is preserved.
+        return exps[0][1] if exps else flat_count
+
+    reranked = sorted(candidates, key=rank_key, reverse=True)[:top_n]
+
+    print(f"\nTop {top_n} tool n-grams (size 2–4) across {len(records)} sessions:")
+    print(f"  (ranked by strongest specific subcommand signal)\n")
+    print(f"  {'Count':>6}  Pattern / top subcommand expansions")
+    print(f"  {'------':>6}  ------------------------------------")
+    for pattern, flat_count in reranked:
+        print(f"  {flat_count:>6}  {' → '.join(pattern)}")
+        exps = expansions.get(pattern, [])
+        for sub_pattern, sub_count in exps:
+            if sub_pattern != pattern:
+                print(f"  {'':6}    {sub_count:>6}  {' → '.join(sub_pattern)}")
+
+
+def _flat_tools_for_output(rec: dict) -> dict:
+    """Return a copy of the record with tools as flat label strings (for JSONL output)."""
+    return {
+        **rec,
+        "sequence": [
+            {**turn, "tools": [t["flat"] for t in turn["tools"]]}
+            for turn in rec["sequence"]
+        ],
+    }
 
 
 def write_html(records: list[dict], path: Path, since_days: int) -> None:
@@ -404,8 +461,8 @@ def main() -> None:
                         help="Write GitHub-renderable Mermaid markdown to this path")
     parser.add_argument("--summary-only", action="store_true",
                         help="Print n-gram summary only (ignores --output/--html/--markdown)")
-    parser.add_argument("--subcommands", action="store_true",
-                        help="Expand Bash labels to include subcommands (e.g. 'git commit', 'gh run watch')")
+    parser.add_argument("--no-subcommands", action="store_true",
+                        help="Suppress subcommand expansion detail in summary (show flat labels only)")
     args = parser.parse_args()
 
     paths = discover_sessions(args.since, args.project)
@@ -415,7 +472,7 @@ def main() -> None:
 
     records = []
     for p in paths:
-        rec = parse_session(p, subcommands=args.subcommands)
+        rec = parse_session(p)
         if rec:
             records.append(rec)
 
@@ -429,14 +486,33 @@ def main() -> None:
             out_path.parent.mkdir(parents=True, exist_ok=True)
             with open(out_path, "w") as f:
                 for rec in records:
-                    f.write(json.dumps(rec) + "\n")
+                    f.write(json.dumps(_flat_tools_for_output(rec)) + "\n")
             print(f"JSONL:    {out_path}")
         if args.html:
             write_html(records, Path(args.html), args.since)
         if args.markdown:
             write_markdown(records, Path(args.markdown), args.since)
 
-    summarise(records)
+    summarise(records, show_expansions=not args.no_subcommands)
+
+
+def discover_sessions(since_days: int, project: str | None) -> list[Path]:
+    if not CLAUDE_DIR.exists():
+        return []
+
+    cutoff = time.time() - since_days * 86400
+    paths = []
+
+    for project_dir in CLAUDE_DIR.iterdir():
+        if not project_dir.is_dir():
+            continue
+        if project and project not in project_dir.name:
+            continue
+        for f in project_dir.glob("*.jsonl"):
+            if f.stat().st_mtime >= cutoff:
+                paths.append(f)
+
+    return sorted(paths)
 
 
 if __name__ == "__main__":
