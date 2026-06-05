@@ -2,3 +2,5 @@ bin/
 # But include chezmoi-managed bin directories
 !executable_*/bin/
 !dot_*/bin/
+
+output/
