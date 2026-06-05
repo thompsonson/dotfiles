@@ -1,0 +1,52 @@
+# OpenTelemetry Collector config — Claude Code telemetry pipeline.
+# Runs on pop-mini only. Other machines push here via Tailscale MagicDNS.
+# Receivers: OTLP HTTP (4318) + gRPC (4317).
+# Exporters: file (JSONL with rotation) -> ingest.py reads into SQLite.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 1024
+  resourcedetection:
+    detectors: [env, system]
+    timeout: 2s
+
+exporters:
+  file/metrics:
+    path: /data/metrics.jsonl
+    rotation: {max_megabytes: 50, max_days: 365, max_backups: 14}
+  file/logs:
+    path: /data/logs.jsonl
+    rotation: {max_megabytes: 50, max_days: 365, max_backups: 14}
+  file/traces:
+    path: /data/traces.jsonl
+    rotation: {max_megabytes: 50, max_days: 365, max_backups: 14}
+
+extensions:
+  health_check: {endpoint: 0.0.0.0:13133}
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [file/metrics]
+    logs:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [file/logs]
+    traces:
+      receivers: [otlp]
+      processors: [resourcedetection, batch]
+      exporters: [file/traces]
+  telemetry:
+    logs: {level: info}

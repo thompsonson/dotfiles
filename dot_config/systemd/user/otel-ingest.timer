@@ -1,0 +1,13 @@
+[Unit]
+Description=Run OTel JSONL→SQLite ingester every 5 min
+Documentation=file://%h/.local/share/otel/ingest.py
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+Unit=otel-ingest.service
+
+[Install]
+WantedBy=timers.target

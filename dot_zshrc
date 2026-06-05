@@ -258,5 +258,22 @@ _sysbak_completion() {
 }
 compdef _sysbak_completion sysbak 2>/dev/null
 
+# Claude Code OpenTelemetry export → pop-mini central collector.
+# pop-mini: always-on (it hosts the collector, see ~/.local/share/otel/).
+# Other machines: opt-in via `touch ~/.config/claude-telemetry/enabled`.
+if [[ "$HOST" == "pop-mini" ]]; then
+  export CLAUDE_CODE_ENABLE_TELEMETRY=1
+  export OTEL_METRICS_EXPORTER=otlp
+  export OTEL_LOGS_EXPORTER=otlp
+  export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+  export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+elif [ -f "$HOME/.config/claude-telemetry/enabled" ]; then
+  export CLAUDE_CODE_ENABLE_TELEMETRY=1
+  export OTEL_METRICS_EXPORTER=otlp
+  export OTEL_LOGS_EXPORTER=otlp
+  export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+  export OTEL_EXPORTER_OTLP_ENDPOINT=http://pop-mini.monkey-ladon.ts.net:4318
+fi
+
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh

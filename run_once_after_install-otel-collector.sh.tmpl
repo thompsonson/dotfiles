@@ -1,0 +1,58 @@
+#!/bin/bash
+# Install the Claude Code OTel collector on pop-mini.
+# Other machines: opt-in via `mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled`
+# Runs once per machine; re-runs if this file changes.
+
+set -euo pipefail
+
+{{- if eq .chezmoi.hostname "pop-mini" }}
+
+echo '== Installing Claude Code OTel collector (pop-mini) =='
+
+# 1. Data dir
+mkdir -p "$HOME/.local/share/otel/data"
+
+# 2. Docker check
+if ! command -v docker >/dev/null 2>&1; then
+  echo 'docker not found — install docker first, then re-run `chezmoi apply`' >&2
+  exit 1
+fi
+
+# 3. Pull the collector image (idempotent)
+docker pull otel/opentelemetry-collector-contrib:0.110.0
+
+# 4. Bring up the collector
+docker compose -f "$HOME/.local/share/otel/compose.yml" up -d
+sleep 3
+docker compose -f "$HOME/.local/share/otel/compose.yml" ps
+
+# 5. Initial backfill of historical ~/.claude/projects (idempotent)
+echo '== Backfilling historical Claude transcripts =='
+python3 "$HOME/.local/share/otel/backfill.py"
+
+# 6. Enable + start the ingest timer
+systemctl --user daemon-reload
+systemctl --user enable --now otel-ingest.timer
+systemctl --user status --no-pager otel-ingest.timer | head -10
+
+cat <<EOF
+
+✓ OTel collector running on pop-mini (ports 4317/4318)
+✓ SQLite DB: ~/.local/share/otel/data/claude.db
+✓ Ingest timer active (every 5 min)
+
+Test:   otel-stats hours-per-week --since=2026-04-01
+Logs:   docker compose -f ~/.local/share/otel/compose.yml logs -f otelcol
+Status: systemctl --user status otel-ingest.timer
+EOF
+
+{{- else }}
+
+# Non-pop-mini machines: nothing to install. The zshrc env vars handle the
+# opt-in toggle. Touch ~/.config/claude-telemetry/enabled to start sending.
+echo 'OTel collector install skipped — this is not pop-mini.'
+echo 'To send telemetry to pop-mini from this machine:'
+echo '  mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled'
+echo '  (new shells will pick up the env vars)'
+
+{{- end }}

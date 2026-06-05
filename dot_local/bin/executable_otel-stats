@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# otel-stats — thin SQL wrapper over ~/.local/share/otel/data/claude.db
+# Presets for retro analysis. Escape hatch: `otel-stats sql "<query>"`.
+#
+# Quantity = 5-min bucket method: count distinct (date, hour, slot) tuples
+# from legacy_events.ts and multiply by 5 to get minutes.
+
+set -euo pipefail
+
+DB="${OTEL_DB:-$HOME/.local/share/otel/data/claude.db}"
+
+if [ ! -f "$DB" ]; then
+  echo "no $DB — run backfill.py first" >&2
+  exit 1
+fi
+
+cmd="${1:-help}"; shift || true
+
+# Optional filters via env-var-style args: PROJECT=foo SINCE=2026-04-01
+PROJECT="${PROJECT:-}"
+SINCE="${SINCE:-1970-01-01}"
+UNTIL="${UNTIL:-9999-12-31}"
+for arg in "$@"; do
+  case "$arg" in
+    --project=*) PROJECT="${arg#--project=}" ;;
+    --since=*)   SINCE="${arg#--since=}" ;;
+    --until=*)   UNTIL="${arg#--until=}" ;;
+  esac
+done
+
+PROJ_FILTER=""
+if [ -n "$PROJECT" ]; then
+  # Strip characters that could break the SQL literal (local tool, but good practice).
+  PROJECT="${PROJECT//[^a-zA-Z0-9._-]/}"
+  PROJ_FILTER="AND project LIKE '%${PROJECT}%'"
+fi
+
+run() { sqlite3 -header -column "$DB" "$@"; }
+
+case "$cmd" in
+  help|-h|--help)
+    cat <<EOF
+otel-stats — Claude Code telemetry queries
+
+Usage:
+  otel-stats <preset> [--project=NAME] [--since=YYYY-MM-DD] [--until=YYYY-MM-DD]
+
+Presets:
+  hours-per-day     Active hours per calendar day
+  hours-per-week    Active hours per ISO week
+  hours-per-month   Active hours per month
+  by-project        Active hours grouped by project
+  by-tool           Tool-call counts grouped by tool name
+  by-model          Event counts grouped by model
+  sessions          Distinct session count per day
+  tokens            Token totals (input/output/cache) per day
+  recent            Last 50 events (raw)
+  schema            Show table + view definitions
+  sql "<query>"     Run an arbitrary SQL query
+
+Environment:
+  OTEL_DB           Override the database path (default: ~/.local/share/otel/data/claude.db)
+EOF
+    ;;
+
+  hours-per-day)
+    run "SELECT day, ROUND(SUM(minutes)/60.0, 2) AS hours
+         FROM (
+           SELECT date(ts) AS day,
+                  COUNT(DISTINCT substr(ts,12,2) || '|' ||
+                                 (cast(substr(ts,15,2) AS INTEGER)/5)) * 5 AS minutes
+           FROM legacy_events
+           WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+           GROUP BY date(ts)
+         )
+         GROUP BY day
+         ORDER BY day;"
+    ;;
+
+  hours-per-week)
+    run "SELECT strftime('%Y-W%W', ts) AS week,
+                ROUND(COUNT(DISTINCT date(ts) || '|' || substr(ts,12,2) || '|' ||
+                            (cast(substr(ts,15,2) AS INTEGER)/5)) * 5 / 60.0, 2) AS hours
+         FROM legacy_events
+         WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY week
+         ORDER BY week;"
+    ;;
+
+  hours-per-month)
+    run "SELECT strftime('%Y-%m', ts) AS month,
+                ROUND(COUNT(DISTINCT date(ts) || '|' || substr(ts,12,2) || '|' ||
+                            (cast(substr(ts,15,2) AS INTEGER)/5)) * 5 / 60.0, 2) AS hours
+         FROM legacy_events
+         WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY month
+         ORDER BY month;"
+    ;;
+
+  by-project)
+    run "SELECT project,
+                COUNT(*) AS events,
+                ROUND(COUNT(DISTINCT date(ts) || '|' || substr(ts,12,2) || '|' ||
+                            (cast(substr(ts,15,2) AS INTEGER)/5)) * 5 / 60.0, 2) AS hours
+         FROM legacy_events
+         WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY project
+         ORDER BY hours DESC;"
+    ;;
+
+  by-tool)
+    run "SELECT tool_name, COUNT(*) AS calls
+         FROM legacy_events
+         WHERE tool_name IS NOT NULL
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY tool_name
+         ORDER BY calls DESC;"
+    ;;
+
+  by-model)
+    run "SELECT model, COUNT(*) AS events
+         FROM legacy_events
+         WHERE model IS NOT NULL
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY model
+         ORDER BY events DESC;"
+    ;;
+
+  sessions)
+    run "SELECT date(ts) AS day, COUNT(DISTINCT session_id) AS sessions
+         FROM legacy_events
+         WHERE session_id IS NOT NULL
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY day
+         ORDER BY day;"
+    ;;
+
+  tokens)
+    run "SELECT date(ts) AS day,
+                SUM(COALESCE(input_tokens,0))       AS input_tok,
+                SUM(COALESCE(output_tokens,0))      AS output_tok,
+                SUM(COALESCE(cache_read_tokens,0))  AS cache_read,
+                SUM(COALESCE(cache_write_tokens,0)) AS cache_write
+         FROM legacy_events
+         WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL' $PROJ_FILTER
+         GROUP BY day
+         HAVING input_tok > 0 OR output_tok > 0
+         ORDER BY day;"
+    ;;
+
+  recent)
+    run "SELECT ts, project, event_type, tool_name, model
+         FROM legacy_events
+         ORDER BY ts DESC
+         LIMIT 50;"
+    ;;
+
+  schema)
+    run "SELECT type, name, sql FROM sqlite_master
+         WHERE type IN ('table','view','index')
+           AND name NOT LIKE 'sqlite_%'
+         ORDER BY type, name;"
+    ;;
+
+  sql)
+    query="${1:-}"
+    [ -z "$query" ] && { echo "usage: otel-stats sql '<query>'" >&2; exit 2; }
+    run "$query"
+    ;;
+
+  *)
+    echo "unknown preset: $cmd (try 'otel-stats help')" >&2
+    exit 2
+    ;;
+esac

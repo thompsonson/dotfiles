@@ -1,0 +1,25 @@
+# OTel collector for Claude Code telemetry. Pop-mini only.
+#
+# Bring up:   docker compose -f ~/.local/share/otel/compose.yml up -d
+# Tear down:  docker compose -f ~/.local/share/otel/compose.yml down
+# Logs:       docker compose -f ~/.local/share/otel/compose.yml logs -f otelcol
+#
+# Bind: 127.0.0.1 (local) + Tailscale IP. Optionally lock down with ufw:
+#   sudo ufw allow in on tailscale0 to any port 4318 proto tcp
+#   sudo ufw allow in on tailscale0 to any port 4317 proto tcp
+
+services:
+  otelcol:
+    image: otel/opentelemetry-collector-contrib:0.110.0
+    container_name: otelcol-claude
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ${HOME}/.local/share/otel/config.yaml:/etc/otelcol/config.yaml:ro
+      - ${HOME}/.local/share/otel/data:/data
+    network_mode: host
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:13133/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
