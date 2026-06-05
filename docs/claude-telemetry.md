@@ -1,179 +1,142 @@
-# Claude Code Telemetry & Multi-Machine Aggregation — Plan
+# Claude Code Telemetry — Pop-mini OTel Pipeline
 
-Notes from an exploration of how to track Claude Code cost / tokens / tool
-usage across machines, and how that interacts with [codeburn][cb].
+Central OTel collector on pop-mini, SQLite store, ingest from any machine
+running Claude Code. Codeburn-based retros are superseded by SQL against the
+ingested store.
 
-[cb]: https://github.com/thompsonson/codeburn
+## TL;DR
 
-## TL;DR — do this in order
+- **Where:** pop-mini hosts everything. Other machines push telemetry to it via
+  Tailscale MagicDNS (`pop-mini.monkey-ladon.ts.net:4318`).
+- **Stack:** `otelcol-contrib` in Docker → JSONL file exporter → Python
+  ingester on a systemd-user timer → SQLite at
+  `~/.local/share/otel/data/claude.db`.
+- **Backfill:** one-shot import of `~/.claude/projects/*/*.jsonl` and
+  `*/subagents/*.jsonl` into a separate `legacy_events` table for historical
+  retros. Goes back to Jan 2026 via subagent residuals.
+- **Retention:** sysbak already covers `~/.claude/projects/`. The SQLite store
+  also lives there once sysbak's include list picks up
+  `~/.local/share/otel/data/`.
+- **Goal:** retrospective analysis (weekly / monthly / project). Not live
+  dashboards.
 
-1. **Run the diagnostic in §1** before building anything. It answers whether
-   "only ~1 month showing in codeburn" is data loss or display windowing —
-   the answer changes what's worth doing next.
-2. **Add `~/.claude/projects/` to `sysbak`** (§2). Solves retention
-   independently of any tooling choice.
-3. **Decide on aggregation** (§3) only if step 1 confirms multiple machines
-   each hold sessions worth merging.
-4. **OTel telemetry env vars** (§4) are optional and orthogonal — only
-   useful if you'll actually look at dashboards.
+## Why this and not codeburn
 
----
+Codeburn reads top-level Claude transcripts; Claude Code auto-deletes those
+after `cleanupPeriodDays` (default 30). Sub-agent jsonls survive in nested
+dirs that the cleanup sweep doesn't reach. Codeburn ignores them, so its view
+is permanently windowed and silently incomplete. OTel captures forward-going
+data into a store we own, and the backfill rescues what's still on disk.
 
-## 1. Diagnostic — what's actually on disk?
+The Anthropic OTel surface (`CLAUDE_CODE_ENABLE_TELEMETRY=1`) is the
+officially supported channel; the local `.jsonl` files are documented as an
+internal "mirror destination" with no stable schema. See
+[Anthropic monitoring docs](https://code.claude.com/docs/en/monitoring-usage).
 
-Claude Code stores session transcripts as JSONL at
-`~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl`. There's no evidence
-Claude rotates them, so files going back >1 month should be present unless
-something else removed them.
+## Components
 
-Run on your laptop:
+| Path | Purpose |
+|---|---|
+| `~/.local/share/otel/config.yaml` | Collector config (OTLP HTTP/gRPC in, file exporter out) |
+| `~/.local/share/otel/compose.yml` | Docker compose (pop-mini only, `network_mode: host`) |
+| `~/.local/share/otel/schema.sql`  | SQLite schema — `events`, `legacy_events`, `ingest_state` |
+| `~/.local/share/otel/ingest.py`   | OTel JSONL → SQLite `events` (every 5 min via systemd timer) |
+| `~/.local/share/otel/backfill.py` | `~/.claude/projects/**/*.jsonl` → `legacy_events` (one-shot, idempotent) |
+| `~/.local/bin/otel-stats`         | Thin SQL wrapper with retro presets |
+| `~/.config/systemd/user/otel-ingest.{service,timer}` | Ingester runs every 5 min |
+| `run_once_after_install-otel-collector.sh.tmpl` (chezmoi) | First-time install, pop-mini-gated |
 
-```bash
-#!/usr/bin/env bash
-# Inventory ~/.claude session storage.
-# Distinguishes "data is gone" from "codeburn is windowing the display".
+## Activation
 
-set -u
-DIR="${CLAUDE_DIR:-$HOME/.claude/projects}"
-
-if [ ! -d "$DIR" ]; then
-  echo "No $DIR — Claude Code not installed or session dir is elsewhere."
-  exit 1
-fi
-
-echo "=== Inventory: $DIR ==="
-files=$(find "$DIR" -name '*.jsonl' 2>/dev/null | wc -l | tr -d ' ')
-projects=$(find "$DIR" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')
-echo "$files session files across $projects project dirs"
-du -sh "$DIR" 2>/dev/null
-
-echo
-echo "=== Sessions older than... (by mtime) ==="
-for d in 30 60 90 180 365 730; do
-  n=$(find "$DIR" -name '*.jsonl' -mtime +$d 2>/dev/null | wc -l | tr -d ' ')
-  printf "  %4d days: %5s files\n" "$d" "$n"
-done
-
-echo
-echo "=== Newest / oldest by mtime ==="
-find "$DIR" -name '*.jsonl' 2>/dev/null -print0 \
-  | xargs -0 ls -lt 2>/dev/null \
-  | awk 'NR==1 {newest=$0} {oldest=$0} END {print "newest:", newest; print "oldest:", oldest}'
-
-echo
-echo "=== Largest projects ==="
-du -sh "$DIR"/*/ 2>/dev/null | sort -h | tail -10
-```
-
-### How to read the output
-
-| What you see | What it means | Next step |
-|---|---|---|
-| Files >30d old exist, codeburn UI shows ~1 month | codeburn is windowing the display | Check codeburn flags / config for the lookback window |
-| Few/no files >30d old, total size small | Data was removed (reinstall, cleanup, migration) | Restore from backup if you have one; treat retention as a backup problem from now on (§2) |
-| Lots of files but only one or two project dirs | You changed `cwd`s a lot or only used one project — probably fine | — |
-
-mtime is a first approximation: if you've copied files between machines it
-can lie. For a deeper check, the JSONL files contain per-event timestamps
-inside — parseable with `jq` if needed.
-
----
-
-## 2. Backup retention — do this regardless
-
-Whatever aggregation choice you make, the retention story should not depend
-on it. Add `~/.claude/projects/` (and `~/.claude/sessions/` if you care about
-metadata) to `sysbak`'s include list so the USB rsnapshot rotation owns
-historical session data.
-
-Once that's in place, "how far back can I see?" becomes "however far back
-your backup chain goes," not a tooling concern.
-
----
-
-## 3. Cross-machine aggregation
-
-Only worth building if you actually run Claude on multiple machines and
-want one combined view. If `pop-mini` is the only Claude host, skip this
-and just `ssh pop-mini codeburn` from elsewhere.
-
-### Recommended shape: sync-to-laptop, pull model
-
-- **Laptop is the aggregator.** Runs codeburn against a tree containing
-  its own sessions plus copies pulled from each remote host.
-- **Pull, not push.** A launchd timer on the laptop rsyncs from each
-  device over Tailscale/SSH on a schedule (e.g. every 15 min). Pull
-  handles "remote was offline" gracefully — next tick catches up. Push
-  from remotes has to deal with "laptop closed" and needs retry logic.
-- **Namespace per host, do not merge.** Pull into
-  `~/.claude-aggregated/<hostname>/projects/`, never into
-  `~/.claude/projects/`. Reasons:
-    - Keeps your live Claude Code untouched (no chance of seeing foreign
-      sessions in the running client).
-    - Gives you a free `(machine_id, session_id)` key via the directory
-      name — handles dedup if you ever ssh into another host and run
-      Claude there.
-    - Easy to wipe and re-sync if anything goes wrong.
-- **codeburn must support multiple roots.** Verify before designing the
-  rest. If it only reads `~/.claude/projects/`, either (a) PR a
-  `--scan-root` / env var, or (b) symlink children of the aggregated
-  tree under a single shadow root.
-
-### Why not "pop-mini as a server"
-
-codeburn today is a *parser* (reads provider session files from disk),
-not a *receiver*. Turning it into a server/client app means designing:
-an ingest API, schema versioning, auth tokens, retry/backoff on the
-client, dedup keys, a fan-out for new providers. That's weeks of work.
-
-Sync-to-laptop reuses 100% of the existing parser and is days of work
-(launchd plist + rsync wrapper + multi-root scan). You can graduate to
-real client/server later if file-sync hits a wall — e.g. you want
-sub-minute freshness or non-Unix clients.
-
-### Open questions to nail down before any code
-
-- **Menubar offline behaviour** — when the laptop is off-network, does
-  the menubar show stale-cached data, blank, or fall back to a local
-  parse? Decide now; affects how the read path is structured.
-- **Cursor SQLite** — codeburn parses Cursor's SQLite DB. Syncing a live
-  SQLite file is fine with WAL mode + rsync, but worth a sanity check
-  that the parser tolerates a snapshot taken mid-write.
-
----
-
-## 4. (Optional) OTel telemetry env vars
-
-Orthogonal to all of the above. Useful if you want *live* metrics (cost,
-tokens by model, tool success/failure, lines-of-code, commits, PRs) flowing
-to a dashboard rather than reconstructed from JSONL after the fact.
+After `chezmoi apply` on pop-mini:
 
 ```bash
-# In ~/.zshrc, ideally guarded by a per-machine opt-in toggle:
-if [ -f "$HOME/.config/claude-telemetry/enabled" ]; then
-  export CLAUDE_CODE_ENABLE_TELEMETRY=1
-  export OTEL_METRICS_EXPORTER=otlp
-  export OTEL_LOGS_EXPORTER=otlp
-  export OTEL_EXPORTER_OTLP_PROTOCOL=grpc
-  export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
-fi
+docker compose -f ~/.local/share/otel/compose.yml up -d   # if not already running
+python3 ~/.local/share/otel/backfill.py                   # first-time backfill
+systemctl --user enable --now otel-ingest.timer
+
+otel-stats hours-per-week --since=2026-04-01
+otel-stats by-project --since=2026-04-01
+otel-stats sql "SELECT model, COUNT(*) FROM legacy_events GROUP BY model;"
 ```
 
-The receiver options, lightest first:
+On a non-pop-mini machine:
 
-- `OTEL_METRICS_EXPORTER=console` — prints to terminal. Good for sanity
-  checks, useless for trends.
-- **Custom OTel→SQLite bridge** — ~100 lines of Python listening on
-  `:4317`, inserting into one file. Fits the dotfiles ethos; you own
-  the schema and retention.
-- **Anthropic's `claude-code-monitoring-guide` Docker stack** —
-  Prometheus + Loki + Grafana with pre-built dashboards. Heaviest
-  option; only worth it if you'll genuinely watch dashboards.
+```bash
+mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled
+exec zsh -l   # pick up env vars
+```
 
-Defaults to leave alone unless you have a reason: `OTEL_LOG_TOOL_DETAILS`
-(off — fattens logs fast), `OTEL_LOG_USER_PROMPTS` (off — privacy / size),
-`OTEL_LOG_RAW_API_BODIES` (off — size).
+## Network
 
-Note: Claude Code already has `/cost` for session-level spend with zero
-setup, and the Anthropic Console is the source of truth for billing. If
-cost is the only thing you care about, those two cover it.
+The collector uses `network_mode: host` so it listens on every interface — 127.0.0.1 for
+the local Claude shell, the LAN IP for in-house machines, the Tailscale IP for remote
+hosts. If you want to lock down:
+
+```bash
+sudo ufw allow in on tailscale0 to any port 4318 proto tcp
+sudo ufw allow in on tailscale0 to any port 4317 proto tcp
+sudo ufw deny  in to any port 4318 proto tcp
+sudo ufw deny  in to any port 4317 proto tcp
+```
+
+## Schema overview
+
+`legacy_events` (historical, codeburn-shaped):
+- `source_kind`: `session` or `subagent`
+- `ts, session_id, parent_session_id, project, git_branch, model`
+- `event_type, tool_name, tool_use_id, message_id`
+- `input_tokens, output_tokens, cache_read_tokens, cache_write_tokens`
+- `raw` (full JSON for inspection)
+
+`events` (forward OTel data):
+- `source`: `metrics`, `logs`, `traces`
+- `ts, service_name, host_name, scope_name, name, value, unit`
+- `trace_id, span_id`
+- `attributes, resource` (JSON)
+
+## Operations
+
+```bash
+# Status
+docker compose -f ~/.local/share/otel/compose.yml ps
+systemctl --user status otel-ingest.timer
+
+# Logs
+docker compose -f ~/.local/share/otel/compose.yml logs -f otelcol
+journalctl --user -u otel-ingest.service -f
+
+# Re-backfill (idempotent, picks up new files)
+python3 ~/.local/share/otel/backfill.py --verbose
+
+# Reset state (re-ingest everything next run)
+sqlite3 ~/.local/share/otel/data/claude.db "DELETE FROM ingest_state;"
+
+# Wipe (nuclear)
+docker compose -f ~/.local/share/otel/compose.yml down
+rm -rf ~/.local/share/otel/data
+```
+
+## What we considered
+
+- **Sync `~/.claude/projects/` to a single host with rsync** — viable but
+  clunky, and inherits codeburn's blind spot (subagent jsonls don't have token
+  data attached the way main sessions do, so reconstructed costs drift).
+- **MQTT bus** (chops broker on `:1884` is already running on pop-mini) — would
+  unify telemetry with the chops/atomicguard event stream but couples this
+  pipeline to a system that's not yet stable. Deferred; revisit when
+  workflow-service has shipped and there's a real holistic story.
+- **lestash co-location** — single SQLite for everything personal. Rejected
+  for now: telemetry and knowledge data have different query shapes and
+  different retention/privacy concerns.
+- **Prometheus + Loki + Grafana** (the official Anthropic monitoring stack) —
+  pure dashboard play, doesn't serve retro analysis. Out of scope.
+
+## Backup retention
+
+`~/.claude/projects/` is already in `sysbak`'s include list. Add
+`~/.local/share/otel/data/` for the SQLite + JSONL files to be backed up too:
+
+```bash
+sysbak config  # then add ~/.local/share/otel/data to includes
+```

@@ -1,0 +1,13 @@
+[Unit]
+Description=Ingest OTel collector JSONL into Claude telemetry SQLite
+Documentation=file://%h/.local/share/otel/schema.sql
+After=default.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env python3 %h/.local/share/otel/ingest.py
+Nice=10
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=default.target
