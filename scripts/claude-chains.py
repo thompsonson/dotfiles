@@ -28,6 +28,10 @@ CLAUDE_DIR = Path.home() / ".claude" / "projects"
 
 _BASH_WRAPPERS = {"sudo", "env", "time", "nice", "nohup", "watch"}
 
+# Labels excluded from n-gram analysis — utility commands with no workflow signal.
+# Kept in raw sequence output; stripped only when computing n-grams.
+_NGRAM_NOISE = {"cd", "echo", "mkdir", "ls", "cat", "rm", "cp", "mv", "touch", "pwd"}
+
 # CLIs where subcommands carry workflow signal.
 # Value = number of words to keep (including the CLI name itself).
 # gh needs 3: `gh run watch`, `gh pr create`, `gh issue list`
@@ -209,7 +213,8 @@ def ngrams(stream: list[str], n: int) -> list[tuple[str, ...]]:
 def compute_ngrams(records: list[dict], top_n: int = 50) -> list[tuple[tuple, int]]:
     counts: Counter = Counter()
     for rec in records:
-        flat = [t for turn in rec["sequence"] for t in turn["tools"]]
+        flat = [t for turn in rec["sequence"] for t in turn["tools"]
+                if t not in _NGRAM_NOISE]
         for n in (2, 3, 4):
             counts.update(ngrams(flat, n))
     return counts.most_common(top_n)
