@@ -642,7 +642,7 @@ du_fallback() {
     name="${path/#$HOME\//\~\/}"
     name="${name%/}"
     printf "  %-8s %s\n" "$(fmt_kb "$size")" "$name"
-  done
+  done || true
 }
 
 # --- mem ----------------------------------------------------------------------
