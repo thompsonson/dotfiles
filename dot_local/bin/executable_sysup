@@ -573,7 +573,7 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs devenv direnv)
+  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs devenv direnv opencode)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
