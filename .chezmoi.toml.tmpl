@@ -1,9 +1,18 @@
+{{- /* Termux reports os "linux" with no /etc/os-release. Detect it via the
+       TERMUX_VERSION env var or the Termux prefix directory. */ -}}
+{{- $isTermux := false -}}
+{{- if env "TERMUX_VERSION" -}}{{- $isTermux = true -}}{{- end -}}
+{{- if stat "/data/data/com.termux/files/usr" -}}{{- $isTermux = true -}}{{- end -}}
+
 {{- $osID := .chezmoi.os -}}
-{{- if (and (eq .chezmoi.os "linux") (hasKey .chezmoi.osRelease "id")) -}}
+{{- if $isTermux -}}
+{{-   $osID = "linux-termux" -}}
+{{- else if (and (eq .chezmoi.os "linux") (hasKey .chezmoi.osRelease "id")) -}}
 {{-   $osID = printf "%s-%s" .chezmoi.os .chezmoi.osRelease.id -}}
 {{- end -}}
 
 
 [data]
     osid = {{ $osID | quote }}
-    install_nix = {{ if eq .chezmoi.os "linux" }}true{{ else }}false{{ end }}
+    is_termux = {{ $isTermux }}
+    install_nix = {{ if and (eq .chezmoi.os "linux") (not $isTermux) }}true{{ else }}false{{ end }}

@@ -5,7 +5,7 @@ This file contains specific instructions for Claude Code when working with this 
 ## Repository Context
 
 This is a chezmoi-managed dotfiles repository that supports:
-- **Platforms**: macOS, Linux, and WSL
+- **Platforms**: macOS, Linux, WSL, and Termux (Android)
 - **Shell**: Zsh with oh-my-zsh, antigen, and powerlevel10k
 - **Package Management**: Homebrew (cross-platform)
 - **Node.js**: fnm for version management
@@ -64,6 +64,13 @@ The zsh configuration uses these variables:
 - `IS_WSL`: Windows Subsystem for Linux
 - `IS_MACOS`: macOS
 - `IS_LINUX`: Regular Linux
+- `IS_TERMUX`: Termux on Android (detected via `$TERMUX_VERSION` or the Termux prefix dir)
+
+Termux notes: no root/`sudo`, no systemd, no Homebrew/Docker/Nix. Packages are
+installed via `pkg` (an apt wrapper) instead of `apt-get`/`brew`. chezmoi reports
+the OS as `linux`; the install scripts detect Termux separately and set
+`osid = "linux-termux"` plus the `is_termux` template data flag. The terminal
+font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 
 ## Key Files
 

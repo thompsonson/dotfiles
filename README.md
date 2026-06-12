@@ -1,10 +1,10 @@
 # Dotfiles
 
-Cross-platform dotfiles managed with [chezmoi](https://www.chezmoi.io/) for macOS, Linux, and WSL.
+Cross-platform dotfiles managed with [chezmoi](https://www.chezmoi.io/) for macOS, Linux, WSL, and Termux (Android).
 
 ## Features
 
-- **Cross-platform support**: Works on macOS, Linux, and WSL
+- **Cross-platform support**: Works on macOS, Linux, WSL, and Termux (Android)
 - **Modern CLI tools**: bat, eza, fd, delta, ncdu, httpie, tmux, and more
 - **Shell configuration**: Zsh with oh-my-zsh, antigen, and powerlevel10k
 - **Remote development**: Tmux configuration with session management helpers
@@ -31,6 +31,9 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
    
    # Linux/WSL
    curl -sfL https://git.io/chezmoi | sh
+
+   # Termux (Android)
+   pkg install chezmoi
    ```
 
 2. Initialize with this repository:
@@ -98,6 +101,14 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 - Windows Subsystem for Linux support
 - WSL-specific aliases and configurations
 - Docker integration handling
+
+### Termux (Android)
+- Detected via `$TERMUX_VERSION` / the Termux prefix directory
+- Packages installed with `pkg` (no root/`sudo`, no Homebrew/apt)
+- Full zsh + oh-my-zsh + antigen + powerlevel10k setup
+- Skips Android-incompatible steps: Docker, systemd, Nix, fontconfig
+- Terminal font installed to `~/.termux/font.ttf`
+- Backups (`sysbak`) are unsupported — use git to back up dotfiles
 
 ## Customization
 
