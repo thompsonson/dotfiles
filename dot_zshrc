@@ -261,7 +261,8 @@ _sysbak_completion() {
 }
 compdef _sysbak_completion sysbak 2>/dev/null
 
-# Claude Code OpenTelemetry export → pop-mini central collector.
+# OpenTelemetry export → pop-mini central collector.
+# Used by Claude Code and opencode (both read standard OTEL_* env vars).
 # pop-mini: always-on (it hosts the collector, see ~/.local/share/otel/).
 # Other machines: opt-in via `touch ~/.config/claude-telemetry/enabled`.
 if [[ "$HOST" == "pop-mini" ]]; then
