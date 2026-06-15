@@ -626,7 +626,8 @@ cmd_doctor() {
   echo "  User:     $(whoami)"
 
   header "Package Managers"
-  local tools_pm=(brew apt-get pkg chezmoi fnm node npm uv pipx nix)
+  local tools_pm=(brew apt-get chezmoi fnm node npm uv pipx nix)
+  [ "$IS_TERMUX" = true ] && tools_pm+=(pkg)
   for tool in "${tools_pm[@]}"; do
     check_tool "$tool"
   done

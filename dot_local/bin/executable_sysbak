@@ -63,6 +63,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
 elif [ -n "$TERMUX_VERSION" ] || [ -d /data/data/com.termux/files/usr ]; then
   # shellcheck disable=SC2034
   IS_TERMUX=true
+  # shellcheck disable=SC2034
+  IS_LINUX=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
   # shellcheck disable=SC2034
   IS_WSL=true

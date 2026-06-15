@@ -105,13 +105,12 @@ install_pkg_packages() {
 # Failures are reported but never abort the run (some packages vary by repo).
 install_pkg_packages \
   curl git direnv jq make rsync tree ripgrep fzf grep findutils coreutils \
-  zsh bash nano openssh gnupg python nodejs fnm \
+  zsh bash nano openssh gnupg python fnm \
   btop tldr uv sqlite gh just shellcheck cmake \
   bat eza fd git-delta ncdu tmux zoxide duf hyperfine procs git-lfs \
   pandoc ffmpeg yt-dlp p7zip yq
 
-# Node via Termux's fnm (Homebrew is unavailable on Android). Falls back to the
-# nodejs package installed above if fnm isn't present.
+# Node via fnm (Homebrew is unavailable on Android).
 if command -v fnm >/dev/null 2>&1; then
   echo 'Setting up fnm and installing Node.js LTS'
   eval "$(fnm env --shell bash)"
