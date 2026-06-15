@@ -165,6 +165,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
+- `~/.config/dev/agents-env.md` — Agents environment (inter-agent messaging via `dev`)
 
 ## When Making Changes
 
