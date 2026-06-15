@@ -9,8 +9,9 @@ set -euo pipefail
 
 echo '== Installing Claude Code OTel collector (pop-mini) =='
 
-# 1. Data dir
+# 1. Data dir + .env for compose user mapping
 mkdir -p "$HOME/.local/share/otel/data"
+printf "UID=%s\nGID=%s\n" "$(id -u)" "$(id -g)" > "$HOME/.local/share/otel/.env"
 
 # 2. Docker check
 if ! command -v docker >/dev/null 2>&1; then
