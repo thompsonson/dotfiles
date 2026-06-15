@@ -20,9 +20,13 @@ setopt HIST_REDUCE_BLANKS        # Remove superfluous blanks before recording en
 IS_WSL=false
 IS_MACOS=false
 IS_LINUX=false
+IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
+  IS_TERMUX=true
+  IS_LINUX=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
   IS_WSL=true
 else
@@ -162,6 +166,7 @@ if [ -z "$TMUX" ] && [ -z "$VSCODE_INJECTION" ] && [ -t 1 ]; then
   _platform="Linux"
   [ "$IS_MACOS" = true ] && _platform="macOS"
   [ "$IS_WSL" = true ] && _platform="WSL"
+  [ "$IS_TERMUX" = true ] && _platform="Termux"
 
   echo ""
   echo "  \033[1m${_hostname}\033[0m  \033[2m${_platform}\033[0m"
@@ -213,7 +218,9 @@ _dev_completion() {
   local -a subcmds sessions projects
   subcmds=(claude layout detach kill kill-all help)
   sessions=(${(f)"$(tmux list-sessions -F '#S' 2>/dev/null)"})
-  projects=(${(f)"$(/usr/bin/find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
+  # `command find` bypasses the fd alias without hardcoding /usr/bin/find,
+  # which doesn't exist on Termux (find lives in $PREFIX/bin).
+  projects=(${(f)"$(command find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
   # Add custom-path projects from config
   if [ -f ~/.config/dev/config ]; then
     local -a config_projects

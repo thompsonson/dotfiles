@@ -45,9 +45,15 @@ has() { command -v "$1" &>/dev/null; }
 IS_WSL=false
 IS_MACOS=false
 IS_LINUX=false
+IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
+  # Termux: a userspace Linux on Android. Treat as Linux for /proc-based
+  # readouts but keep the flag so root/systemd paths can opt out.
+  IS_LINUX=true
+  IS_TERMUX=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
   IS_WSL=true
 else
@@ -147,6 +153,8 @@ get_os_info() {
     local distro
     distro=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo "Linux")
     echo "WSL - $distro ($(uname -m))"
+  elif [ "$IS_TERMUX" = true ]; then
+    echo "Termux on Android (${TERMUX_VERSION:-unknown}) ($(uname -m))"
   else
     local distro
     distro=$(grep PRETTY_NAME /etc/os-release 2>/dev/null | cut -d'"' -f2 || echo "Linux")

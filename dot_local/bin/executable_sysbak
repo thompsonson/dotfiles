@@ -56,15 +56,30 @@ IS_WSL=false
 IS_MACOS=false
 # shellcheck disable=SC2034
 IS_LINUX=false
+IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
+  # shellcheck disable=SC2034
+  IS_TERMUX=true
+  # shellcheck disable=SC2034
+  IS_LINUX=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
   # shellcheck disable=SC2034
   IS_WSL=true
 else
   # shellcheck disable=SC2034
   IS_LINUX=true
+fi
+
+# rsnapshot/USB/cron backups need root + a mounted block device — neither
+# exists on unrooted Android. Bail early with a clear message instead of
+# failing partway through a sudo prompt that can never succeed.
+if [ "$IS_TERMUX" = true ]; then
+  echo "sysbak is not supported on Termux (no root, no rsnapshot, no USB mounts)." >&2
+  echo "Back up your dotfiles with git (push to your remote) instead." >&2
+  exit 0
 fi
 
 # --- Configuration ------------------------------------------------------------
