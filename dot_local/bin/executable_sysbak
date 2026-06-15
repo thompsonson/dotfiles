@@ -60,7 +60,7 @@ IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
-elif [ -n "$TERMUX_VERSION" ] || [ -d /data/data/com.termux/files/usr ]; then
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
   # shellcheck disable=SC2034
   IS_TERMUX=true
   # shellcheck disable=SC2034

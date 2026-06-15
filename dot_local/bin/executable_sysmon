@@ -49,7 +49,7 @@ IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
-elif [ -n "$TERMUX_VERSION" ] || [ -d /data/data/com.termux/files/usr ]; then
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
   # Termux: a userspace Linux on Android. Treat as Linux for /proc-based
   # readouts but keep the flag so root/systemd paths can opt out.
   IS_LINUX=true

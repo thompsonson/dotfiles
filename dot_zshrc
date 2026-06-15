@@ -24,7 +24,7 @@ IS_TERMUX=false
 
 if [[ "$OSTYPE" == "darwin"* ]]; then
   IS_MACOS=true
-elif [ -n "$TERMUX_VERSION" ] || [ -d /data/data/com.termux/files/usr ]; then
+elif [ -n "${TERMUX_VERSION:-}" ] || [ -d /data/data/com.termux/files/usr ]; then
   IS_TERMUX=true
   IS_LINUX=true
 elif [ -f /proc/version ] && grep -qi "microsoft\|wsl" /proc/version; then
