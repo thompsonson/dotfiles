@@ -40,12 +40,12 @@ run() { sqlite3 -header -column "$DB" "$@"; }
 case "$cmd" in
   help|-h|--help)
     cat <<EOF
-otel-stats — Claude Code telemetry queries
+otel-stats — AI coding tool telemetry queries
 
 Usage:
   otel-stats <preset> [--project=NAME] [--since=YYYY-MM-DD] [--until=YYYY-MM-DD]
 
-Presets:
+Legacy presets (historical backfill — legacy_events table):
   hours-per-day     Active hours per calendar day
   hours-per-week    Active hours per ISO week
   hours-per-month   Active hours per month
@@ -55,6 +55,16 @@ Presets:
   sessions          Distinct session count per day
   tokens            Token totals (input/output/cache) per day
   recent            Last 50 events (raw)
+
+Live presets (OTel stream — events table, claude-code + opencode):
+  live-cost         Daily cost (USD) by tool
+  live-tokens       Daily token breakdown (input/output/cache) for claude-code
+  live-by-model     Cost and tokens grouped by model
+  live-services     Event counts by service and signal type
+  live-spans        Top opencode trace span names
+  live-recent       Last 50 live events
+
+Other:
   schema            Show table + view definitions
   sql "<query>"     Run an arbitrary SQL query
 
@@ -151,6 +161,72 @@ EOF
   recent)
     run "SELECT ts, project, event_type, tool_name, model
          FROM legacy_events
+         ORDER BY ts DESC
+         LIMIT 50;"
+    ;;
+
+  live-cost)
+    run "SELECT date(ts) AS day,
+                json_extract(attributes, '$.model') AS model,
+                ROUND(SUM(value), 4) AS cost_usd
+         FROM events
+         WHERE name = 'claude_code.cost.usage'
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL'
+         GROUP BY day, model
+         ORDER BY day, cost_usd DESC;"
+    ;;
+
+  live-tokens)
+    run "SELECT date(ts) AS day,
+                SUM(CASE WHEN json_extract(attributes,'$.type')='input'         THEN value ELSE 0 END) AS input,
+                SUM(CASE WHEN json_extract(attributes,'$.type')='output'        THEN value ELSE 0 END) AS output,
+                SUM(CASE WHEN json_extract(attributes,'$.type')='cacheRead'     THEN value ELSE 0 END) AS cache_read,
+                SUM(CASE WHEN json_extract(attributes,'$.type')='cacheCreation' THEN value ELSE 0 END) AS cache_write
+         FROM events
+         WHERE name = 'claude_code.token.usage'
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL'
+         GROUP BY day
+         ORDER BY day;"
+    ;;
+
+  live-by-model)
+    run "SELECT json_extract(attributes, '$.model') AS model,
+                ROUND(SUM(CASE WHEN name='claude_code.cost.usage'  THEN value ELSE 0 END), 4) AS cost_usd,
+                SUM(CASE WHEN name='claude_code.token.usage'
+                          AND json_extract(attributes,'$.type')='input'  THEN value ELSE 0 END) AS input_tok,
+                SUM(CASE WHEN name='claude_code.token.usage'
+                          AND json_extract(attributes,'$.type')='output' THEN value ELSE 0 END) AS output_tok
+         FROM events
+         WHERE name IN ('claude_code.cost.usage','claude_code.token.usage')
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL'
+         GROUP BY model
+         ORDER BY cost_usd DESC;"
+    ;;
+
+  live-services)
+    run "SELECT date(ts) AS day, service_name, source, COUNT(*) AS n
+         FROM events
+         WHERE date(ts) BETWEEN '$SINCE' AND '$UNTIL'
+         GROUP BY day, service_name, source
+         ORDER BY day DESC, n DESC;"
+    ;;
+
+  live-spans)
+    run "SELECT name, COUNT(*) AS n
+         FROM events
+         WHERE service_name = 'opencode'
+           AND source = 'traces'
+           AND date(ts) BETWEEN '$SINCE' AND '$UNTIL'
+         GROUP BY name
+         ORDER BY n DESC
+         LIMIT 25;"
+    ;;
+
+  live-recent)
+    run "SELECT ts, service_name, source, name,
+                ROUND(value, 4) AS value, unit,
+                substr(attributes, 1, 80) AS attrs
+         FROM events
          ORDER BY ts DESC
          LIMIT 50;"
     ;;
