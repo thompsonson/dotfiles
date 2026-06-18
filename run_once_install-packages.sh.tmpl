@@ -75,51 +75,13 @@ is_wsl() {
 }
 
 {{ if .is_termux -}}
-echo '🤖 Installing Termux (Android) packages'
+echo '🤖 Installing Termux zsh environment'
 
-# Termux has no sudo/root and installs via `pkg` (an apt wrapper). Package
-# names differ from Debian, and Debian-only packages (docker, lm-sensors,
-# mosquitto, fontconfig, …) have no Termux equivalent and are omitted.
-pkg update -y || true
-
-install_pkg_packages() {
-  local packages=("$@")
-  local failed_packages=()
-  local current=0 total=${#packages[@]}
-  echo "Installing $total Termux packages..."
-  for package in "${packages[@]}"; do
-    current=$((current + 1))
-    if pkg install -y "$package" 2>&1; then
-      echo "  [$current/$total] $package ✓"
-    else
-      echo "  [$current/$total] $package FAILED"
-      failed_packages+=("$package")
-    fi
-  done
-  if [ ${#failed_packages[@]} -gt 0 ]; then
-    echo "Failed: ${failed_packages[*]}"
-    echo "Retry: pkg install ${failed_packages[*]}"
-  fi
-}
-
-# Core tools, modern CLI replacements, and dev utilities available in Termux.
-# Failures are reported but never abort the run (some packages vary by repo).
-install_pkg_packages \
-  curl git direnv jq make rsync tree ripgrep fzf grep findutils coreutils \
-  zsh bash nano openssh gnupg python fnm \
-  btop tldr uv sqlite gh just shellcheck cmake \
-  bat eza fd git-delta ncdu tmux zoxide duf hyperfine procs git-lfs \
-  pandoc ffmpeg yt-dlp p7zip yq
-
-# Node via fnm (Homebrew is unavailable on Android).
-if command -v fnm >/dev/null 2>&1; then
-  echo 'Setting up fnm and installing Node.js LTS'
-  eval "$(fnm env --shell bash)"
-  fnm install --lts && fnm use lts-latest && fnm default lts-latest
-  echo "Node.js version: $(node --version 2>/dev/null || echo 'n/a')"
-elif command -v node >/dev/null 2>&1; then
-  echo "Using Termux nodejs package: $(node --version)"
-fi
+# Full system upgrade first to prevent partial-upgrade breakage (e.g. curl
+# libngtcp2 mismatches that break pkg). Then install only what the Oh My Zsh
+# + Powerlevel10k theme stack needs.
+pkg upgrade -y || true
+pkg install -y curl git zsh
 
 # Terminal font: Termux uses a single ~/.termux/font.ttf (no fontconfig/fc-cache).
 echo 'Installing MesloLGS NF as the Termux terminal font'
@@ -134,8 +96,8 @@ if [ ! -f "$HOME/.termux/font.ttf" ]; then
   fi
 fi
 
-echo 'ℹ️  Termux: Docker/systemd/Nix/Homebrew are unavailable on Android and are skipped.'
-echo '   oh-my-zsh, antigen, and powerlevel10k are installed by the common section below.'
+echo 'ℹ️  Termux: only zsh + Oh My Zsh + Powerlevel10k are installed.'
+echo '   Other tools (git, tmux, docker, python, etc.) are skipped on Termux.'
 
 {{ else if eq .osid "linux-debian" "linux-raspbian" "linux-pop" "linux-ubuntu" -}}
 echo '🐧 Installing Linux packages'
@@ -658,22 +620,6 @@ elif [ -d /home/linuxbrew/.linuxbrew ]; then
   eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
 fi
 {{ end -}}
-hash -r  # Clear command cache
-
-if command -v uv >/dev/null 2>&1; then
-  echo 'Installing OpenHands AI CLI'
-  if ! command -v openhands >/dev/null 2>&1; then
-    uv tool install openhands-ai || echo "Failed to install OpenHands - continuing..."
-  else
-    echo 'OpenHands already installed'
-  fi
-else
-  echo 'Warning: uv not found in PATH, skipping OpenHands installation'
-  echo "Current PATH: $PATH"
-  echo "Brew status: $(command -v brew || echo 'not found')"
-  echo "Try: brew install uv"
-fi
-
 # Install Oh My Zsh (same everywhere)
 if [ ! -f ~/.oh-my-zsh/oh-my-zsh.sh ]; then
   (echo '💰  Installing oh-my-zsh' && yes | sh -c "$(curl -fsSL https://raw.github.com/ohmyzsh/ohmyzsh/master/tools/install.sh)")
