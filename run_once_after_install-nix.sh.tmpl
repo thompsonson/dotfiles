@@ -1,4 +1,4 @@
-#!/bin/bash
+#!{{ lookPath "bash" }}
 # Nix + devenv bootstrap. Gated on install_nix data flag (default false if unset).
 {{- $installNix := false -}}
 {{- if hasKey . "install_nix" -}}{{- $installNix = .install_nix -}}{{- end }}
