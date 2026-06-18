@@ -1,5 +1,60 @@
 # Changelog
 
+## [1.2.0](https://github.com/thompsonson/dotfiles/compare/v1.1.0...v1.2.0) (2026-06-18)
+
+
+### Features
+
+* add agents-env.md with dev send/discovery instructions for coding agents ([20a00cf](https://github.com/thompsonson/dotfiles/commit/20a00cf0a7ef74c2f8db6ba0653f6d4767f5d02e))
+* add Claude Code statusline with context and rate limit display ([bcc9a71](https://github.com/thompsonson/dotfiles/commit/bcc9a713db6bafe5911014e6d375f5bc0106d10f))
+* add commonly-used base packages to install script ([#39](https://github.com/thompsonson/dotfiles/issues/39)) ([640588c](https://github.com/thompsonson/dotfiles/commit/640588cc898b5aeea3a1615f5054e1b1536ae0a1)), closes [#35](https://github.com/thompsonson/dotfiles/issues/35)
+* add LiteLLM proxy as a managed service ([#21](https://github.com/thompsonson/dotfiles/issues/21)) ([#23](https://github.com/thompsonson/dotfiles/issues/23)) ([a3ccae7](https://github.com/thompsonson/dotfiles/commit/a3ccae7530ef8982c7cda0da9fb114e0ed8f08e2))
+* add opencode AI coding assistant ([#65](https://github.com/thompsonson/dotfiles/issues/65)) ([69c958a](https://github.com/thompsonson/dotfiles/commit/69c958adab60052db6c722b341c7155b249b67d4))
+* add sysmon, sysbak, and sysup repair ([#14](https://github.com/thompsonson/dotfiles/issues/14)) ([3cd8df3](https://github.com/thompsonson/dotfiles/commit/3cd8df3db6d3c7950dff23743912eaceeb44fbd0))
+* Add Termux (Android) support across dotfiles ([#66](https://github.com/thompsonson/dotfiles/issues/66)) ([53518d5](https://github.com/thompsonson/dotfiles/commit/53518d53f596a7d145b49d52b91b40b7a7014e75))
+* **claude-chains:** annotate n-grams with subcommand expansions, re-rank by strongest specific signal ([ab17513](https://github.com/thompsonson/dotfiles/commit/ab175137b1e74d00a4ed634b29765815cb720a59))
+* **claude-chains:** tool-chain sequence extractor + codeburn install fix ([#58](https://github.com/thompsonson/dotfiles/issues/58)) ([4163a80](https://github.com/thompsonson/dotfiles/commit/4163a80e0985b415b74b1c86d820cc8988c6d969))
+* CPU temperature, CPU hog, and pop-upgrade monitoring ([#17](https://github.com/thompsonson/dotfiles/issues/17)) ([#18](https://github.com/thompsonson/dotfiles/issues/18)) ([dac4a5a](https://github.com/thompsonson/dotfiles/commit/dac4a5ac5143761413d6103b1af9d42a1c81d94a))
+* dev binary handoff, zshenv, bat/fzf theming, sysmon fix ([#60](https://github.com/thompsonson/dotfiles/issues/60)) ([01aca1f](https://github.com/thompsonson/dotfiles/commit/01aca1fc7bc032d123ecf6633635a7c1ec4220ed))
+* **nix:** Nix + devenv bootstrap (Linux-first, opt-in on macOS) ([#40](https://github.com/thompsonson/dotfiles/issues/40)) ([0cc8653](https://github.com/thompsonson/dotfiles/commit/0cc8653d0e3f6015c3692c0aa4e9a80e65546811))
+* **otel-stats:** add live presets for events table ([#68](https://github.com/thompsonson/dotfiles/issues/68)) ([5a8f448](https://github.com/thompsonson/dotfiles/commit/5a8f44851d6fc652c8e62aa0ff8d660342dedfdd))
+* **otel:** Claude Code telemetry pipeline — OTel collector → SQLite ([#59](https://github.com/thompsonson/dotfiles/issues/59)) ([0f06a7a](https://github.com/thompsonson/dotfiles/commit/0f06a7a0a1e640672faa95a8c03fe94db2e9da5a))
+* **sysbak:** add --yes flag for non-interactive setup ([#51](https://github.com/thompsonson/dotfiles/issues/51)) ([1ef48c8](https://github.com/thompsonson/dotfiles/commit/1ef48c80e52d5f6c83bff8a863996032e65a246b))
+* **sysbak:** auto-exclude /nix/store from backups when Nix is present ([#43](https://github.com/thompsonson/dotfiles/issues/43)) ([5b75139](https://github.com/thompsonson/dotfiles/commit/5b7513941c8fa37d63b16c1a26cc2da79fa7224c))
+* **sysup:** add clean subcommand to free disk space from caches ([760d594](https://github.com/thompsonson/dotfiles/commit/760d594e5504dd55a68ff2ec35e884e7047b4dda))
+
+
+### Bug Fixes
+
+* antigen re-download, sysmon Termux filter, install next-steps cleanup ([8710ffb](https://github.com/thompsonson/dotfiles/commit/8710ffbdfffc4b90b63ef1f0dabe343b76807a45))
+* **claude-chains:** filter utility commands (cd, echo, ls, etc.) from n-gram analysis ([c6a024e](https://github.com/thompsonson/dotfiles/commit/c6a024e0fb232726b53c2372e5ac5678dfae2e16))
+* **codeburn:** bump to v0.9.1-thompsonson.3; add to sysup doctor ([#55](https://github.com/thompsonson/dotfiles/issues/55)) ([a53592d](https://github.com/thompsonson/dotfiles/commit/a53592dc1fd965975b79afe7d9050826893825ad))
+* **codeburn:** install from release tarball URL (v0.9.1-thompsonson.4) ([#56](https://github.com/thompsonson/dotfiles/issues/56)) ([982a195](https://github.com/thompsonson/dotfiles/commit/982a195d70d7894f43dbb52ee481eaa1ceef4a42))
+* **codeburn:** install v0.9.1-thompsonson.2 (ships pre-built dist) ([#54](https://github.com/thompsonson/dotfiles/issues/54)) ([e4ee122](https://github.com/thompsonson/dotfiles/commit/e4ee122ff14372e7cdefeb89236051abe9c61ad5))
+* **doctor:** repair two version-capture bugs in sysbak + sysup ([#48](https://github.com/thompsonson/dotfiles/issues/48)) ([40b243f](https://github.com/thompsonson/dotfiles/commit/40b243fac84abc86197307ca4956933ab3630aba))
+* **nix:** install devenv direnvrc so `use devenv` in .envrc works ([#46](https://github.com/thompsonson/dotfiles/issues/46)) ([f727494](https://github.com/thompsonson/dotfiles/commit/f727494c042a5a4234bd6171d8f2614d41c7f62b))
+* **otel:** remove broken healthcheck, generate .env for user mapping ([3d69413](https://github.com/thompsonson/dotfiles/commit/3d69413c7727a85fd8ce7f1f36890f51a1c8357a))
+* **otel:** run collector as host user, fix healthcheck ([dfa72a8](https://github.com/thompsonson/dotfiles/commit/dfa72a8292f168742d1bcf39687f131c5d56e53f))
+* **sysbak:** add one_fs to rsnapshot.conf default ([#50](https://github.com/thompsonson/dotfiles/issues/50)) ([a46409b](https://github.com/thompsonson/dotfiles/commit/a46409bb90f02caa6a02fe48ec2e39bf2f88d768))
+* **sysbak:** preserve config customizations when re-running setup ([#49](https://github.com/thompsonson/dotfiles/issues/49)) ([81d2e41](https://github.com/thompsonson/dotfiles/commit/81d2e4178f799b15192af07fb05c7184a026bca5))
+* **sysbak:** use create_ prefix for machine-specific config ([aae8f2e](https://github.com/thompsonson/dotfiles/commit/aae8f2efde59cb011e096ba575acddc3344fddf7))
+* **sysbak:** write config after sudo, not before ([#52](https://github.com/thompsonson/dotfiles/issues/52)) ([249aa22](https://github.com/thompsonson/dotfiles/commit/249aa223ef1777d6310b27f456aa53b56a1ebe55))
+* use lookPath for bash shebang in chsh script for Termux ([a7e85d7](https://github.com/thompsonson/dotfiles/commit/a7e85d749e82d399aa4f214a820a1ca337cffe63))
+* use lookPath for bash shebang to support Termux ([9c235ac](https://github.com/thompsonson/dotfiles/commit/9c235ac42eac836fe5123bc379aa75e528622bdc))
+* use lookPath shebang in all run_once scripts for Termux compat ([05a7a3c](https://github.com/thompsonson/dotfiles/commit/05a7a3c9af2f5b76a3576e274996e624f78ddc15))
+
+
+### Documentation
+
+* add pi-agent-policy.md — workflow and trust model definition for pi-guards ([cd75c10](https://github.com/thompsonson/dotfiles/commit/cd75c10b92b7b78892d402ecd2c8262dfbcb4b43))
+* Claude session analysis and telemetry planning ([#53](https://github.com/thompsonson/dotfiles/issues/53)) ([bcb2406](https://github.com/thompsonson/dotfiles/commit/bcb24066d49ff03e9545f970bdbcf5e7ae049cfa))
+* update sysmon and sysup docs for temperature, CPU hog, and doctor changes ([c5a54b4](https://github.com/thompsonson/dotfiles/commit/c5a54b4bf7d92f5d8a9185b71377db5c572f11fa))
+
+
+### CI/CD
+
+* align release workflow with dev repo pattern ([065e191](https://github.com/thompsonson/dotfiles/commit/065e19155bb79bf10d7a315b3629472e0dcdef7e))
+
 ## [1.1.0](https://github.com/thompsonson/dotfiles/compare/v1.0.1...v1.1.0) (2026-02-25)
 
 
