@@ -4,3 +4,4 @@ bin/
 !dot_*/bin/
 
 output/
+scripts/__pycache__/
