@@ -646,12 +646,6 @@ fi
 # Note: Shell configuration (aliases, PATH, etc.) should be managed by chezmoi templates
 echo 'ℹ️  Note: Shell configuration (.zshrc) should be managed by chezmoi templates'
 
-# Install Poetry (same method everywhere)
-if ! command -v poetry >/dev/null 2>&1; then
-  echo 'Installing Poetry'
-  curl -sSL https://install.python-poetry.org | python3 -
-fi
-
 # Install OpenHands AI CLI (common - requires uv)
 # Ensure tools are available in current session
 {{ if eq .chezmoi.os "darwin" -}}

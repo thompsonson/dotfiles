@@ -90,7 +90,7 @@ Each tool is skipped if not installed. A total freed summary is shown at the end
 | Group | Tools checked |
 |-------|--------------|
 | Package Managers | brew, apt-get, chezmoi, fnm, node, npm, uv, pipx |
-| Development Tools | git, zsh, tmux, fzf, docker, python3, poetry, just, gh, curl, sysbak, rsnapshot |
+| Development Tools | git, zsh, tmux, fzf, docker, python3, just, gh, curl, sysbak, rsnapshot |
 | Modern CLI Replacements | eza, bat, fd, rg, delta, btop, zoxide, jq, sensors, sar |
 
 ### Key paths

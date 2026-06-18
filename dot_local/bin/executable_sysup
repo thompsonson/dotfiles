@@ -633,7 +633,7 @@ cmd_doctor() {
   done
 
   header "Development Tools"
-  local tools_dev=(git zsh tmux fzf docker python3 poetry just gh curl sysbak rsnapshot kubectl cmake git-lfs devenv direnv opencode)
+  local tools_dev=(git zsh tmux fzf docker python3 just gh curl sysbak rsnapshot kubectl cmake git-lfs devenv direnv opencode)
   for tool in "${tools_dev[@]}"; do
     check_tool "$tool"
   done
@@ -699,7 +699,6 @@ get_version() {
     uv)        uv --version 2>/dev/null | awk '{print $2}' ;;
     pipx)      pipx --version 2>/dev/null ;;
     docker)    docker --version 2>/dev/null | awk '{print $3}' | tr -d ',' ;;
-    poetry)    poetry --version 2>/dev/null | awk '{print $3}' | tr -d ')' ;;
     gh)        gh --version 2>/dev/null | head -1 | awk '{print $3}' ;;
     just)      just --version 2>/dev/null | awk '{print $2}' ;;
     curl)      curl --version 2>/dev/null | head -1 | awk '{print $2}' ;;
