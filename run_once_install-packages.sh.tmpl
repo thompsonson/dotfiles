@@ -627,7 +627,7 @@ fi
 
 # Install Antigen (same everywhere)
 MASK='\U1f637'
-if [ ! -f ~/.zsh/antigen/antigen.zsh ]; then
+if [ ! -f ~/.zsh/antigen/antigen.zsh ] || [ ! -s ~/.zsh/antigen/antigen.zsh ]; then
   mkdir -p ~/.zsh/antigen
   (echo -e "${MASK} Installing Antigen plugin Manager" && curl -L git.io/antigen > ~/.zsh/antigen/antigen.zsh)
 fi
@@ -646,7 +646,7 @@ if is_wsl; then
   echo '   • Run "wsl --shutdown" from PowerShell if you need to restart WSL'
   echo ''
 fi
-
+{{ if not .is_termux }}
 echo '📝 Next steps:'
 echo '   1. Update your chezmoi .zshrc template to include:'
 echo '      • Homebrew setup: eval "$(brew shellenv)"'
@@ -684,6 +684,7 @@ echo '   • Shell configuration managed by chezmoi - do not edit .zshrc directl
 echo '   • For chezmoi: install with "sudo snap install chezmoi" or "brew install chezmoi"'
 echo '   • Run "chezmoi doctor" to check chezmoi configuration'
 echo ''
+
 echo '📋 Suggested additions to your chezmoi .zshrc template:'
 echo ''
 echo '# Add to the top (before antigen setup):'
@@ -719,4 +720,7 @@ echo 'if command -v bat >/dev/null 2>&1; then'
 echo '  alias cat="bat"'
 echo 'fi'
 echo ''
+{{ else -}}
+echo '🎉 Termux zsh environment is ready! Restart your terminal with: exec zsh'
+{{ end -}}
 echo '🎉 Your development environment is ready!'

@@ -227,6 +227,16 @@ get_primary_disk_mounts() {
       if (total+0 == 0) next
       print mp, used, total, pct
     }' | sort
+  elif [ "$IS_TERMUX" = true ]; then
+    df -k 2>/dev/null | awk 'NR>1 {
+      dev=$1; mp=$6; used=$3; total=$2; pct=$5
+      if (mp ~ /^\/(dev|proc|sys|run|snap)/) next
+      if (mp ~ /^\/apex\//) next
+      if (mp ~ /^\/vendor/ || mp ~ /^\/odm_/ || mp ~ /^\/product/) next
+      if (mp ~ /^\/bootstrap-apex\//) next
+      if (total+0 == 0) next
+      print mp, used, total, pct
+    }' | sort
   else
     df -k 2>/dev/null | awk 'NR>1 {
       dev=$1; mp=$6; used=$3; total=$2; pct=$5
