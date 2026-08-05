@@ -138,18 +138,21 @@ install_brew_packages() {
   local packages=("$@")
   local failed_packages=()
   local current=0 total=${#packages[@]}
+  # HOMEBREW_NO_INSTALL_CLEANUP: prevent post-install cleanup waits
+  export HOMEBREW_NO_INSTALL_CLEANUP=1
+
   echo "Installing $total brew packages..."
   for package in "${packages[@]}"; do
     current=$((current + 1))
     if brew list "$package" &>/dev/null; then
       # Already installed — attempt upgrade
-      if brew upgrade "$package" 2>&1; then
+      if CI=true brew upgrade "$package" 2>&1; then
         echo "  [$current/$total] $package ✓ (upgraded)"
       else
         echo "  [$current/$total] $package ✓ (already latest)"
       fi
     else
-      if brew install "$package" 2>&1; then
+      if CI=true brew install "$package" 2>&1; then
         echo "  [$current/$total] $package ✓ (installed)"
       else
         echo "  [$current/$total] $package FAILED"
@@ -359,6 +362,8 @@ command -v brew >/dev/null 2>&1 || \
 # Ensure Homebrew is in PATH and environment is set up
 export PATH="/usr/local/bin:/usr/local/sbin:$PATH"
 eval "$(/usr/local/bin/brew shellenv)" 2>/dev/null || true
+export HOMEBREW_NO_INSTALL_CLEANUP=1
+
 
 # Function to install packages with progress
 install_with_progress() {
@@ -366,7 +371,7 @@ install_with_progress() {
   local total=${#packages[@]}
   local current=0
   local failed_packages=()
-  
+
   echo "📦 Installing $total packages..."
   
   # Ensure brew is in PATH
@@ -380,7 +385,7 @@ install_with_progress() {
       echo "  ✅ $package already installed"
     else
       echo "  🔄 Installing $package..."
-      if brew install "$package" 2>&1; then
+      if CI=true brew install "$package" 2>&1; then
         echo "  ✅ $package installed successfully"
       else
         echo "  ❌ Failed to install $package"
@@ -406,13 +411,13 @@ install_with_progress {{ $allMacosPackages | join " " }}
 # Install Docker Desktop
 if ! command -v docker >/dev/null 2>&1; then
   echo 'Installing Docker Desktop'
-  brew install --cask docker
+  CI=true brew install --cask docker
 fi
 
 # Install pipx (macOS method)
 if ! command -v pipx >/dev/null 2>&1; then
   echo 'Installing pipx'
-  brew install pipx
+  CI=true brew install pipx
   pipx ensurepath
 fi
 
@@ -422,13 +427,13 @@ echo 'Installing macOS applications'
 # Install Visual Studio Code
 if ! command -v code >/dev/null 2>&1; then
   echo 'Installing Visual Studio Code'
-  brew install --cask visual-studio-code
+  CI=true brew install --cask visual-studio-code
 fi
 
 # Install productivity apps
 echo 'Installing productivity apps'
-brew install --cask rectangle    # Window management
-brew install --cask alfred       # Spotlight replacement
+CI=true brew install --cask rectangle    # Window management
+CI=true brew install --cask alfred       # Spotlight replacement
 
 # Configure macOS system preferences
 echo 'Configuring macOS system preferences'
