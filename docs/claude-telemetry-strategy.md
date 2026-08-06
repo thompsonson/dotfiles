@@ -2,13 +2,13 @@
 
 ## Purpose
 
-This telemetry pipeline serves two connected goals:
+Telemetry serves two connected goals:
 
 **1. Personal development analytics**
 As the sole developer and CTO of Manta Technologies, understand where Claude Code time is actually spent — across Manta repos, AtomicGuard, and personal tooling. Weekly and monthly retros, not live dashboards.
 
 **2. Empirical input to workflow-service**
-Claude Code's tool chains are real-world evidence of recurring workflows. A session that consistently runs `git commit → gh pr create → gh run watch` is a workflow that exists in practice. The telemetry pipeline captures these patterns so they can be registered in `workflow-service` — grounding its intent registry in observed behaviour rather than guesswork.
+Claude Code's tool chains are real-world evidence of recurring workflows. A session that consistently runs `git commit → gh pr create → gh run watch` is a workflow that exists in practice. The telemetry captures these patterns so they can be registered in `workflow-service` — grounding its intent registry in observed behaviour rather than guesswork.
 
 The connection: **Claude Code produces tool chains → telemetry captures them → analysis reveals patterns → patterns become registered workflows → workflow-service routes voice/agent inputs to those workflows → atomicguard validates execution.**
 
@@ -21,53 +21,47 @@ The connection: **Claude Code produces tool chains → telemetry captures them �
 - Not a replacement for Anthropic Console billing data
 - Not multi-user or shared infrastructure
 
-This is a lightweight personal tool: one Docker container, one SQLite file, a few Python scripts.
-
 ---
 
-## The pipeline
+## The pipeline (current)
+
+Engine-neutral devmon ledger in Rust (formerly the OTel stack, now retired):
 
 ```
-Claude Code (any machine)
-  │  CLAUDE_CODE_ENABLE_TELEMETRY=1
-  │  OTEL_EXPORTER_OTLP_ENDPOINT → pop-mini:4318
+omp session jsonl (~/.omp/agent/sessions)
+opencode.db (~/.local/share/opencode)
+claude transcripts (~/.claude/projects/**/*.jsonl)
+  │  devmon collect — byte-offset watermarks, idempotent (I11)
   ▼
-otelcol-contrib (Docker, pop-mini)
-  │  file exporter → JSONL rotation
-  ▼
-ingest.py (systemd timer, every 5 min)
-  │  byte-offset tracking, idempotent
-  ▼
-claude.db → table: events          ← live OTel forward stream
-
-~/.claude/projects/**/*.jsonl      ← existing transcripts
-  │  backfill.py (one-shot, idempotent)
-  ▼
-claude.db → table: legacy_events   ← historical data (back to Jan 2026)
-
-claude-chains.py                   ← tool-sequence n-gram analysis (standalone)
-otel-stats                         ← SQL presets for retros
+~/.local/share/devmon/devmon.db
+  ├── agent_turn        token usage per model turn
+  ├── agent_tool_call   tool chains (workflow-service input)
+  ├── agent_compaction  context resets
+  ├── agent_session     sessions + project slug (extra)
+  └── inference/serving  lemond telemetry, /metrics
 ```
+
+Historical `~/.claude/projects` transcripts from the retired otel backfill are
+ingested by `devmon otel-migrate` (same ingest path, guard bypassed).
 
 ---
 
 ## What good looks like
 
 ### Personal analytics (done when...)
-- `otel-stats hours-per-week --since=2026-01-01` gives a reliable weekly active-time view across all projects
-- `otel-stats by-project` shows where effort is concentrated across Manta vs AtomicGuard vs tooling
-- Token totals per day are queryable — giving a cost-proxy without hitting the Anthropic Console
+- `devmon retro token_ledger` gives daily input/output/cache totals per model and engine
+- Weekly active-time view across all projects, per project via `agent_session.extra.project`
+- Cost-proxy token totals per day are queryable — without hitting the Anthropic Console
 
 ### Workflow-service input (done when...)
-- `claude-chains.py --summary-only --since 30` reliably surfaces the top 20 tool n-grams
-- At least 3 recurring patterns are clearly identifiable (e.g. `git → gh pr create`, `Read → Edit → Bash`, `Agent → git → gh`)
-- Those patterns are written up as candidate workflow registrations in `workflow-service`
+- `agent_tool_call` rows reliably surface the top tool chains (`Read → Edit → Bash`, `git → gh pr create`)
+- At least 3 recurring patterns are clearly identifiable and written up as candidate workflow registrations in `workflow-service`
 - The connection between "observed in telemetry" and "registered in workflow-service" is documented in that repo
 
 ### Ongoing health (done when...)
-- `otel-ingest.timer` runs reliably on pop-mini with no manual intervention
-- New machines can opt in by touching `~/.config/claude-telemetry/enabled`
-- `sysbak` covers `~/.local/share/otel/data/` so the SQLite store is backed up
+- The collector runs as a systemd-user unit (`devmon-collect.service`)
+- Presence-based mutual exclusion keeps omp and claude feeds from double-counting the same sessions
+- `sysbak` covers `~/.local/share/devmon/` so the ledger is backed up
 
 ---
 
@@ -75,17 +69,32 @@ otel-stats                         ← SQL presets for retros
 
 | Question | Source |
 |---|---|
-| How many hours per week am I using Claude Code? | `otel-stats hours-per-week` |
-| Which projects take the most time? | `otel-stats by-project` |
-| What are the most common tool sequences? | `claude-chains.py --summary-only` |
-| Which tools fail most often? | `otel-stats by-tool` + error analysis |
-| Which workflows recur enough to register? | n-gram analysis → workflow-service |
-| How does usage split across Manta vs AtomicGuard? | `--project` filter on any preset |
+| How many hours per week am I using Claude Code? | `devmon retro token_ledger` |
+| Which projects take the most time? | `agent_session.extra.project` |
+| What are the most common tool sequences? | `agent_tool_call` group-by tool_name |
+| Which workflows recur enough to register? | tool chains → workflow-service |
+| How does usage split across Manta vs AtomicGuard? | project filter on agent_session |
+
+---
+
+## Retired: the OTel pipeline
+
+The OTel collector pipeline (`otelcol-contrib` Docker on pop-mini → file exporter
+→ Python ingester → `claude.db`) was replaced by devmon in Aug 2026. Superseded:
+
+- `~/.local/share/otel/{ingest.py,backfill.py,schema.sql,config.yaml,compose.yml}`
+- `~/.config/systemd/user/otel-ingest.{service,timer}`
+- `run_once_after_install-otel-collector.sh.tmpl`
+- `OTEL_*` / `CLAUDE_CODE_ENABLE_TELEMETRY` exports in `.zshrc`
+
+Claude Code's OTel forward stream mapped to no devmon aggregate, so `ingest.py`
+was not ported; `backfill.py` became `feed/claude.rs`. Legacy data (if any
+`claude.db` survives) migrates with `devmon otel-migrate`.
 
 ---
 
 ## Related docs
 
-- [`claude-telemetry.md`](claude-telemetry.md) — ops reference: setup, activation, network, operations
 - [`claude-session-analysis.md`](claude-session-analysis.md) — historical analysis (Apr 2026 baseline)
+- [`claude-telemetry.md`](claude-telemetry.md) — retired ops reference
 - [`workflow-service`](https://github.com/thompsonson/workflow-service) — the downstream consumer of workflow patterns
