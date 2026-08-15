@@ -48,7 +48,7 @@ In the Claude Code pane, ask:
 
 ```
 "Add ripgrep to the install script"     # edits run_once_install-packages.sh.tmpl
-"Add a new alias for tldr"             # edits dot_zshrc
+"Add a new alias for tldr"             # edits dot_zshrc.tmpl
 "Update the tmux prefix key"           # edits dot_tmux.conf
 "Apply the changes"                     # runs chezmoi apply
 ```

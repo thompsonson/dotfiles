@@ -159,7 +159,7 @@ A numbered list with a `Select [1-N]:` prompt, grouped into:
 
 ## Tab Completion
 
-Tab completion is configured in `dot_zshrc`. `dev <TAB>` completes:
+Tab completion is configured in `dot_zshrc.tmpl`. `dev <TAB>` completes:
 - Active tmux session names
 - Discovered projects from `~/Projects`
 - Custom-path project names from `config.toml`

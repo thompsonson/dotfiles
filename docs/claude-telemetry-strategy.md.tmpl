@@ -5,7 +5,7 @@
 This telemetry pipeline serves two connected goals:
 
 **1. Personal development analytics**
-As the sole developer and CTO of Manta Technologies, understand where Claude Code time is actually spent — across Manta repos, AtomicGuard, and personal tooling. Weekly and monthly retros, not live dashboards.
+As the sole developer and {{ .role }} of {{ .employer_name }}, understand where Claude Code time is actually spent — across {{ .employer_short }} repos, AtomicGuard, and personal tooling. Weekly and monthly retros, not live dashboards.
 
 **2. Empirical input to workflow-service**
 Claude Code's tool chains are real-world evidence of recurring workflows. A session that consistently runs `git commit → gh pr create → gh run watch` is a workflow that exists in practice. The telemetry pipeline captures these patterns so they can be registered in `workflow-service` — grounding its intent registry in observed behaviour rather than guesswork.
@@ -55,7 +55,7 @@ otel-stats                         ← SQL presets for retros
 
 ### Personal analytics (done when...)
 - `otel-stats hours-per-week --since=2026-01-01` gives a reliable weekly active-time view across all projects
-- `otel-stats by-project` shows where effort is concentrated across Manta vs AtomicGuard vs tooling
+- `otel-stats by-project` shows where effort is concentrated across {{ .employer_short }} vs AtomicGuard vs tooling
 - Token totals per day are queryable — giving a cost-proxy without hitting the Anthropic Console
 
 ### Workflow-service input (done when...)
@@ -80,12 +80,12 @@ otel-stats                         ← SQL presets for retros
 | What are the most common tool sequences? | `claude-chains.py --summary-only` |
 | Which tools fail most often? | `otel-stats by-tool` + error analysis |
 | Which workflows recur enough to register? | n-gram analysis → workflow-service |
-| How does usage split across Manta vs AtomicGuard? | `--project` filter on any preset |
+| How does usage split across {{ .employer_short }} vs AtomicGuard? | `--project` filter on any preset |
 
 ---
 
 ## Related docs
 
-- [`claude-telemetry.md`](claude-telemetry.md) — ops reference: setup, activation, network, operations
+- [`claude-telemetry.md`](claude-telemetry.md.tmpl) — ops reference: setup, activation, network, operations
 - [`claude-session-analysis.md`](claude-session-analysis.md) — historical analysis (Apr 2026 baseline)
 - [`workflow-service`](https://github.com/thompsonson/workflow-service) — the downstream consumer of workflow patterns

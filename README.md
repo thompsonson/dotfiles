@@ -57,7 +57,7 @@ sh -c "$(curl -fsLS get.chezmoi.io)" -- init --apply $GITHUB_USERNAME
 
 ```
 .
-├── dot_zshrc                           # Zsh configuration
+├── dot_zshrc.tmpl                      # Zsh configuration
 ├── dot_p10k.zsh                       # Powerlevel10k theme config
 ├── dot_tmux.conf                      # Tmux configuration (TPM, resurrect, continuum)
 ├── dot_claude/                        # Claude Code configuration
@@ -214,7 +214,7 @@ Detailed usage guides for the custom tools in this repository:
 
 ### Common Issues
 
-1. **Permission errors**: Ensure proper PATH configuration in `dot_zshrc`
+1. **Permission errors**: Ensure proper PATH configuration in `dot_zshrc.tmpl`
 2. **Missing directories**: The setup creates necessary directories automatically
 3. **Package conflicts**: Check platform-specific package lists
 

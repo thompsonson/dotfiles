@@ -7,7 +7,7 @@ ingested store.
 ## TL;DR
 
 - **Where:** pop-mini hosts everything. Other machines push telemetry to it via
-  Tailscale MagicDNS (`pop-mini.monkey-ladon.ts.net:4318`).
+  Tailscale MagicDNS (`pop-mini.{{ .tailnet_domain }}:4318`).
 - **Stack:** `otelcol-contrib` in Docker → JSONL file exporter → Python
   ingester on a systemd-user timer → SQLite at
   `~/.local/share/otel/data/claude.db`.

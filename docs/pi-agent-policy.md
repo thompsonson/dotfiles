@@ -12,7 +12,7 @@ List the specific tasks you actually delegate to Pi in this repo. Examples to co
 
 | Workflow | Used? | Notes |
 |----------|-------|-------|
-| Editing shell config (`dot_zshrc`, `dot_p10k.zsh`) | TODO | |
+| Editing shell config (`dot_zshrc.tmpl`, `dot_p10k.zsh`) | TODO | |
 | Adding new packages to `run_once_install-packages.sh.tmpl` | TODO | |
 | Writing new `sysmon`/`sysup`/`sysbak` features | TODO | |
 | Updating documentation (`docs/`) | TODO | |
@@ -76,7 +76,7 @@ Which directories should Pi be allowed to write to?
 - TODO — are there any? e.g. `~/.gitconfig` for git config changes?
 
 **Files that should never be written directly (always via chezmoi source):**
-- `~/.zshrc` → edit `dot_zshrc` in chezmoi
+- `~/.zshrc` → edit `dot_zshrc.tmpl` in chezmoi
 - `~/.tmux.conf` → edit `dot_tmux.conf` in chezmoi
 - `~/.config/Code/User/settings.json` → edit the `.tmpl` source
 - TODO — add others

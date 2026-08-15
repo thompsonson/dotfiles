@@ -48,7 +48,9 @@ jobs:
 
       # Syntax checks
       - name: Syntax - zshrc
-        run: zsh -n dot_zshrc
+        run: |
+          chezmoi execute-template < dot_zshrc.tmpl > /tmp/zshrc-rendered
+          zsh -n /tmp/zshrc-rendered
 
       - name: Syntax - sysup
         run: bash -n dot_local/bin/executable_sysup
@@ -95,7 +97,9 @@ jobs:
 
       # Syntax checks (zsh is pre-installed on macOS)
       - name: Syntax - zshrc
-        run: zsh -n dot_zshrc
+        run: |
+          chezmoi execute-template < dot_zshrc.tmpl > /tmp/zshrc-rendered
+          zsh -n /tmp/zshrc-rendered
 
       - name: Syntax - sysup
         run: bash -n dot_local/bin/executable_sysup
