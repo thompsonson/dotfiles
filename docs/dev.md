@@ -1,21 +1,28 @@
 # Dev Session Manager
 
-`dev` is a persistent tmux session manager for multi-device development. It provides a single entry point for creating, attaching to, and managing tmux sessions with automatic project discovery.
+`dev` is a persistent tmux session manager for multi-device development. It provides a single entry point for creating, attaching to, and managing tmux sessions with automatic project discovery, remote-host routing, and inter-agent messaging.
 
-Sessions survive disconnects, reboots (via tmux-resurrect), and can be accessed from any device via SSH.
+Sessions survive disconnects, reboots (via tmux-resurrect), and can be accessed from any device via SSH. A background daemon (`dev --daemon`) backs session state over a Unix socket, so most commands are fast, scriptable, and work the same locally or against a remote host.
 
 **Source:** `~/.local/bin/dev` (`dot_local/bin/executable_dev` in chezmoi)
+
+> **Note:** `dev` moved from subcommands (`dev status`, `dev kill <name>`, ...) to `--flag` commands (`dev --status`, `dev --kill <name>`, ...). The old subcommand forms still work but are deprecated — run `dev --help` for the authoritative, current list.
 
 ## Synopsis
 
 ```bash
-dev                     # Interactive picker (fzf or numbered fallback)
-dev <project>           # Create or attach to session for <project>
-dev claude <project>    # Force claude+shell layout (vertical split)
-dev detach              # Detach from current tmux session
-dev kill <name>         # Kill a session
-dev kill-all            # Kill all sessions (with confirmation)
-dev help                # Show built-in help
+dev                          # Interactive picker (fzf or numbered fallback)
+dev <project>                # Create or attach to session for <project>
+dev <project> --agent opencode  # Override the session's agent
+dev --start <project>        # Start a session without attaching
+dev --stop <session>         # Stop (kill) a session
+dev --status                 # Session status table
+dev --list                   # JSON: sessions + discovered projects
+dev --kill <name>            # Kill a session
+dev --kill-all               # Kill all sessions (prompts for confirmation)
+dev --detach                 # Detach from current tmux session
+dev --doctor                 # Check environment and config
+dev --help                   # Full, current command reference
 ```
 
 ## Commands
@@ -24,23 +31,44 @@ dev help                # Show built-in help
 |---------|-------------|
 | `dev` | Open the interactive picker to select a session or project |
 | `dev <project>` | Create a new session (or attach if it exists) for `<project>` |
-| `dev claude <project>` | Same as above but forces the `claude` layout regardless of config |
-| `dev detach` | Detach from the current tmux session (must be inside tmux) |
-| `dev kill <name>` | Kill the named session |
-| `dev kill-all` | Kill all tmux sessions (prompts for confirmation) |
-| `dev help` | Show the built-in help text |
+| `dev --start <project> [--agent <profile>]` | Start a session without attaching |
+| `dev --stop <session>` | Stop (kill) a session |
+| `dev --status [--json]` | Session status table (git branch, dirty flag, last activity) |
+| `dev --list [--agent claude\|opencode]` | JSON: sessions + discovered/custom-path projects |
+| `dev --detach` | Detach from the current tmux session (must be inside tmux) |
+| `dev --kill <session>` | Kill the named session |
+| `dev --kill-all` | Kill all tmux sessions (prompts for confirmation; `--force`/`-y` skips it) |
+| `dev --layout [name]` | Show or change the pane arrangement for the current session |
+| `dev --doctor [<host>] [--config F]` | Check environment and config; with `<host>`, checks that machine |
+| `dev --daemon` | Run the Unix-socket API server (usually managed for you) |
+| `dev --daemon restart [<host>]` | Restart the daemon (local, or the given/configured host) |
+| `dev --update [--check]` | Check for and apply updates |
+| `dev --sandbox show\|generate <project>` | Show or generate the nono sandbox profile for a project |
+| `dev --help` / `dev --version` | Full help / version |
+
+### Inter-agent messaging
+
+`dev` also doubles as the transport for talking to agents (Claude Code, opencode, Codex, ...) running in other sessions on this or another machine — see `~/.config/dev/agents-env.md` for the full pattern.
+
+| Command | Description |
+|---------|-------------|
+| `dev --run-in <session>[:<window>.<pane>] <command...> [--timeout N] [--json]` | Run a background command from the pane's cwd and capture output |
+| `dev --peek <session> [--pane 1.1] [--lines N] [--json]` | Print the latest pane content without interacting |
+| `dev --inspect <session> [--lines N] [--full]` | JSON session metadata, git state, and pane content |
+| `dev --send <session>[:<window>.<pane>] <message...>` | Send a message into a pane, prefixed with sender identity so the receiver can reply (`dev --host <host> --send <session>:1.1 "..."`) |
 
 ## Layouts
 
 | Layout | Panes | Description |
 |--------|-------|-------------|
 | `default` | 1 | Single shell pane in the project directory |
-| `claude` | 2 | Vertical split -- Claude Code (left) + shell (right) |
+| `claude` | 2 | Vertical split — Claude Code (left) + shell (right) |
+| `opencode` | 2 | Vertical split — opencode (left) + shell (right) |
 
-The layout for a project is determined by (in priority order):
-1. The `force_layout` argument (`dev claude <project>`)
-2. The per-project setting in `~/.config/dev/config`
-3. The `default_layout` setting in the config file
+The layout is a legacy concept superseded by `agent` (see Configuration below) but is still honored for backward compatibility. Priority order:
+1. `--agent claude|opencode` on the command line
+2. The project's `agent` or `layout` field in `~/.config/dev/config.toml`
+3. `defaults.layout` in the config file
 4. Falls back to `default`
 
 ## Project Discovery
@@ -49,59 +77,69 @@ Projects are auto-discovered from `~/Projects/` by scanning up to 3 levels deep 
 
 If two projects share the same basename (e.g. `work/api` and `personal/api`), `dev` uses the `category/project` form to disambiguate them in the picker and tab completion.
 
-Custom-path projects defined in the config file are appended to the discovery list and also appear in the interactive picker and tab completion.
+Custom-path projects defined in the config file (anything with an explicit `path`) are appended to the discovery list and also appear in the interactive picker and tab completion.
 
 ## Configuration
 
-Per-project settings are stored in `~/.config/dev/config`:
+Per-project settings are stored in **`~/.config/dev/config.toml`** (TOML — this replaced the old `~/.config/dev/config` INI format; that file is no longer read).
 
-```ini
-# Default layout for all projects (optional, defaults to "default")
-default_layout=default
+```toml
+[defaults]
+layout = "default"
+host = "myserver"          # optional: default remote host for all projects
 
-# Per-project overrides
-atomicguard=claude                           # layout only
-manta-deploy=claude@myserver                 # layout + remote host
-dotfiles=claude:~/.local/share/chezmoi       # layout + custom path
-myproject=default:/opt/myproject@server      # all three
+[sandbox]
+backend = "nono"
+base_profile = "nolabs-ai/pi"
+sockets = ["/run/user/1000/dev.sock"]
+
+[project.atomicguard]
+path = "~/Projects/thompsonson/atomicguard"     # omit for projects under ~/Projects
+repository = "https://github.com/thompsonson/atomicguard"
+responsibility = "Maintain the AtomicGuard project"
+
+[project.atomicguard.sandbox]
+write = [".", "~/.config/gh"]
+read = ["~/.gitconfig", "~/.ssh"]
+allow = ["/tmp", "~/.omp"]
+
+[project.dotfiles]
+path = "~/.local/share/chezmoi"                 # custom path: outside ~/Projects
+repository = "https://github.com/thompsonson/dotfiles"
+responsibility = "Maintain the chezmoi-managed dotfiles repository"
+layout = "claude"
+
+[project.dotfiles.sandbox]
+write = ["."]
+read = ["~/.gitconfig", "~/.ssh"]
+allow = ["/tmp"]
 ```
 
-### Format
-
-```
-project=layout[:path][@host]
-```
+### Fields (per `[project.<name>]`)
 
 | Field | Required | Description |
-|-------|----------|-------------|
-| `layout` | yes | `default` or `claude` |
-| `:path` | no | Custom directory (expands `~`). Omit for projects under `~/Projects`. |
-| `@host` | no | SSH hostname. If set and local hostname differs, `dev` will SSH to that host. |
+|-------|----------|--------------|
+| `path` | no | Custom directory (expands `~`). Omit for projects under `~/Projects`. |
+| `host` | no | SSH hostname; omit for local projects. |
+| `layout` | no | Legacy pane arrangement: `default`, `claude`, or `opencode`. |
+| `agent` | no | Default agent (`claude` or `opencode`) for new sessions — preferred over `layout`. |
+| `repository` | no | Informational — shown in `dev --status`/`--list`. |
+| `responsibility` | no | Informational — one-line description shown in `dev --status`/`--list`. |
+| `sandbox` | no | `[project.<name>.sandbox]` table: `write`, `read`, `allow` path lists for the nono sandbox. See `dev --sandbox show <project>`. |
 
-When a project has a custom `:path`, the config key (e.g. `dotfiles`) is used as the tmux session name instead of the directory basename.
+After editing `config.toml`, run **`dev --daemon restart`** — the daemon caches config in memory and does not hot-reload on file changes. Confirm with `dev --doctor` (checks the config parses) and `dev --list` (confirms the project is registered).
 
 ### Adding a Custom-Path Project
 
-1. Open `~/.config/dev/config` (create it if it doesn't exist)
-2. Add a line: `myproject=claude:/path/to/project`
-3. Run `dev myproject` -- a session will be created in `/path/to/project` with the `claude` layout
-4. Tab completion picks up the new name immediately
+1. Open `~/.config/dev/config.toml` (create it if it doesn't exist)
+2. Add a `[project.myproject]` block with `path = "/path/to/project"` and any other fields
+3. Run `dev --daemon restart` to pick up the change
+4. Run `dev myproject` — a session will be created in `/path/to/project`
+5. Tab completion picks up the new name after the daemon restart
 
 ## Remote Projects
 
-If a project has `@host` in its config and the local hostname doesn't match, `dev` will SSH to the remote host and run `dev` there transparently. This works for:
-
-- Opening sessions (`dev myproject`)
-- Killing sessions (`dev kill myproject`)
-- The interactive picker (remote-only projects appear in the list)
-
-Projects that only exist on a remote host still appear in the picker with an `@host` annotation.
-
-### How it works
-
-1. `dev` reads the `@host` suffix from the config
-2. Compares it against the local `hostname -s`
-3. If they differ, runs `ssh -t <host> dev <args>` instead of acting locally
+If a project has `host` set (directly, or inherited from `defaults.host`) and it doesn't match the local hostname, `dev` transparently routes to that machine over SSH. This works for opening sessions, killing sessions, status/list, and more. Use `--host <machine>` to target an explicit machine regardless of config, `--local` to force local operation even when a remote host is configured, or `--all` to aggregate `--list`/`--status` across every host in the config.
 
 ## Interactive Picker
 
@@ -110,22 +148,21 @@ Running `dev` with no arguments opens the interactive picker.
 ### fzf mode (if fzf is installed)
 
 A fuzzy-searchable list with two sections:
-- **[session]** entries for active tmux sessions (with layout type and last-activity time)
+- **[session]** entries for active tmux sessions (with layout/agent type and last-activity time)
 - **[project]** entries for discovered + custom-path projects not yet open
 
 ### Fallback mode (no fzf)
 
 A numbered list with a `Select [1-N]:` prompt, grouped into:
-1. **Active Sessions** -- existing tmux sessions
-2. **Available Projects** -- projects without an active session
+1. **Active Sessions** — existing tmux sessions
+2. **Available Projects** — projects without an active session
 
 ## Tab Completion
 
 Tab completion is configured in `dot_zshrc`. `dev <TAB>` completes:
-- Subcommands: `claude`, `detach`, `kill`, `kill-all`, `help`
 - Active tmux session names
 - Discovered projects from `~/Projects`
-- Custom-path project names from the config file
+- Custom-path project names from `config.toml`
 
 ## Tmux Keybindings
 
@@ -161,21 +198,33 @@ For projects that need multiple background services, copy `~/.local/share/start-
 # Pick a project interactively
 dev
 
-# Open atomicguard with its configured layout
+# Open atomicguard with its configured agent/layout
 dev atomicguard
 
 # Open dotfiles in the chezmoi source directory (custom path from config)
 dev dotfiles
 
-# Force claude+shell layout for any project
-dev claude myproject
+# Force the opencode agent for a session, regardless of config
+dev myproject --agent opencode
 
-# Kill a session
-dev kill myproject
+# Start a session without attaching, then check status
+dev --start myproject
+dev --status
 
-# Kill all sessions (will prompt for confirmation)
-dev kill-all
+# Kill a session / kill everything
+dev --kill myproject
+dev --kill-all
 
 # Detach from current session (inside tmux)
-dev detach
+dev --detach
+
+# Peek at another session's pane without attaching
+dev --peek intelligent_agents
+
+# Send a message to an agent in another session
+dev --send atomicguard "heads up: config.toml changed, restart when convenient"
+
+# After editing config.toml
+dev --daemon restart
+dev --doctor
 ```
