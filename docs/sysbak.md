@@ -9,7 +9,7 @@
 ```bash
 sysbak                          # Backup dashboard (same as sysbak status)
 sysbak status                   # Drive state, snapshot counts, last backup time
-sysbak run [alpha|beta|gamma]   # Trigger rsnapshot at given level
+sysbak [--dry-run] run [alpha|beta|gamma]   # Trigger rsnapshot at given level
 sysbak list <file>              # Show unique file versions across snapshots
 sysbak diff <file> [version]    # Diff current file vs snapshot version
 sysbak restore <file> [version] # Restore file from a snapshot version
@@ -27,12 +27,12 @@ sysbak help                     # Show built-in help
 | Command | Description |
 |---------|-------------|
 | `sysbak` / `sysbak status` | Dashboard: drive state, snapshot counts, disk usage, staleness |
-| `sysbak run [level]` | Trigger rsnapshot (alpha/beta/gamma). Supports `--dry-run` |
+| `sysbak [--dry-run] run [level]` | Trigger rsnapshot (alpha/beta/gamma). `--dry-run` is a global flag — it must come before `run`, not after |
 | `sysbak list <file>` | Show unique file versions across snapshots (inode-deduplicated) |
 | `sysbak diff <file> [ver]` | Diff current file vs snapshot version (uses `delta` if available) |
 | `sysbak restore <file> [ver]` | Restore a file from a snapshot version (with confirmation) |
 | `sysbak warn` | Print staleness warning. Exit code: 0=ok, 1=warn, 2=critical |
-| `sysbak setup` | One-time: install rsnapshot, write config/fstab/cron |
+| `sysbak setup [--yes\|-y]` | One-time: install rsnapshot, write config/fstab/cron. `--yes` skips confirmation prompts (non-interactive) |
 | `sysbak doctor` | Diagnose: config, device, dependencies, schedule, snapshots |
 | `sysbak git-bundle` | Bundle all git repos from ~/Projects to USB drive |
 | `sysbak config [--edit]` | Show config file or open in `$EDITOR` |
@@ -127,9 +127,9 @@ Each job gates on `mountpoint -q` — silently skipped if the drive is disconnec
 
 ## Configuration
 
-Config file: `~/.config/sysbak/config`
+Config file: `~/.config/sysbak/config` (a bash script, sourced directly — not INI)
 
-```ini
+```bash
 # Device and mount
 device=/dev/sda1
 mount_point=/mnt/backup
@@ -141,10 +141,21 @@ backup_dirs=(
     ~/.local/share/chezmoi
 )
 
+# Exclude patterns — defaults cover node_modules, __pycache__, caches, .git/objects.
+# When /nix/store exists, the script also auto-appends the Nix store + caches
+# (reproducible from flake.lock, never worth backing up). Setting this key
+# replaces the defaults entirely, so include Nix yourself if you customize it:
+# exclude_patterns=(
+#     "node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/"
+#     "/nix/store" "/nix/var" "~/.cache/nix" "~/.local/state/nix"
+# )
+
 # Staleness thresholds (hours)
 stale_warn_hours=25
 stale_crit_hours=48
 ```
+
+`sysbak doctor` reports exclude-pattern count and warns if `/nix/store` exists but isn't excluded.
 
 ## Typical Workflow
 
@@ -155,7 +166,7 @@ sysbak setup                    # Install rsnapshot, configure device
 # Daily use
 sysbak                          # Quick status check
 sysbak run                      # Manual alpha backup
-sysbak run --dry-run            # Preview what rsnapshot would do
+sysbak --dry-run run            # Preview what rsnapshot would do
 
 # File recovery
 sysbak list src/main.py         # Find versions

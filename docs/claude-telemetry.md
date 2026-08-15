@@ -14,9 +14,9 @@ ingested store.
 - **Backfill:** one-shot import of `~/.claude/projects/*/*.jsonl` and
   `*/subagents/*.jsonl` into a separate `legacy_events` table for historical
   retros. Goes back to Jan 2026 via subagent residuals.
-- **Retention:** sysbak already covers `~/.claude/projects/`. The SQLite store
-  also lives there once sysbak's include list picks up
-  `~/.local/share/otel/data/`.
+- **Retention:** sysbak already covers `~/.claude/projects/` (via `~/.claude`)
+  and `~/.local/share/otel/data/` (via `~/.local`) — both fall under existing
+  `backup_dirs` entries, no extra config needed.
 - **Goal:** retrospective analysis (weekly / monthly / project). Not live
   dashboards.
 
@@ -134,9 +134,10 @@ rm -rf ~/.local/share/otel/data
 
 ## Backup retention
 
-`~/.claude/projects/` is already in `sysbak`'s include list. Add
-`~/.local/share/otel/data/` for the SQLite + JSONL files to be backed up too:
+Both `~/.claude/projects/` and `~/.local/share/otel/data/` (SQLite + JSONL)
+are already covered by sysbak's default `backup_dirs` (`~/.claude` and
+`~/.local` are both entries). No extra config needed; verify with:
 
 ```bash
-sysbak config  # then add ~/.local/share/otel/data to includes
+sysbak config   # prints the active config, including backup_dirs
 ```

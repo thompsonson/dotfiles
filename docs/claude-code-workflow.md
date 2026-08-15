@@ -86,12 +86,12 @@ All of these operations are auto-approved. Claude presents a plan for user revie
 
 **Example session:**
 ```
-User: Add a new layout option to the dev command
+User: Add a new health check to sysmon
 
 Claude: [Enters plan mode]
-        [Reads dot_local/bin/executable_dev]
-        [Reads docs/dev.md]
-        [Searches for layout-related code]
+        [Reads dot_local/bin/executable_sysmon]
+        [Reads docs/sysmon.md]
+        [Searches for existing check_* functions]
         [Presents plan with specific files to modify]
 
 User: [Approves plan]
@@ -102,10 +102,10 @@ User: [Approves plan]
 After plan approval, Claude makes edits. Each edit is shown for approval unless auto-approved via settings:
 
 ```
-Claude: I'll add the new layout option to the dev script.
+Claude: I'll add the new health check to sysmon.
 
-        [Edit tool] dot_local/bin/executable_dev
-        Adding case for 'split' layout...
+        [Edit tool] dot_local/bin/executable_sysmon
+        Adding check_data_stores()...
 
         [User sees diff and approves]
 ```
@@ -123,7 +123,7 @@ Claude: [Runs git status - auto-approved]
         [Runs git diff - auto-approved]
         [Runs git log for commit style - auto-approved]
 
-        I'll commit with: "feat(dev): add split layout for side-by-side panes"
+        I'll commit with: "feat(sysmon): add data-store bloat check"
 
         [Runs git add - requires approval]
         [Runs git commit - requires approval]
@@ -156,27 +156,26 @@ Claude: [Runs gh pr checks - auto-approved]
 Here's a complete workflow for adding a feature:
 
 ```
-User: I want to add a 'split' layout to the dev command that creates
-      two equal shell panes side by side
+User: I want sysmon to warn when a data store on disk gets too big
 
-Claude: I'll explore the codebase to understand the current layout system.
+Claude: I'll explore the codebase to understand the current health-check system.
 
-        [Reads executable_dev - auto-approved]
-        [Reads docs/dev.md - auto-approved]
-        [Greps for "layout" patterns - auto-approved]
+        [Reads executable_sysmon - auto-approved]
+        [Reads docs/sysmon.md - auto-approved]
+        [Greps for "check_" patterns - auto-approved]
 
-        I found the layout system. Here's my plan:
+        I found the health-check system. Here's my plan:
 
-        1. Add 'split' to the layouts case statement
-        2. Update the help text
-        3. Update docs/dev.md
+        1. Add a new check_data_stores() function
+        2. Wire it into check_warnings()
+        3. Update docs/sysmon.md
 
         [Presents detailed plan]
 
 User: looks good, proceed
 
-Claude: [Edit executable_dev - user approves diff]
-        [Edit docs/dev.md - user approves diff]
+Claude: [Edit executable_sysmon - user approves diff]
+        [Edit docs/sysmon.md - user approves diff]
 
         Changes complete. Want me to commit?
 

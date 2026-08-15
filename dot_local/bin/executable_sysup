@@ -647,7 +647,7 @@ cmd_doctor() {
   header "Key Paths"
   check_path "$HOME/.tmux/plugins/tpm" "TPM"
   check_path "$HOME/.oh-my-zsh" "oh-my-zsh"
-  check_path "$HOME/.config/dev/config" "dev config"
+  check_path "$HOME/.config/dev/config.toml" "dev config"
   check_path "$HOME/.config/sysbak/config" "sysbak config"
   check_path "$HOME/Projects" "Projects directory"
 

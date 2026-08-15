@@ -99,7 +99,7 @@ Each tool is skipped if not installed. A total freed summary is shown at the end
 |------|-------------|
 | `~/.tmux/plugins/tpm` | Tmux Plugin Manager |
 | `~/.oh-my-zsh` | Oh My Zsh framework |
-| `~/.config/dev/config` | Dev session manager config |
+| `~/.config/dev/config.toml` | Dev session manager config |
 | `~/.config/sysbak/config` | Backup manager config |
 | `~/Projects` | Project discovery directory |
 

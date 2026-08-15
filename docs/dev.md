@@ -4,7 +4,7 @@
 
 Sessions survive disconnects, reboots (via tmux-resurrect), and can be accessed from any device via SSH. A background daemon (`dev --daemon`) backs session state over a Unix socket, so most commands are fast, scriptable, and work the same locally or against a remote host.
 
-**Source:** `~/.local/bin/dev` (`dot_local/bin/executable_dev` in chezmoi)
+**Source:** `~/.local/bin/dev` — a standalone Rust binary (maintained in its own `dev` project repo, not chezmoi-managed). Installed/updated via `dev --update`; chezmoi only sets up its config directory and PATH.
 
 > **Note:** `dev` moved from subcommands (`dev status`, `dev kill <name>`, ...) to `--flag` commands (`dev --status`, `dev --kill <name>`, ...). The old subcommand forms still work but are deprecated — run `dev --help` for the authoritative, current list.
 
