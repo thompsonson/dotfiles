@@ -398,6 +398,56 @@ check_temps() {
   fi
 }
 
+check_data_stores() {
+  has sqlite3 || return 0
+
+  local otel_db="$HOME/.local/share/otel/data/claude.db"
+  local oc_db="$HOME/.local/share/opencode/opencode.db"
+
+  # otel claude.db: single controlled writer (ingest.py), should stay small
+  # now that the collector filter drops opencode's internal noise. A climb
+  # past a few GB again means the filter regressed (opencode span-name
+  # change, etc).
+  if [ -f "$otel_db" ]; then
+    local otel_bytes otel_mb
+    if [ "$IS_MACOS" = true ]; then
+      otel_bytes=$(stat -f%z "$otel_db" 2>/dev/null || echo 0)
+    else
+      otel_bytes=$(stat -c%s "$otel_db" 2>/dev/null || echo 0)
+    fi
+    otel_mb=$(( otel_bytes / 1048576 ))
+    if [ "$otel_mb" -ge 8000 ]; then
+      add_warning "critical" "otel claude.db at ${otel_mb}M (above 8G — check the collector filter at ~/.local/share/otel/config.yaml)"
+    elif [ "$otel_mb" -ge 4000 ]; then
+      add_warning "warn" "otel claude.db at ${otel_mb}M (above 4G — check the collector filter at ~/.local/share/otel/config.yaml)"
+    fi
+  fi
+
+  # opencode.db: live, multi-writer app database (every dev session touches
+  # it). SQLite doesn't reclaim freed pages without VACUUM, and opencode has
+  # no built-in compaction (github.com/anomalyco/opencode#16777). Report-only
+  # — VACUUM needs sessions stopped first, so this isn't auto-fixed here.
+  if [ -f "$oc_db" ]; then
+    local oc_bytes oc_mb page_count freelist_count free_pct
+    if [ "$IS_MACOS" = true ]; then
+      oc_bytes=$(stat -f%z "$oc_db" 2>/dev/null || echo 0)
+    else
+      oc_bytes=$(stat -c%s "$oc_db" 2>/dev/null || echo 0)
+    fi
+    oc_mb=$(( oc_bytes / 1048576 ))
+    page_count=$(timeout 5 sqlite3 -readonly "$oc_db" "PRAGMA page_count;" 2>/dev/null || echo 0)
+    freelist_count=$(timeout 5 sqlite3 -readonly "$oc_db" "PRAGMA freelist_count;" 2>/dev/null || echo 0)
+    if [ "${page_count:-0}" -gt 0 ] 2>/dev/null; then
+      free_pct=$(( freelist_count * 100 / page_count ))
+      if [ "$free_pct" -ge 75 ] 2>/dev/null; then
+        add_warning "critical" "opencode.db is ${oc_mb}M, ${free_pct}% dead space (maintenance VACUUM overdue: stop dev sessions, then sqlite3 $oc_db VACUUM)"
+      elif [ "$free_pct" -ge 50 ] 2>/dev/null; then
+        add_warning "warn" "opencode.db is ${oc_mb}M, ${free_pct}% dead space (consider a maintenance VACUUM when sessions are stopped)"
+      fi
+    fi
+  fi
+}
+
 check_cpu_hogs() {
   [ "$IS_LINUX" = true ] || return 0
   local clk_tck
@@ -484,6 +534,7 @@ check_warnings() {
 
   check_temps
   check_cpu_hogs
+  check_data_stores
 
   # Backup staleness (if sysbak is available)
   if has sysbak; then
@@ -848,6 +899,8 @@ HEALTH CHECKS (sysmon warn)
   Zombie processes    warn >0, critical >5
   CPU temperature     warn >75°C, critical >90°C (Linux, requires lm-sensors)
   CPU hogs            warn if any process >50% CPU, or root daemon >10% CPU for >1h
+  otel claude.db      warn >4G, critical >8G (collector filter regression)
+  opencode.db         warn >50% dead space, critical >75% (needs a VACUUM)
 
 EXAMPLES
   sysmon              # Quick health dashboard

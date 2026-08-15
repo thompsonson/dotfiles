@@ -89,9 +89,9 @@ Each tool is skipped if not installed. A total freed summary is shown at the end
 
 | Group | Tools checked |
 |-------|--------------|
-| Package Managers | brew, apt-get, chezmoi, fnm, node, npm, uv, pipx |
-| Development Tools | git, zsh, tmux, fzf, docker, python3, just, gh, curl, sysbak, rsnapshot |
-| Modern CLI Replacements | eza, bat, fd, rg, delta, btop, zoxide, jq, sensors, sar |
+| Package Managers | brew, apt-get, chezmoi, fnm, node, npm, uv, pipx, nix (+ pkg on Termux) |
+| Development Tools | git, zsh, tmux, fzf, docker, python3, just, gh, curl, sysbak, rsnapshot, kubectl, cmake, git-lfs, devenv, direnv, opencode |
+| Modern CLI Replacements | eza, bat, fd, rg, delta, btop, zoxide, jq, sensors, sar, sqlite3, yq, pandoc, ffmpeg, yt-dlp |
 
 ### Key paths
 
