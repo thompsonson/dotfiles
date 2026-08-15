@@ -9,7 +9,7 @@
 ```bash
 sysbak                          # Backup dashboard (same as sysbak status)
 sysbak status                   # Drive state, snapshot counts, last backup time
-sysbak [--dry-run] run [alpha|beta|gamma]   # Trigger rsnapshot at given level
+sysbak run [alpha|beta|gamma] [--dry-run]   # Trigger rsnapshot at given level
 sysbak list <file>              # Show unique file versions across snapshots
 sysbak diff <file> [version]    # Diff current file vs snapshot version
 sysbak restore <file> [version] # Restore file from a snapshot version
@@ -27,7 +27,7 @@ sysbak help                     # Show built-in help
 | Command | Description |
 |---------|-------------|
 | `sysbak` / `sysbak status` | Dashboard: drive state, snapshot counts, disk usage, staleness |
-| `sysbak [--dry-run] run [level]` | Trigger rsnapshot (alpha/beta/gamma). `--dry-run` is a global flag — it must come before `run`, not after |
+| `sysbak run [level] [--dry-run]` | Trigger rsnapshot (alpha/beta/gamma). `--dry-run` can appear anywhere in the arguments |
 | `sysbak list <file>` | Show unique file versions across snapshots (inode-deduplicated) |
 | `sysbak diff <file> [ver]` | Diff current file vs snapshot version (uses `delta` if available) |
 | `sysbak restore <file> [ver]` | Restore a file from a snapshot version (with confirmation) |
@@ -166,7 +166,7 @@ sysbak setup                    # Install rsnapshot, configure device
 # Daily use
 sysbak                          # Quick status check
 sysbak run                      # Manual alpha backup
-sysbak --dry-run run            # Preview what rsnapshot would do
+sysbak run --dry-run            # Preview what rsnapshot would do
 
 # File recovery
 sysbak list src/main.py         # Find versions

@@ -1092,13 +1092,20 @@ HELP
 # === Main =====================================================================
 
 main() {
-  # Parse global flags
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --dry-run) DRY_RUN=true; shift ;;
-      *) break ;;
-    esac
+  # Parse global flags anywhere in argv, not just a leading run
+  local args=()
+  for arg in "$@"; do
+    if [[ "$arg" == "--dry-run" ]]; then
+      DRY_RUN=true
+    else
+      args+=("$arg")
+    fi
   done
+  if [[ ${#args[@]} -gt 0 ]]; then
+    set -- "${args[@]}"
+  else
+    set --
+  fi
 
   case "${1:-}" in
     ""|status)         cmd_status ;;
