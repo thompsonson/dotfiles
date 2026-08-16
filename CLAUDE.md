@@ -75,7 +75,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 ## Key Files
 
 ### Shell Configuration
-- `dot_zshrc`: Main shell configuration with welcome message and dev completion
+- `dot_zshrc.tmpl`: Main shell configuration with welcome message and dev completion
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
 
@@ -87,11 +87,15 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
 - `dot_config/sysbak/config`: Per-machine backup configuration
 
+### Telemetry
+- `dot_local/bin/executable_otel-stats`: Query/report tool over the local Claude Code telemetry SQLite store
+- `run_once_after_install-otel-collector.sh.tmpl`: Installs the OTel collector → SQLite pipeline; see `docs/claude-telemetry.md.tmpl`
+
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
-- `dot_local/bin/executable_dev`: Dev session manager (project discovery, fzf picker, layouts)
-- `dot_config/dev/config`: Per-project layout configuration
-- `run_once_after_install-tpm.sh`: Auto-installs TPM and plugins
+- `~/.local/bin/dev`: Dev session manager — a standalone Rust binary, maintained in its own repo (not chezmoi-managed); see `docs/dev.md`
+- `~/.config/dev/config.toml`: Per-project layout/sandbox configuration (not chezmoi-managed; machine-local)
+- `run_once_after_install-tpm.sh.tmpl`: Auto-installs TPM and plugins
 - `dot_local/share/start-service.sh.example`: Template for multi-service orchestration
 
 ### Editor Configuration
@@ -113,27 +117,32 @@ The `dev` command provides persistent tmux sessions for multi-device development
 ```bash
 dev                     # Interactive picker (fzf or numbered fallback)
 dev <project>           # Create or attach to session for <project>
-dev claude <project>    # Force claude+shell layout (vertical split)
-dev detach              # Detach from current tmux session
-dev kill <name>         # Kill a session
-dev kill-all            # Kill all sessions (with confirmation)
-dev help                # Full help text
+dev --start <project>   # Start a session without attaching
+dev --detach            # Detach from current tmux session
+dev --kill <name>       # Kill a session
+dev --kill-all          # Kill all sessions (with confirmation)
+dev --status            # Session status table
+dev --doctor            # Check environment and config
+dev --help              # Full, current command reference
 ```
+
+Old subcommand forms (`dev claude <project>`, `dev kill <name>`, ...) still work but are deprecated in favor of `--flag` forms — see [`docs/dev.md`](docs/dev.md).
 
 ### Configuration
-Per-project layouts are configured in `~/.config/dev/config`:
-```ini
-default_layout=default
-atomicguard=claude
-manta-deploy=claude
-dotfiles=claude:~/.local/share/chezmoi
-```
+Per-project settings are stored in `~/.config/dev/config.toml` (TOML):
+```toml
+[defaults]
+layout = "default"
 
-Format: `project=layout[:path][@host]` — `:path` for custom directories, `@host` for remote SSH.
+[project.dotfiles]
+path = "~/.local/share/chezmoi"
+layout = "claude"
+```
 
 ### Layouts
 - **default**: Single shell pane in the project directory
 - **claude**: Vertical split with `claude` (left) and shell (right)
+- **opencode**: Vertical split with `opencode` (left) and shell (right)
 
 ### Project Discovery
 Projects are auto-discovered from `~/Projects/` (up to 3 levels deep). Any directory containing `.git` is treated as a project.
@@ -165,6 +174,11 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
+- [`docs/claude-code-workflow.md`](docs/claude-code-workflow.md) — How Claude Code operates in this repo (permissions, plan mode, example sessions)
+- [`docs/claude-telemetry.md`](docs/claude-telemetry.md.tmpl) — OTel collector → SQLite pipeline for Claude Code telemetry
+- [`docs/claude-telemetry-strategy.md`](docs/claude-telemetry-strategy.md.tmpl) — Telemetry analysis strategy and tooling (`otel-stats`, `claude-chains.py`)
+- [`docs/claude-session-analysis.md`](docs/claude-session-analysis.md) — Point-in-time session analysis report (historical snapshot, not living docs)
+- [`docs/pi-agent-policy.md`](docs/pi-agent-policy.md) — Draft policy for `~/.pi` agent sandboxing (unimplemented)
 - `~/.config/dev/agents-env.md` — Agents environment (inter-agent messaging via `dev`)
 
 ## When Making Changes
@@ -205,7 +219,7 @@ Add the tool to the appropriate array in the `doctor` command:
 
 If the tool has a non-standard version flag, add a case to `get_version()`.
 
-### 3. Shell Aliases (`dot_zshrc`)
+### 3. Shell Aliases (`dot_zshrc.tmpl`)
 
 If the new tool replaces a standard command, add a conditional alias:
 ```zsh

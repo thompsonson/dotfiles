@@ -100,18 +100,22 @@ run_syntax() {
 
     local syntax_failed=0
 
-    # Zsh syntax check
-    if has_cmd zsh; then
-        if [[ -f "$REPO_DIR/dot_zshrc" ]]; then
-            if zsh -n "$REPO_DIR/dot_zshrc" 2>/dev/null; then
-                pass "dot_zshrc (zsh -n)"
+    # Zsh syntax check (render the template first, chezmoi falls back to
+    # blank defaults for prompted values when non-interactive)
+    if has_cmd zsh && has_cmd chezmoi; then
+        if [[ -f "$REPO_DIR/dot_zshrc.tmpl" ]]; then
+            rendered_zshrc="$(mktemp)"
+            if chezmoi execute-template < "$REPO_DIR/dot_zshrc.tmpl" > "$rendered_zshrc" 2>/dev/null \
+                && zsh -n "$rendered_zshrc" 2>/dev/null; then
+                pass "dot_zshrc.tmpl (rendered, zsh -n)"
             else
-                fail "dot_zshrc (zsh -n)"
+                fail "dot_zshrc.tmpl (rendered, zsh -n)"
                 syntax_failed=1
             fi
+            rm -f "$rendered_zshrc"
         fi
     else
-        skip "zsh not installed"
+        skip "zsh or chezmoi not installed"
     fi
 
     # Bash syntax check on shell scripts

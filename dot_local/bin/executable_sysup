@@ -639,7 +639,7 @@ cmd_doctor() {
   done
 
   header "Modern CLI Replacements"
-  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar yq pandoc ffmpeg yt-dlp)
+  local tools_cli=(eza bat fd rg delta btop zoxide jq sensors sar sqlite3 yq pandoc ffmpeg yt-dlp)
   for tool in "${tools_cli[@]}"; do
     check_tool "$tool"
   done
@@ -647,7 +647,7 @@ cmd_doctor() {
   header "Key Paths"
   check_path "$HOME/.tmux/plugins/tpm" "TPM"
   check_path "$HOME/.oh-my-zsh" "oh-my-zsh"
-  check_path "$HOME/.config/dev/config" "dev config"
+  check_path "$HOME/.config/dev/config.toml" "dev config"
   check_path "$HOME/.config/sysbak/config" "sysbak config"
   check_path "$HOME/Projects" "Projects directory"
 

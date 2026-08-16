@@ -222,9 +222,9 @@ _dev_completion() {
   # which doesn't exist on Termux (find lives in $PREFIX/bin).
   projects=(${(f)"$(command find ~/Projects -maxdepth 3 -name .git -type d 2>/dev/null | sed 's|.*/Projects/||;s|/\.git$||' | sort)"})
   # Add custom-path projects from config
-  if [ -f ~/.config/dev/config ]; then
+  if [ -f ~/.config/dev/config.toml ]; then
     local -a config_projects
-    config_projects=(${(f)"$(grep -E '^[a-zA-Z].*=.*:' ~/.config/dev/config | cut -d= -f1)"})
+    config_projects=(${(f)"$(grep -oE '^\[project\.[a-zA-Z0-9_-]+\]$' ~/.config/dev/config.toml | sed 's/^\[project\.//;s/\]$//')"})
     projects+=($config_projects)
   fi
   _arguments '1:command:->cmd' '2:target:->target'
@@ -278,12 +278,14 @@ if [[ "$HOST" == "pop-mini" ]]; then
   export OTEL_LOGS_EXPORTER=otlp
   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
   export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+{{- if .tailnet_domain }}
 elif [ -f "$HOME/.config/claude-telemetry/enabled" ]; then
   export CLAUDE_CODE_ENABLE_TELEMETRY=1
   export OTEL_METRICS_EXPORTER=otlp
   export OTEL_LOGS_EXPORTER=otlp
   export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
-  export OTEL_EXPORTER_OTLP_ENDPOINT=http://pop-mini.monkey-ladon.ts.net:4318
+  export OTEL_EXPORTER_OTLP_ENDPOINT=http://pop-mini.{{ .tailnet_domain }}:4318
+{{- end }}
 fi
 
 # source the PowerLevel10k config

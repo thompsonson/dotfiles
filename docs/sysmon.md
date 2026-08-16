@@ -61,6 +61,8 @@ The CPU temperature line is colour-coded: green (<75°C), yellow (75-89°C), red
 | CPU temperature | ≥75°C | ≥90°C | Linux (requires `lm-sensors`) |
 | CPU hog — any process | >50% CPU | — | Linux |
 | CPU hog — root daemon | >10% CPU for >1h accumulated | — | Linux |
+| otel claude.db size | ≥4G | ≥8G | All (requires `sqlite3`) |
+| opencode.db dead space | ≥50% freelist | ≥75% freelist | All (requires `sqlite3`) |
 | Backup staleness | stale | critical | All (requires `sysbak`) |
 
 Exit codes: `0` = all healthy, `1` = warnings present, `2` = critical issues.

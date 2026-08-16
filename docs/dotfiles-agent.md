@@ -12,11 +12,10 @@ This creates (or reattaches to) a tmux session named `dotfiles` in `~/.local/sha
 
 ## What Happens
 
-1. `dev` looks up `dotfiles` in `~/.config/dev/config` and finds `claude:~/.local/share/chezmoi`
-2. Extracts layout `claude` and path `~/.local/share/chezmoi`
-3. Creates tmux session `dotfiles` with a vertical split
-4. Left pane: runs `claude` (Claude Code CLI) in the chezmoi source directory
-5. Right pane: shell in the same directory for manual commands
+1. `dev` looks up `[project.dotfiles]` in `~/.config/dev/config.toml` and finds `path = "~/.local/share/chezmoi"` and `layout = "claude"`
+2. Creates tmux session `dotfiles` with a vertical split
+3. Left pane: runs `claude` (Claude Code CLI) in the chezmoi source directory
+4. Right pane: shell in the same directory for manual commands
 
 ## Project-Level Permissions
 
@@ -49,7 +48,7 @@ In the Claude Code pane, ask:
 
 ```
 "Add ripgrep to the install script"     # edits run_once_install-packages.sh.tmpl
-"Add a new alias for tldr"             # edits dot_zshrc
+"Add a new alias for tldr"             # edits dot_zshrc.tmpl
 "Update the tmux prefix key"           # edits dot_tmux.conf
 "Apply the changes"                     # runs chezmoi apply
 ```
@@ -70,10 +69,10 @@ sysup doctor                 # Verify tool health
 ## Session Lifecycle
 
 ```bash
-dev dotfiles        # Create or reattach
-C-a d               # Detach (session stays alive in background)
-dev dotfiles        # Reattach later, from any terminal or SSH session
-dev kill dotfiles   # Destroy the session when done
+dev dotfiles          # Create or reattach
+C-a d                 # Detach (session stays alive in background)
+dev dotfiles          # Reattach later, from any terminal or SSH session
+dev --kill dotfiles   # Destroy the session when done
 ```
 
 Sessions persist across disconnects and are auto-saved by tmux-resurrect every 15 minutes.

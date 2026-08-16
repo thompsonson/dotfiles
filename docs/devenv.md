@@ -8,7 +8,7 @@ default); opt-in on macOS by flipping the flag in `~/.config/chezmoi/chezmoi.tom
 
 1. `chezmoi apply` — installs Nix via the Determinate Systems installer and
    `nix profile install nixpkgs#devenv`. Idempotent; safe to re-run.
-2. Open a new shell. The `nix` and `direnv` hooks are wired up in `dot_zshrc`.
+2. Open a new shell. The `nix` and `direnv` hooks are wired up in `dot_zshrc.tmpl`.
 3. Verify: `sysup doctor` reports `nix`, `devenv`, `direnv` with versions.
 
 ## Usage
@@ -45,7 +45,7 @@ scrolls off. If you see that, re-run `chezmoi apply` and open a new shell.
 - First `devenv shell` after cloning a project can take minutes while Nix
   realizes the closure. Subsequent activations are fast (store hit).
 - If the DetSys installer doesn't automatically configure your shell,
-  `dot_zshrc` sources `/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh`
+  `dot_zshrc.tmpl` sources `/nix/var/nix/profiles/default/etc/profile.d/nix-daemon.sh`
   as a fallback.
 - `direnv allow` is per-directory trust. Re-run after cloning a new repo.
 

@@ -485,7 +485,7 @@ mkdir -p ~/Code ~/Projects ~/Scripts
 # Git configuration
 echo 'Configuring Git'
 git config --global user.name "Matthew Thompson"
-git config --global user.email "thompsonson@gmail.com"
+git config --global user.email "{{ .email }}"
 git config --global init.defaultBranch main
 git config --global pull.rebase true
 git config --global core.autocrlf input
@@ -526,7 +526,7 @@ if command -v gpg >/dev/null 2>&1; then
 Key-Type: RSA
 Key-Length: 4096
 Name-Real: Matthew Thompson
-Name-Email: thompsonson@gmail.com
+Name-Email: {{ .email }}
 Expire-Date: 2y
 %no-protection
 %commit
@@ -559,7 +559,7 @@ chmod 700 ~/.ssh
 # Generate SSH key if it doesn't exist (using modern ed25519)
 if [ ! -f ~/.ssh/id_ed25519 ]; then
   echo 'Generating new SSH key'
-  ssh-keygen -t ed25519 -C "thompsonson@gmail.com" -f ~/.ssh/id_ed25519 -N ""
+  ssh-keygen -t ed25519 -C "{{ .email }}" -f ~/.ssh/id_ed25519 -N ""
   
   # Start ssh-agent and add key
   eval "$(ssh-agent -s)"
