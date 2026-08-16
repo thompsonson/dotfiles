@@ -18,6 +18,19 @@ processors:
   resourcedetection:
     detectors: [env, system]
     timeout: 2s
+  # Drops opencode's own internal instrumentation spans (sql.execute,
+  # Credential.list, Session.getPart, etc.) — self-tracing noise that
+  # ballooned claude.db to 111G with mostly-empty attribute payloads.
+  # Keeps ai.toolCall (name+args, ~11KB) and ai.stream.finish/firstChunk
+  # (small completion markers) as genuine tool-call telemetry. Still drops
+  # ai.streamText/.doStream (~2.3MB each, duplicates full prompt/context
+  # already stored in opencode.db and ~/.claude/projects).
+  # Real product telemetry (e.g. service.name="oh-my-pi") is untouched.
+  filter/drop_opencode_internal:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["service.name"] == "opencode" and name != "ai.toolCall" and name != "ai.stream.finish" and name != "ai.stream.firstChunk"'
 
 exporters:
   file/metrics:
@@ -46,7 +59,7 @@ service:
       exporters: [file/logs]
     traces:
       receivers: [otlp]
-      processors: [resourcedetection, batch]
+      processors: [resourcedetection, filter/drop_opencode_internal, batch]
       exporters: [file/traces]
   telemetry:
     logs: {level: info}
