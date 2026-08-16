@@ -25,7 +25,7 @@ jobs:
         run: sh -c "$(curl -fsLS get.chezmoi.io)" -- -b /usr/local/bin
 
       - name: Initialize chezmoi
-        run: chezmoi init --source=$PWD
+        run: chezmoi init --source=$PWD --promptDefaults
 
       # Shellcheck
       - name: Shellcheck - sysup
@@ -83,7 +83,7 @@ jobs:
         run: brew install chezmoi shellcheck
 
       - name: Initialize chezmoi
-        run: chezmoi init --source=$PWD
+        run: chezmoi init --source=$PWD --promptDefaults
 
       # Shellcheck
       - name: Shellcheck - sysup
