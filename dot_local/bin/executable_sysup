@@ -124,6 +124,20 @@ brew_upgrade() {
 brew_repair() {
   header "Homebrew"
   if ! has brew; then summary_skip "brew"; return; fi
+  # Homebrew refuses to write its tap-trust store if the directory is
+  # group/world-writable ("Refusing to write insecure trust store").
+  if [ -d "$HOME/.homebrew" ]; then
+    local trust_perms group_digit other_digit
+    trust_perms=$(stat -c "%a" "$HOME/.homebrew" 2>/dev/null || stat -f "%Lp" "$HOME/.homebrew" 2>/dev/null)
+    if [ -n "$trust_perms" ]; then
+      group_digit=${trust_perms: -2:1}
+      other_digit=${trust_perms: -1}
+      if (( (group_digit & 2) || (other_digit & 2) )); then
+        info "Fixing insecure trust store permissions (~/.homebrew)..."
+        chmod go-w "$HOME/.homebrew"
+      fi
+    fi
+  fi
   info "Running diagnostics..."
   brew doctor 2>&1 | head -20 || true
   info "Cleaning up..."
