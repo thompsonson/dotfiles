@@ -186,7 +186,7 @@ Sessions are automatically saved every 15 minutes via **tmux-continuum** and res
 | Manual save | `prefix + Ctrl-s` |
 | Manual restore | `prefix + Ctrl-r` |
 
-TPM is auto-installed by `run_once_after_install-tpm.sh` during chezmoi setup.
+TPM is auto-installed by `run_once_after_install-tpm.sh.tmpl` during chezmoi setup.
 
 ## Multi-Service Orchestration
 
