@@ -315,7 +315,7 @@ get_interfaces() {
   if [ "$IS_MACOS" = true ]; then
     # Use ifconfig on macOS
     local ifaces
-    ifaces=$(ifconfig -l 2>/dev/null | tr ' ' '\n' | grep -v '^$')
+    ifaces=$(ifconfig -l 2>/dev/null | tr ' ' '\n' | grep -v '^$' || true)
     while IFS= read -r iface; do
       local addr status
       addr=$(ifconfig "$iface" 2>/dev/null | awk '/inet / {print $2; exit}')
