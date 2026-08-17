@@ -117,6 +117,14 @@ antigen apply
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#666666"
 ZSH_AUTOSUGGEST_STRATEGY=(history completion)
 ZSH_AUTOSUGGEST_BUFFER_MAX_SIZE=20
+# Force synchronous mode: the plugin's async widget forks a background zsh
+# via process substitution and reaps it on a zle callback. If a pane/session
+# gets torn down mid-computation, that callback never fires and the child is
+# left as a zombie. The plugin checks *presence* of this var (${+VAR}), not
+# its value, so it must be unset (not set to false) to take effect — and
+# unset here, after `antigen apply`, since that's what sets it in the first
+# place on zsh >= 5.0.8.
+unset ZSH_AUTOSUGGEST_USE_ASYNC
 
 # Modern CLI tool aliases (add after antigen apply)
 if command -v eza >/dev/null 2>&1; then
