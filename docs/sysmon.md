@@ -70,6 +70,8 @@ The CPU temperature line is colour-coded: green (<75°C), yellow (75-89°C), red
 
 Exit codes: `0` = all healthy, `1` = warnings present, `2` = critical issues.
 
+`opencode.db` bloat is fixed with `opencode-vacuum` (refuses to run while opencode is active; `--kill` stops sessions first, `--dry-run` previews, `--yes` skips prompts).
+
 Temperature and CPU hog checks are silently skipped if `sensors` is not installed or on non-Linux platforms.
 
 ### Welcome message integration

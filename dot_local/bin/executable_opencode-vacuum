@@ -1,0 +1,227 @@
+#!/bin/bash
+# ============================================================================
+# opencode-vacuum - Reclaim dead space from opencode's SQLite database
+# ============================================================================
+# opencode.db grows without bound (SQLite doesn't reclaim freed pages
+# without VACUUM, and opencode has no built-in compaction:
+# github.com/anomalyco/opencode#16777). VACUUM needs exclusive access to
+# the database, so this refuses to run while opencode processes are
+# active, with an optional --kill to stop them first.
+#
+# Usage: opencode-vacuum [options]
+#   opencode-vacuum              Vacuum if no opencode processes are running
+#   opencode-vacuum --kill       Kill active opencode processes first, then vacuum
+#   opencode-vacuum --dry-run    Show what would happen, change nothing
+#   opencode-vacuum --yes        Skip confirmation prompts
+#   opencode-vacuum help         Show this help
+#   opencode-vacuum version      Show version
+
+set -euo pipefail
+
+OPENCODE_VACUUM_VERSION="1.0.0"
+DB="$HOME/.local/share/opencode/opencode.db"
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+
+if [ -t 1 ]; then
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  CYAN='\033[1;36m'
+  NC='\033[0m'
+else
+  RED='' GREEN='' YELLOW='' CYAN='' NC=''
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+die()     { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info()    { echo -e "${CYAN}$*${NC}"; }
+warn()    { echo -e "${YELLOW}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+
+has() { command -v "$1" &>/dev/null; }
+
+IS_MACOS=false
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+fi
+
+show_help() {
+  cat <<'HELP'
+opencode-vacuum - Reclaim dead space from opencode's SQLite database
+
+USAGE
+  opencode-vacuum              Vacuum if no opencode processes are running
+  opencode-vacuum --kill       Kill active opencode processes first, then vacuum
+  opencode-vacuum --dry-run    Show what would happen, change nothing
+  opencode-vacuum --yes        Skip confirmation prompts
+  opencode-vacuum help         Show this help
+  opencode-vacuum version      Show version
+
+Refuses to VACUUM while opencode is running: VACUUM needs exclusive
+access to rewrite the database file, and a concurrent write from an
+active session can fail or stall mid-operation. Pass --kill to stop
+opencode processes first (SIGTERM, then SIGKILL after a grace period
+for stragglers) — you'll be shown which processes/directories are
+about to be killed and asked to confirm, unless --yes is also given.
+HELP
+}
+
+# confirm PROMPT: returns 0 (proceed) or 1 (abort). Never fails under set -e
+# regardless of the read/case outcome.
+confirm() {
+  local prompt="$1" answer=""
+  if [ "$YES" = true ]; then
+    return 0
+  fi
+  echo -ne "  ${prompt} [y/N] "
+  read -r answer || true
+  case "$answer" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints the process's cwd, or nothing. Always returns 0 — the process may
+# have already exited between listing it and inspecting it (race with the
+# kill loop), and that's not an error condition here.
+get_proc_cwd() {
+  local pid="$1"
+  if [ "$IS_MACOS" = true ]; then
+    lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | awk '/^n/{print substr($0,2)}'
+  else
+    readlink "/proc/$pid/cwd" 2>/dev/null
+  fi
+  return 0
+}
+
+# Prints one PID per line, or nothing. Always returns 0 — pgrep exits 1 when
+# it finds no matches, which is the common/healthy case, not an error.
+list_opencode_pids() {
+  pgrep -x opencode 2>/dev/null || true
+  return 0
+}
+
+# Prints "<size_mb> <dead_space_pct>". Always returns 0.
+db_stats() {
+  local bytes mb page_count freelist_count free_pct=0
+  if [ "$IS_MACOS" = true ]; then
+    bytes=$(stat -f%z "$DB" 2>/dev/null || echo 0)
+  else
+    bytes=$(stat -c%s "$DB" 2>/dev/null || echo 0)
+  fi
+  mb=$(( bytes / 1048576 ))
+  page_count=$(sqlite3 -readonly "$DB" "PRAGMA page_count;" 2>/dev/null || echo 0)
+  freelist_count=$(sqlite3 -readonly "$DB" "PRAGMA freelist_count;" 2>/dev/null || echo 0)
+  if [ "${page_count:-0}" -gt 0 ] 2>/dev/null; then
+    free_pct=$(( freelist_count * 100 / page_count ))
+  fi
+  echo "$mb $free_pct"
+  return 0
+}
+
+main() {
+  local kill_procs=false dry_run=false
+  YES=false
+
+  for arg in "$@"; do
+    case "$arg" in
+      --kill|-k)             kill_procs=true ;;
+      --yes|-y)               YES=true ;;
+      --dry-run)               dry_run=true ;;
+      version|--version|-v)   echo "opencode-vacuum $OPENCODE_VACUUM_VERSION"; exit 0 ;;
+      help|--help|-h)         show_help; exit 0 ;;
+      *)                       die "Unknown option: $arg (try 'opencode-vacuum help')" ;;
+    esac
+  done
+
+  has sqlite3 || die "sqlite3 not found — required to vacuum"
+  [ -f "$DB" ] || die "No database at $DB — nothing to vacuum"
+
+  local pids
+  pids=$(list_opencode_pids)
+
+  if [ -n "$pids" ]; then
+    info "Active opencode process(es):"
+    local pid cwd
+    while read -r pid; do
+      if [ -z "$pid" ]; then
+        continue
+      fi
+      cwd=$(get_proc_cwd "$pid")
+      if [ -n "$cwd" ]; then
+        echo "    PID $pid  ($cwd)"
+      else
+        echo "    PID $pid"
+      fi
+    done <<< "$pids"
+    echo ""
+
+    if [ "$kill_procs" != true ]; then
+      warn "VACUUM needs exclusive access — refusing to run while these are active."
+      info "Stop them yourself, or re-run with --kill to stop them first."
+      exit 1
+    fi
+
+    if [ "$dry_run" = true ]; then
+      info "[dry-run] would kill the process(es) above, then vacuum"
+      exit 0
+    fi
+
+    if ! confirm "Kill the process(es) above?"; then
+      info "Aborted."
+      exit 1
+    fi
+
+    echo "$pids" | xargs -r kill -TERM 2>/dev/null || true
+
+    local waited=0
+    while [ "$waited" -lt 10 ]; do
+      pids=$(list_opencode_pids)
+      if [ -z "$pids" ]; then
+        break
+      fi
+      sleep 1
+      waited=$(( waited + 1 ))
+    done
+
+    pids=$(list_opencode_pids)
+    if [ -n "$pids" ]; then
+      warn "Still running after SIGTERM, sending SIGKILL: $pids"
+      echo "$pids" | xargs -r kill -KILL 2>/dev/null || true
+      sleep 1
+    fi
+
+    pids=$(list_opencode_pids)
+    if [ -n "$pids" ]; then
+      die "opencode process(es) still running (PID(s): $pids) — aborting"
+    fi
+    success "opencode stopped."
+  fi
+
+  local stats before_mb before_free_pct
+  stats=$(db_stats)
+  read -r before_mb before_free_pct <<< "$stats"
+  info "opencode.db: ${before_mb}M, ${before_free_pct}% dead space"
+
+  if [ "$dry_run" = true ]; then
+    info "[dry-run] would run: sqlite3 $DB VACUUM"
+    exit 0
+  fi
+
+  if ! confirm "Run VACUUM now?"; then
+    info "Aborted."
+    exit 1
+  fi
+
+  info "Vacuuming (this may take a while for a multi-GB database)..."
+  sqlite3 "$DB" "VACUUM;"
+
+  local after_mb after_free_pct
+  stats=$(db_stats)
+  read -r after_mb after_free_pct <<< "$stats"
+  success "Done: ${before_mb}M (${before_free_pct}% dead) -> ${after_mb}M (${after_free_pct}% dead)"
+}
+
+main "$@"
