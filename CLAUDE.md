@@ -83,6 +83,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
 - `dot_local/bin/executable_opencode-vacuum`: Reclaims dead space from `~/.local/share/opencode/opencode.db` (SQLite doesn't auto-compact); refuses to run while opencode is active unless `--kill` is passed
+- `dot_local/bin/executable_wol`: Wake-on-LAN sender + reachability poller (name → MAC/IP registry, magic packet, poll-ping)
 
 ### Backup
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
@@ -173,6 +174,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysup.md`](docs/sysup.md) — System update utility reference
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
+- [`docs/wol.md`](docs/wol.md) — Wake-on-LAN sender + reachability poller reference
 - [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 - [`docs/claude-code-workflow.md`](docs/claude-code-workflow.md) — How Claude Code operates in this repo (permissions, plan mode, example sessions)

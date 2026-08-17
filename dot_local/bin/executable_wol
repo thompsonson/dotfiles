@@ -1,0 +1,365 @@
+#!/bin/bash
+# ============================================================================
+# wol - Wake-on-LAN sender + reachability poller
+# ============================================================================
+# Sends WoL magic packets to devices in a name -> MAC/IP registry, and can
+# poll-ping a device until it answers (useful for "wake it, then wait until
+# it's actually up" scripts).
+#
+# Usage: wol [command]
+#   wol                         Device dashboard: MAC, IP, live reachability
+#   wol status                  Same as above
+#   wol list                    List configured devices (no ping)
+#   wol wake <name> [--ping] [--timeout N]
+#                                Send magic packet; --ping waits (default 60s)
+#                                for the host to answer
+#   wol ping <name> [timeout_s]  Poll ping until reachable or timeout (default 60s)
+#   wol doctor                  Diagnose dependencies and config
+#   wol config [--edit]         Show config or open in $EDITOR
+#   wol version                 Show wol version
+#   wol help                    Show usage text
+
+set -euo pipefail
+
+WOL_VERSION="1.0.0"
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+
+if [ -t 1 ]; then
+  BOLD='\033[1m'
+  DIM='\033[2m'
+  RED='\033[0;31m'
+  GREEN='\033[0;32m'
+  YELLOW='\033[1;33m'
+  BLUE='\033[0;34m'
+  CYAN='\033[1;36m'
+  NC='\033[0m'
+else
+  BOLD='' DIM='' RED='' GREEN='' YELLOW='' BLUE='' CYAN='' NC=''
+fi
+
+# --- Helpers ------------------------------------------------------------------
+
+die()     { echo -e "${RED}Error: $*${NC}" >&2; exit 1; }
+info()    { echo -e "${CYAN}$*${NC}"; }
+warn()    { echo -e "${YELLOW}$*${NC}"; }
+success() { echo -e "${GREEN}$*${NC}"; }
+header()  { echo -e "\n${BOLD}${BLUE}── $* ──${NC}"; }
+
+has() { command -v "$1" &>/dev/null; }
+
+IS_MACOS=false
+if [[ "$OSTYPE" == "darwin"* ]]; then
+  IS_MACOS=true
+fi
+
+# --- Configuration ------------------------------------------------------------
+
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/wol"
+CONFIG_FILE="${CONFIG_DIR}/config"
+
+# --- Device registry ------------------------------------------------------------
+# Config format: whitespace-separated table, one device per line.
+#   name  mac  [ip]  [broadcast]
+# ip is required for ping/--ping; broadcast defaults to 255.255.255.255.
+
+# Print the matching config line for a device name, or nothing.
+get_device_line() {
+  local name="$1"
+  [[ -f "$CONFIG_FILE" ]] || return 0
+  awk -v n="$name" '
+    /^[[:space:]]*#/ {next}
+    NF==0 {next}
+    $1==n {print; exit}
+  ' "$CONFIG_FILE"
+}
+
+# Print the matching config line, or die with a helpful message.
+require_device() {
+  local name="$1" line
+  [[ -f "$CONFIG_FILE" ]] || die "No config file at $CONFIG_FILE — run 'wol config --edit' to add a device"
+  line=$(get_device_line "$name")
+  [[ -n "$line" ]] || die "No device named '$name' in $CONFIG_FILE (try 'wol list')"
+  echo "$line"
+}
+
+valid_mac() {
+  [[ "$1" =~ ^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$ ]]
+}
+
+# --- Wake / ping primitives -----------------------------------------------------
+
+send_magic_packet() {
+  local mac="$1" bcast="$2"
+  if has wakeonlan; then
+    wakeonlan -i "$bcast" "$mac" >/dev/null
+  elif has python3; then
+    python3 - "$mac" "$bcast" <<'PYEOF'
+import socket
+import sys
+
+mac = sys.argv[1].replace('-', ':').lower()
+bcast = sys.argv[2]
+mac_bytes = bytes.fromhex(mac.replace(':', ''))
+packet = b'\xff' * 6 + mac_bytes * 16
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+sock.sendto(packet, (bcast, 9))
+sock.close()
+PYEOF
+  else
+    die "Need 'wakeonlan' installed, or python3 as a fallback (neither found)"
+  fi
+}
+
+ping_once() {
+  local ip="$1"
+  if [ "$IS_MACOS" = true ]; then
+    ping -c 1 -t 1 "$ip" &>/dev/null
+  else
+    ping -c 1 -W 1 "$ip" &>/dev/null
+  fi
+}
+
+# === Subcommands ==============================================================
+
+# --- status (default) / list --------------------------------------------------
+
+cmd_list() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    echo -e "${DIM}No config file found at $CONFIG_FILE${NC}"
+    echo -e "${DIM}Run 'wol config --edit' to add a device${NC}"
+    return
+  fi
+
+  header "Devices"
+  printf "  ${DIM}%-16s %-19s %s${NC}\n" "NAME" "MAC" "IP"
+  local found=0 n m i _b
+  while read -r n m i _b; do
+    [[ -z "$n" ]] && continue
+    found=1
+    printf "  %-16s %-19s %s\n" "$n" "$m" "${i:--}"
+  done < <(grep -v '^[[:space:]]*#' "$CONFIG_FILE" | grep -v '^[[:space:]]*$')
+  [[ "$found" -eq 0 ]] && echo -e "  ${DIM}No devices configured${NC}"
+}
+
+cmd_status() {
+  if [[ ! -f "$CONFIG_FILE" ]]; then
+    cmd_list
+    return
+  fi
+
+  header "Devices"
+  printf "  ${DIM}%-16s %-19s %-16s %s${NC}\n" "NAME" "MAC" "IP" "STATUS"
+  local found=0 n m i _b
+  while read -r n m i _b; do
+    [[ -z "$n" ]] && continue
+    found=1
+    local status
+    if [[ -z "$i" ]]; then
+      status="${DIM}no IP${NC}"
+    elif ping_once "$i"; then
+      status="${GREEN}up${NC}"
+    else
+      status="${DIM}down${NC}"
+    fi
+    printf "  %-16s %-19s %-16s %b\n" "$n" "$m" "${i:--}" "$status"
+  done < <(grep -v '^[[:space:]]*#' "$CONFIG_FILE" | grep -v '^[[:space:]]*$')
+  [[ "$found" -eq 0 ]] && echo -e "  ${DIM}No devices configured${NC}"
+}
+
+# --- wake -----------------------------------------------------------------------
+
+cmd_wake() {
+  local name="${1:-}"
+  [[ -z "$name" ]] && die "Usage: wol wake <name> [--ping] [--timeout N]"
+  shift
+
+  local do_ping=false timeout=60
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ping) do_ping=true; shift ;;
+      --timeout) timeout="${2:?--timeout requires a value}"; shift 2 ;;
+      *) die "Unknown option: $1 (try 'wol help')" ;;
+    esac
+  done
+
+  local line mac ip bcast
+  line=$(require_device "$name")
+  read -r _ mac ip bcast <<< "$line"
+  bcast="${bcast:-255.255.255.255}"
+
+  valid_mac "$mac" || die "Invalid MAC address for '$name': $mac"
+
+  send_magic_packet "$mac" "$bcast"
+  success "Magic packet sent to $name ($mac) via $bcast"
+
+  if [[ "$do_ping" = true ]]; then
+    if [[ -z "$ip" ]]; then
+      warn "No IP configured for $name — cannot verify wake. Add one to $CONFIG_FILE."
+      return 0
+    fi
+    poll_ping "$name" "$ip" "$timeout"
+  fi
+}
+
+# --- ping -----------------------------------------------------------------------
+
+poll_ping() {
+  local name="$1" ip="$2" timeout="$3"
+  info "Pinging $name ($ip), timeout ${timeout}s..."
+  local start_epoch elapsed=0
+  start_epoch=$(date +%s)
+  while true; do
+    if ping_once "$ip"; then
+      success "$name ($ip) is up (${elapsed}s)"
+      return 0
+    fi
+    elapsed=$(( $(date +%s) - start_epoch ))
+    if (( elapsed >= timeout )); then
+      die "$name ($ip) did not respond within ${timeout}s"
+    fi
+    sleep 2
+  done
+}
+
+cmd_ping() {
+  local name="${1:-}" timeout="${2:-60}"
+  [[ -z "$name" ]] && die "Usage: wol ping <name> [timeout_seconds]"
+
+  local line ip
+  line=$(require_device "$name")
+  read -r _ _mac ip _bcast <<< "$line"
+  [[ -n "$ip" ]] || die "Device '$name' has no IP configured in $CONFIG_FILE — required for ping"
+
+  poll_ping "$name" "$ip" "$timeout"
+}
+
+# --- doctor -------------------------------------------------------------------
+
+cmd_doctor() {
+  header "Configuration"
+  if [[ -f "$CONFIG_FILE" ]]; then
+    printf "  ${GREEN}✓${NC} %-18s %s\n" "Config file:" "$CONFIG_FILE"
+  else
+    printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Config file:" "$CONFIG_FILE (missing)"
+  fi
+
+  header "Dependencies"
+  local issues=0
+  if has wakeonlan; then
+    printf "  ${GREEN}✓${NC} %-18s %s\n" "wakeonlan:" "installed"
+  elif has python3; then
+    printf "  ${YELLOW}⚠${NC} %-18s %s\n" "wakeonlan:" "not installed (falling back to python3)"
+  else
+    printf "  ${RED}✗${NC} %-18s %s\n" "wakeonlan:" "not installed, and no python3 fallback"
+    issues=$((issues + 1))
+  fi
+  if has ping; then
+    printf "  ${GREEN}✓${NC} %-18s %s\n" "ping:" "available"
+  else
+    printf "  ${RED}✗${NC} %-18s %s\n" "ping:" "not found"
+    issues=$((issues + 1))
+  fi
+
+  if [[ -f "$CONFIG_FILE" ]]; then
+    header "Devices"
+    local count=0 bad=0 n m _i _b
+    while read -r n m _i _b; do
+      [[ -z "$n" ]] && continue
+      count=$((count + 1))
+      if ! valid_mac "$m"; then
+        printf "  ${RED}✗${NC} %-18s %s\n" "$n:" "invalid MAC ($m)"
+        bad=$((bad + 1))
+      fi
+    done < <(grep -v '^[[:space:]]*#' "$CONFIG_FILE" | grep -v '^[[:space:]]*$')
+    printf "  %-20s %d device(s)\n" "  Total:" "$count"
+    issues=$((issues + bad))
+  fi
+
+  echo ""
+  if [[ $issues -eq 0 ]]; then
+    success "All checks passed"
+  else
+    warn "$issues issue(s) found"
+  fi
+  return $issues
+}
+
+# --- config -------------------------------------------------------------------
+
+cmd_config() {
+  if [[ "${1:-}" = "--edit" ]]; then
+    mkdir -p "$CONFIG_DIR"
+    if [[ ! -f "$CONFIG_FILE" ]]; then
+      cat > "$CONFIG_FILE" <<'EOF'
+# wol device registry — one device per line, whitespace-separated
+# name            mac                  ip (optional)   broadcast (optional, default 255.255.255.255)
+# alpha           aa:bb:cc:dd:ee:ff    192.168.1.10
+# beta            11:22:33:44:55:66    192.168.1.11    192.168.1.255
+EOF
+    fi
+    "${EDITOR:-vi}" "$CONFIG_FILE"
+  else
+    if [[ -f "$CONFIG_FILE" ]]; then
+      cat "$CONFIG_FILE"
+    else
+      echo -e "${DIM}No config file found at $CONFIG_FILE${NC}"
+      echo -e "${DIM}Run 'wol config --edit' to create one${NC}"
+    fi
+  fi
+}
+
+# --- help / version -----------------------------------------------------------
+
+show_version() {
+  echo "wol $WOL_VERSION"
+}
+
+show_help() {
+  cat <<'HELP'
+wol - Wake-on-LAN sender + reachability poller
+
+Usage: wol [command]
+
+Commands:
+  status                      Device dashboard: MAC, IP, live reachability (default)
+  list                        List configured devices (no ping)
+  wake <name> [--ping] [--timeout N]
+                               Send magic packet; --ping waits (default 60s) for the host
+  ping <name> [timeout_s]     Poll ping until reachable or timeout (default 60s)
+  doctor                      Diagnose dependencies and config
+  config [--edit]              Show config or open in $EDITOR
+  version                      Show wol version
+  help                         Show this help
+
+Config: ~/.config/wol/config
+  name  mac  [ip]  [broadcast]
+  One device per line, whitespace-separated. IP is required for 'ping'/'--ping'.
+  Broadcast defaults to 255.255.255.255; override per-device for routed subnets.
+
+Examples:
+  wol wake alpha --ping       Wake alpha, wait until it's reachable
+  wol ping alpha 120           Wait up to 120s for alpha to respond
+  wol status                   See which configured devices are currently up
+HELP
+}
+
+# === Main =====================================================================
+
+main() {
+  case "${1:-}" in
+    ""|status)             cmd_status ;;
+    list)                  cmd_list ;;
+    wake)                  shift; cmd_wake "$@" ;;
+    ping)                  shift; cmd_ping "$@" ;;
+    doctor)                cmd_doctor ;;
+    config)                shift; cmd_config "$@" ;;
+    version|--version|-v)  show_version ;;
+    help|--help|-h)        show_help ;;
+    *)                     die "Unknown command: $1 (try 'wol help')" ;;
+  esac
+}
+
+main "$@"
