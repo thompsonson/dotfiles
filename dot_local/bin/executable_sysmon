@@ -486,6 +486,7 @@ check_docker_health() {
   unhealthy=$(echo "$status_output" | awk -F'\t' '$2 ~ /\(unhealthy\)/ {printf "%s%s", (u++?",":""), $1}')
   [ -n "$restarting" ] && add_warning "critical" "Container(s) stuck restarting: $restarting"
   [ -n "$unhealthy" ] && add_warning "warn" "Container(s) unhealthy: $unhealthy"
+  return 0
 }
 
 check_failed_units() {
