@@ -9,12 +9,12 @@
 # active, with an optional --kill to stop them first.
 #
 # Usage: opencode-vacuum [options]
-#   opencode-vacuum              Vacuum if no opencode processes are running
-#   opencode-vacuum --kill       Kill active opencode processes first, then vacuum
-#   opencode-vacuum --dry-run    Show what would happen, change nothing
-#   opencode-vacuum --yes        Skip confirmation prompts
-#   opencode-vacuum help         Show this help
-#   opencode-vacuum version      Show version
+#   opencode-vacuum                 Vacuum if no opencode processes are running
+#   opencode-vacuum --kill, -k      Kill active opencode processes first, then vacuum
+#   opencode-vacuum --dry-run       Show what would happen, change nothing
+#   opencode-vacuum --yes, -y       Skip confirmation prompts
+#   opencode-vacuum help, --help, -h    Show this help
+#   opencode-vacuum version, --version, -v  Show version
 
 set -euo pipefail
 
@@ -52,12 +52,12 @@ show_help() {
 opencode-vacuum - Reclaim dead space from opencode's SQLite database
 
 USAGE
-  opencode-vacuum              Vacuum if no opencode processes are running
-  opencode-vacuum --kill       Kill active opencode processes first, then vacuum
-  opencode-vacuum --dry-run    Show what would happen, change nothing
-  opencode-vacuum --yes        Skip confirmation prompts
-  opencode-vacuum help         Show this help
-  opencode-vacuum version      Show version
+  opencode-vacuum                 Vacuum if no opencode processes are running
+  opencode-vacuum --kill, -k      Kill active opencode processes first, then vacuum
+  opencode-vacuum --dry-run       Show what would happen, change nothing
+  opencode-vacuum --yes, -y       Skip confirmation prompts
+  opencode-vacuum help, --help, -h        Show this help
+  opencode-vacuum version, --version, -v  Show version
 
 Refuses to VACUUM while opencode is running: VACUUM needs exclusive
 access to rewrite the database file, and a concurrent write from an

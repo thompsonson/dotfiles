@@ -57,7 +57,7 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 | Manager | Steps | What it fixes |
 |---------|-------|---------------|
 | `apt` | `dpkg --configure -a` → `apt --fix-broken install` → `apt clean` → `apt autoremove` | Interrupted installs, unmet dependencies, corrupted package database, orphaned packages |
-| `brew` | `brew doctor` → `brew cleanup --prune=0` → `brew autoremove` | Stale caches, orphaned dependencies, configuration issues |
+| `brew` | fix insecure `~/.homebrew` trust-store permissions → `brew doctor` → `brew cleanup --prune=0` → `brew autoremove` | Stale caches, orphaned dependencies, configuration issues, silently-skipped tap-trust checks |
 
 ### When to use repair
 

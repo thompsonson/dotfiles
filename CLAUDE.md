@@ -82,6 +82,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 ### System Maintenance
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
+- `dot_local/bin/executable_opencode-vacuum`: Reclaims dead space from `~/.local/share/opencode/opencode.db` (SQLite doesn't auto-compact); refuses to run while opencode is active unless `--kill` is passed
 
 ### Backup
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
@@ -90,7 +91,6 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 ### Telemetry
 - `dot_local/bin/executable_otel-stats`: Query/report tool over the local Claude Code telemetry SQLite store
 - `run_once_after_install-otel-collector.sh.tmpl`: Installs the OTel collector → SQLite pipeline; see `docs/claude-telemetry.md.tmpl`
-- `dot_local/bin/executable_opencode-vacuum`: Reclaims dead space from `~/.local/share/opencode/opencode.db` (SQLite doesn't auto-compact); refuses to run while opencode is active unless `--kill` is passed
 
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum

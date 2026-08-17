@@ -815,7 +815,8 @@ PACKAGE MANAGERS (checked in order)
 REPAIR (sysup repair)
   apt                dpkg --configure -a, apt --fix-broken install,
                      apt clean, apt autoremove
-  brew               brew doctor, brew cleanup, brew autoremove
+  brew               fix insecure trust-store perms, brew doctor, brew cleanup,
+                     brew autoremove
 
 CLEAN (sysup clean)
   uv                 uv cache clean
