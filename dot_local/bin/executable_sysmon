@@ -513,7 +513,10 @@ check_cpu_hogs() {
     [ -n "$cpu" ] || continue
     # Any process >50% CPU right now
     if awk "BEGIN {exit !($cpu >= 50)}"; then
-      add_warning "warn" "Process '$comm' (PID $pid, $user) using ${cpu}% CPU"
+      local cwd_info="" cwd
+      cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null)
+      [ -n "$cwd" ] && cwd_info=" in ${cwd/#$HOME/\~}"
+      add_warning "warn" "Process '$comm' (PID $pid, $user) using ${cpu}% CPU$cwd_info"
       continue
     fi
     # Root daemons >10% CPU with >1h accumulated time (runaway pattern)
