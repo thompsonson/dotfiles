@@ -157,7 +157,7 @@ apt_status() {
   info "Updating package index..."
   if sudo apt-get update -qq 2>/dev/null; then
     local upgradable
-    upgradable=$(apt list --upgradable 2>/dev/null | grep -v "^Listing")
+    upgradable=$(apt list --upgradable 2>/dev/null | grep -v "^Listing" || true)
     if [ -n "$upgradable" ]; then
       echo "$upgradable"
     else
@@ -209,7 +209,7 @@ pkg_status() {
   info "Updating package index..."
   if pkg update -y 2>/dev/null; then
     local upgradable
-    upgradable=$(apt list --upgradable 2>/dev/null | grep -v "^Listing")
+    upgradable=$(apt list --upgradable 2>/dev/null | grep -v "^Listing" || true)
     if [ -n "$upgradable" ]; then
       echo "$upgradable"
     else
@@ -704,7 +704,7 @@ cmd_doctor() {
   if [ "$IS_LINUX" = true ] && has pop-upgrade; then
     header "Linux Daemon Health"
     local pu_pid pu_cpu
-    pu_pid=$(pgrep -x pop-upgrade 2>/dev/null | head -1)
+    pu_pid=$(pgrep -x pop-upgrade 2>/dev/null | head -1 || true)
     if [ -n "$pu_pid" ]; then
       pu_cpu=$(ps -p "$pu_pid" -o %cpu= 2>/dev/null | tr -d ' ')
       if awk "BEGIN {exit !($pu_cpu > 5)}"; then
