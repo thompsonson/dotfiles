@@ -523,13 +523,28 @@ check_warnings() {
   fi
 
   # Zombie process warnings
-  local zombie_count
+  local zombie_count zombie_detail=""
   zombie_count=$(ps -eo state 2>/dev/null | awk '/^Z/{n++} END{print n+0}')
   zombie_count="${zombie_count:-0}"
+  if [ "$zombie_count" -ge 1 ] 2>/dev/null; then
+    # Identify what's leaking: the most common zombie comm (what died) and
+    # the most common parent PID (who isn't reaping it) — a zombie's own
+    # /proc entry only keeps comm/ppid, so this is all that's recoverable
+    # after the fact. Enough to point at the culprit without a live trace.
+    local top_child top_ppid parent_comm
+    top_child=$(ps -eo state,comm 2>/dev/null | awk '$1 ~ /^Z/{print $2}' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')
+    top_ppid=$(ps -eo ppid,state 2>/dev/null | awk '$2 ~ /^Z/{print $1}' | sort | uniq -c | sort -rn | head -1 | awk '{print $2}')
+    if [ -n "$top_ppid" ]; then
+      parent_comm=$(ps -o comm= -p "$top_ppid" 2>/dev/null | tr -d ' ')
+    fi
+    if [ -n "$top_child" ] && [ -n "$parent_comm" ]; then
+      zombie_detail=" (mostly '$top_child', unreaped by $parent_comm PID $top_ppid)"
+    fi
+  fi
   if [ "$zombie_count" -ge 5 ] 2>/dev/null; then
-    add_warning "critical" "$zombie_count zombie processes detected"
+    add_warning "critical" "$zombie_count zombie processes detected$zombie_detail"
   elif [ "$zombie_count" -ge 1 ] 2>/dev/null; then
-    add_warning "warn" "$zombie_count zombie process(es) detected"
+    add_warning "warn" "$zombie_count zombie process(es) detected$zombie_detail"
   fi
 
   check_temps
