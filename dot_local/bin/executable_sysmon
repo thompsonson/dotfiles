@@ -463,6 +463,46 @@ check_data_stores() {
   fi
 }
 
+check_chezmoi_drift() {
+  has chezmoi || return 0
+  local pending_count sample
+  pending_count=$(chezmoi status 2>/dev/null | grep -c .)
+  if [ "${pending_count:-0}" -gt 0 ] 2>/dev/null; then
+    sample=$(chezmoi status 2>/dev/null | awk '{print $NF}' | head -3 | xargs -n1 basename 2>/dev/null \
+      | awk '{printf "%s%s", (NR>1?", ":""), $0}')
+    if [ "$pending_count" -gt 3 ]; then
+      sample="$sample, +$((pending_count - 3)) more"
+    fi
+    add_warning "warn" "$pending_count file(s) pending chezmoi apply ($sample)"
+  fi
+}
+
+check_docker_health() {
+  has docker || return 0
+  docker info &>/dev/null || return 0
+  local status_output restarting unhealthy
+  status_output=$(docker ps -a --format '{{.Names}}\t{{.Status}}' 2>/dev/null)
+  restarting=$(echo "$status_output" | awk -F'\t' '$2 ~ /^Restarting/ {printf "%s%s", (r++?",":""), $1}')
+  unhealthy=$(echo "$status_output" | awk -F'\t' '$2 ~ /\(unhealthy\)/ {printf "%s%s", (u++?",":""), $1}')
+  [ -n "$restarting" ] && add_warning "critical" "Container(s) stuck restarting: $restarting"
+  [ -n "$unhealthy" ] && add_warning "warn" "Container(s) unhealthy: $unhealthy"
+}
+
+check_failed_units() {
+  [ "$IS_LINUX" = true ] || return 0
+  has systemctl || return 0
+  local failed_names failed_count sample
+  failed_names=$(systemctl --user list-units --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
+  failed_count=$(echo "$failed_names" | grep -c .)
+  if [ "${failed_count:-0}" -gt 0 ] 2>/dev/null; then
+    sample=$(echo "$failed_names" | head -3 | awk '{printf "%s%s", (NR>1?", ":""), $0}')
+    if [ "$failed_count" -gt 3 ]; then
+      sample="$sample, +$((failed_count - 3)) more"
+    fi
+    add_warning "warn" "$failed_count failed systemd --user unit(s): $sample"
+  fi
+}
+
 check_cpu_hogs() {
   [ "$IS_LINUX" = true ] || return 0
   local clk_tck
@@ -565,6 +605,9 @@ check_warnings() {
   check_temps
   check_cpu_hogs
   check_data_stores
+  check_chezmoi_drift
+  check_docker_health
+  check_failed_units
 
   # Backup staleness (if sysbak is available)
   if has sysbak; then
@@ -931,6 +974,9 @@ HEALTH CHECKS (sysmon warn)
   CPU hogs            warn if any process >50% CPU, or root daemon >10% CPU for >1h
   otel claude.db      warn >4G, critical >8G (collector filter regression)
   opencode.db         warn >50% dead space, critical >75% (needs a VACUUM)
+  chezmoi drift       warn if any files pending `chezmoi apply`
+  Docker containers   critical if restarting, warn if unhealthy (requires docker)
+  systemd --user      warn if any units are in failed state (Linux)
 
 EXAMPLES
   sysmon              # Quick health dashboard
