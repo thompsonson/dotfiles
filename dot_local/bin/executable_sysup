@@ -665,6 +665,41 @@ cmd_doctor() {
   check_path "$HOME/.config/sysbak/config" "sysbak config"
   check_path "$HOME/Projects" "Projects directory"
 
+  if has brew; then
+    header "Homebrew Health"
+
+    # Trust-store permissions — brew refuses to write trust.json if the
+    # directory is group/world-writable, silently skipping tap-trust checks.
+    if [ -d "$HOME/.homebrew" ]; then
+      local trust_perms group_digit other_digit
+      trust_perms=$(stat -c "%a" "$HOME/.homebrew" 2>/dev/null || stat -f "%Lp" "$HOME/.homebrew" 2>/dev/null)
+      if [ -n "$trust_perms" ]; then
+        group_digit=${trust_perms: -2:1}
+        other_digit=${trust_perms: -1}
+        if (( (group_digit & 2) || (other_digit & 2) )); then
+          echo -e "  ${YELLOW}⚠${NC} trust store    ${YELLOW}~/.homebrew is group/world-writable (fix: sysup repair)${NC}"
+        else
+          echo -e "  ${GREEN}✓${NC} trust store    permissions OK"
+        fi
+      fi
+    fi
+
+    # Untrusted taps with formulae actually installed from them
+    local untrusted=() trust_json="$HOME/.homebrew/trust.json" formula
+    while IFS= read -r formula; do
+      [ -n "$formula" ] || continue
+      if [ -f "$trust_json" ] && grep -q "\"$formula\"" "$trust_json" 2>/dev/null; then
+        continue
+      fi
+      untrusted+=("$formula")
+    done < <(brew list --formula --full-name 2>/dev/null | grep "/")
+    if [ ${#untrusted[@]} -gt 0 ]; then
+      echo -e "  ${YELLOW}⚠${NC} tap trust      ${YELLOW}untrusted: ${untrusted[*]} (fix: brew trust --formula <name>)${NC}"
+    else
+      echo -e "  ${GREEN}✓${NC} tap trust      all installed non-core formulae trusted"
+    fi
+  fi
+
   # Linux-specific daemon health
   if [ "$IS_LINUX" = true ] && has pop-upgrade; then
     header "Linux Daemon Health"

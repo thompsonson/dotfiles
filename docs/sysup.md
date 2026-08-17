@@ -105,6 +105,15 @@ Each tool is skipped if not installed. A total freed summary is shown at the end
 
 Each tool and path is shown with a green check (✓), yellow warning (⚠ installed but version unavailable), or red cross (✗ not installed).
 
+### Homebrew Health
+
+When `brew` is installed, `sysup doctor` also reports (read-only — `sysup repair` applies the fix):
+
+| Check | Flags when |
+|-------|-----------|
+| Trust-store permissions | `~/.homebrew` is group/world-writable — brew silently refuses to write `trust.json` and skips its tap-trust check |
+| Tap trust | Any formula installed from a non-core tap isn't in `~/.homebrew/trust.json` |
+
 ### Linux Daemon Health
 
 On Linux, if `pop-upgrade` is installed (Pop!_OS), `sysup doctor` adds a **Linux Daemon Health** section showing whether the daemon is running and its current CPU usage. A daemon using >5% CPU is flagged as potentially stuck.
