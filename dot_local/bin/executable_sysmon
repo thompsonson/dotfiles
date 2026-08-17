@@ -342,7 +342,22 @@ get_listening_ports() {
     lsof -i -P -n 2>/dev/null | awk '/LISTEN/ {split($9,a,":"); printf "%s\t%s\t%s\t%s\n", a[NF], "tcp", $2, $1}' | sort -t$'\t' -k1 -n | uniq
   else
     if has ss; then
-      ss -tlnp 2>/dev/null | awk 'NR>1 {split($4,a,":"); port=a[length(a)]; match($0,/users:\(\("([^"]+)",pid=([0-9]+)/,m); printf "%s\ttcp\t%s\t%s\n", port, m[2], m[1]}' | sort -t$'\t' -k1 -n | uniq
+      # Extracts name/pid from users:(("name",pid=N,fd=N)) with index/substr/
+      # split rather than gawk's 3-arg match(..., arr) — mawk (Debian/Ubuntu/
+      # Pop!_OS default /usr/bin/awk) doesn't support that extension.
+      ss -tlnp 2>/dev/null | awk 'NR>1 {
+        split($4,a,":"); port=a[length(a)]
+        name=""; pid=""
+        idx = index($0, "users:((\"")
+        if (idx > 0) {
+          rest = substr($0, idx + length("users:((\""))
+          split(rest, parts, "\",pid=")
+          name = parts[1]
+          split(parts[2], parts2, ",")
+          pid = parts2[1]
+        }
+        printf "%s\ttcp\t%s\t%s\n", port, pid, name
+      }' | sort -t$'\t' -k1 -n | uniq
     fi
   fi
 }
