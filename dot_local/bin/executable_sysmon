@@ -466,7 +466,7 @@ check_data_stores() {
 check_chezmoi_drift() {
   has chezmoi || return 0
   local pending_count sample
-  pending_count=$(chezmoi status 2>/dev/null | grep -c .)
+  pending_count=$(chezmoi status 2>/dev/null | grep -c . || true)
   if [ "${pending_count:-0}" -gt 0 ] 2>/dev/null; then
     sample=$(chezmoi status 2>/dev/null | awk '{print $NF}' | head -3 | xargs -n1 basename 2>/dev/null \
       | awk '{printf "%s%s", (NR>1?", ":""), $0}')
@@ -493,7 +493,7 @@ check_failed_units() {
   has systemctl || return 0
   local failed_names failed_count sample
   failed_names=$(systemctl --user list-units --failed --no-legend --plain 2>/dev/null | awk '{print $1}')
-  failed_count=$(echo "$failed_names" | grep -c .)
+  failed_count=$(echo "$failed_names" | grep -c . || true)
   if [ "${failed_count:-0}" -gt 0 ] 2>/dev/null; then
     sample=$(echo "$failed_names" | head -3 | awk '{printf "%s%s", (NR>1?", ":""), $0}')
     if [ "$failed_count" -gt 3 ]; then
