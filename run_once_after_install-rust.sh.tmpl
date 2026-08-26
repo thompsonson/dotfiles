@@ -24,5 +24,11 @@ fi
 rustup toolchain install stable
 rustup component add rust-analyzer clippy rustfmt
 
+# cargo-update drives `sysup upgrade`'s cargo-installed-binaries step
+# (tauri-cli, create-tauri-app, etc.) — see Group G (sysup upgrade coverage).
+if ! command -v cargo-install-update >/dev/null 2>&1; then
+  cargo install cargo-update --locked
+fi
+
 echo '✅ Rust toolchain ready (rustc, cargo, clippy, rustfmt, rust-analyzer).'
 echo '   Open a new shell to pick up the cargo env.'

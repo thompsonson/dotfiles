@@ -337,6 +337,49 @@ pipx_upgrade() {
   fi
 }
 
+# --- 5b. rustup (Rust toolchain) ----------------------------------------------
+
+rust_status() {
+  header "Rust (rustup)"
+  if ! has rustup; then summary_skip "rustup"; return; fi
+  rustup check 2>/dev/null || true
+  summary_ok "rustup"
+}
+
+rust_upgrade() {
+  header "Rust (rustup)"
+  if ! has rustup; then summary_skip "rustup"; return; fi
+  if rustup update; then
+    summary_ok "rustup"
+  else
+    summary_fail "rustup"
+  fi
+  # Cargo-installed binaries (e.g. tauri-cli) — opt-in via `cargo install cargo-update`
+  if has cargo-install-update; then
+    info "Upgrading cargo-installed binaries..."
+    cargo install-update -a 2>/dev/null || warn "cargo install-update failed"
+  fi
+}
+
+# --- 5c. nix profile ------------------------------------------------------
+
+nix_status() {
+  header "Nix profile"
+  if ! has nix; then summary_skip "nix"; return; fi
+  nix profile list 2>/dev/null || true
+  summary_ok "nix"
+}
+
+nix_upgrade() {
+  header "Nix profile"
+  if ! has nix; then summary_skip "nix"; return; fi
+  if nix profile upgrade '.*' 2>/dev/null; then
+    summary_ok "nix"
+  else
+    summary_fail "nix"
+  fi
+}
+
 # --- 6. tpm (tmux plugins) ---------------------------------------------------
 
 tpm_status() {
@@ -537,6 +580,8 @@ cmd_status() {
   fnm_status
   uv_status
   pipx_status
+  rust_status
+  nix_status
   tpm_status
   vscode_status
   chezmoi_status
@@ -553,6 +598,8 @@ cmd_upgrade() {
   fnm_upgrade
   uv_upgrade
   pipx_upgrade
+  rust_upgrade
+  nix_upgrade
   tpm_upgrade
   vscode_upgrade
   chezmoi_upgrade
@@ -811,6 +858,8 @@ PACKAGE MANAGERS (checked in order)
   fnm                Node.js LTS via fnm
   uv                 uv binary and uv-managed tools
   pipx               pipx-managed Python packages
+  rustup             Rust stable toolchain + cargo-installed binaries
+  nix                Nix profile packages (devenv, etc.)
   tpm                Tmux plugins via TPM
   vscode             VS Code extensions
   chezmoi            Dotfiles sync (runs last)
