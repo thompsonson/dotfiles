@@ -1,0 +1,28 @@
+#!{{ lookPath "bash" }}
+# Rust toolchain via rustup. Standalone, no dependencies on other groups.
+# No data flag — default on everywhere; rustup is cheap to install and
+# rustc/cargo are broadly useful. Re-runs (chezmoi re-applies this file on
+# change) are idempotent: the bootstrap and toolchain/component installs
+# are all no-ops once already present.
+
+set -euo pipefail
+
+echo '🦀 Rust toolchain (rustup)'
+
+if ! command -v rustup >/dev/null 2>&1; then
+  echo '  Installing rustup'
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --default-toolchain stable --profile default
+else
+  echo '  rustup already installed — skipping bootstrap'
+fi
+
+# Source cargo env for the current session so subsequent steps can call rustup/cargo.
+# shellcheck source=/dev/null
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
+rustup toolchain install stable
+rustup component add rust-analyzer clippy rustfmt
+
+echo '✅ Rust toolchain ready (rustc, cargo, clippy, rustfmt, rust-analyzer).'
+echo '   Open a new shell to pick up the cargo env.'

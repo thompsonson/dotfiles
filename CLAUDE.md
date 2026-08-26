@@ -79,6 +79,9 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_p10k.zsh`: Powerlevel10k theme configuration
 - `run_once_install-packages.sh.tmpl`: Package installation script
 
+### Language Toolchains
+- `run_once_after_install-rust.sh.tmpl`: Installs Rust via rustup (stable toolchain, clippy/rustfmt/rust-analyzer components); default on everywhere, idempotent
+
 ### System Maintenance
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
@@ -203,6 +206,14 @@ Detailed usage guides are in `docs/`:
 ## Package Management Workflow
 
 When adding a new package or CLI tool to the dotfiles, follow these steps:
+
+### Language toolchain policy
+
+- System packages (curl, jq, ripgrep, tmux) via apt/brew/common.
+- Language toolchains (Rust, Node, Python) via version managers
+  (rustup, fnm, uv) — never via apt.
+- Components (clippy, rustfmt, rust-analyzer) installed by the
+  language's own tool, not the system package manager.
 
 ### 1. Install Script (`run_once_install-packages.sh.tmpl`)
 

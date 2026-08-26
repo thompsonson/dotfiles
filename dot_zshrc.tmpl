@@ -55,6 +55,9 @@ if command -v fnm >/dev/null 2>&1; then
   eval "$(fnm env --use-on-cd)"
 fi
 
+# Rust toolchain (rustup) — guarded so a machine without it doesn't error
+[ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+
 # Smart directory jumping with zoxide
 if command -v zoxide >/dev/null 2>&1; then
   eval "$(zoxide init zsh)"
