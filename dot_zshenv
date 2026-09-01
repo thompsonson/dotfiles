@@ -1,3 +1,12 @@
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 export PATH="$HOME/.local/bin:$PATH"
 [ -d "/home/linuxbrew/.linuxbrew" ] && export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+
+# Skip the compinit call in /etc/zsh/zshrc — antigen runs its own compinit right
+# after, so the global one is redundant work (a full compaudit stat-storm) on
+# every interactive shell. Must be set before /etc/zsh/zshrc runs, i.e. here.
+skip_global_compinit=1
+
+# Cap gitstatusd worker threads (p10k spawns one daemon per interactive shell).
+# Default is 2*ncpu (=32 here); 8 is plenty for prompt git status.
+export GITSTATUS_NUM_THREADS=8

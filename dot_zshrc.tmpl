@@ -1,3 +1,11 @@
+# Enable Powerlevel10k instant prompt. Keep near the top of ~/.zshrc.
+# Renders a cached prompt immediately, then loads the rest of the rc in the
+# background — the ~100ms of rc (antigen, compinit, evals) no longer blocks
+# the first usable prompt. `quiet` suppresses console-I/O warnings.
+if [[ -r "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh" ]]; then
+  source "${XDG_CACHE_HOME:-$HOME/.cache}/p10k-instant-prompt-${(%):-%n}.zsh"
+fi
+
 # If you come from bash you might have to change your $PATH.
 export PATH=$HOME/.local/share/chezmoi/bin:$HOME/.local/bin:$HOME/bin:$PATH
 
@@ -112,6 +120,12 @@ antigen theme romkatv/powerlevel10k
 
 # Tell Antigen that you're done.
 antigen apply
+
+# Antigen schedules a second compinit on the first precmd (its `defer` extension
+# re-runs compinit + compdef _antigen). It already ran compinit during
+# `antigen apply`, so drop the deferred hook — saves a full compinit+compaudit
+# on the first prompt.
+add-zsh-hook -D precmd _antigen_compinit 2>/dev/null
 
 # Configure autosuggestions - ADD THIS SECTION
 ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE="fg=#666666"
@@ -298,3 +312,6 @@ fi
 
 # source the PowerLevel10k config
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
+
+# opencode (installed via opencode.ai/install to ~/.opencode/bin)
+[[ -d "$HOME/.opencode/bin" ]] && export PATH="$HOME/.opencode/bin:$PATH"
