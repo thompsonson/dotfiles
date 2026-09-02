@@ -147,7 +147,16 @@ if command -v fd >/dev/null 2>&1; then
 fi
 
 # System utilities
-alias h="history"
+# `h`        → full history (zsh's bare `history` only shows the last 16)
+# `h -40`    → last 40 entries
+# `h foo`    → search history for `foo` (case-insensitive; joins args)
+h() {
+  if [[ $# -eq 0 || $1 == -<-> || $1 == <-> ]]; then
+    fc -l "${1:-1}"
+  else
+    fc -l 1 | grep -i -- "$*"
+  fi
+}
 if command -v btop >/dev/null 2>&1; then
   alias top="btop"
 fi
