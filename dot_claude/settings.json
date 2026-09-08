@@ -37,5 +37,7 @@
     "type": "command",
     "command": "sh ~/.claude/statusline-command.sh"
   },
-  "agentPushNotifEnabled": true
+  "agentPushNotifEnabled": true,
+  "theme": "dark-ansi",
+  "autoCompactEnabled": false
 }
