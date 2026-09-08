@@ -89,26 +89,33 @@ dev send atomicguard:1.1 "Run cargo test and report the result"
 
 The receiving agent must be configured to watch its pane for incoming messages
 (or the user delegates them explicitly). `dev send` is fire-and-forget — there
-is no built-in reply channel. To get a result back, use `dev run-in` instead.
+is no built-in reply channel. To read the receiving pane's current output, use
+`dev peek` / `dev inspect` instead. (`dev run-in`, the old command-capture
+mechanism, is deprecated — use `peek`/`inspect` for reads; the addressed agent
+channel is the eventual replacement for command capture.)
 
-## Running commands (`dev run-in`)
+## Reading pane output (`dev peek` / `dev inspect`)
 
-Run a command in a target pane and capture its output:
-
-```bash
-dev run-in dotfiles:1.1 "chezmoi apply --dry-run"
-```
-
-For machine-parseable output:
+Read a target pane's latest output (read-only, does not type into the pane):
 
 ```bash
-dev run-in --json dotfiles:1.1 "chezmoi apply --dry-run"
+dev peek dotfiles:1.1 --lines 40
 ```
 
-Returns a JSON object with:
-- `stdout` — pane capture text (includes shell prompts, command echo)
-- `exit_code` — shell exit status (`$?`)
-- `duration_ms` — wall-clock time in milliseconds
+For continuous output (streaming tail):
+
+```bash
+dev peek --follow dotfiles:1.1 --interval 500
+```
+
+For machine-readable pane output plus git state:
+
+```bash
+dev inspect dotfiles:1.1 | jq
+```
+
+`dev peek` returns raw visible pane text (no prompt-side effects); `dev
+inspect` combines session metadata, git state, and pane content.
 
 This is synchronous — the command blocks until the output is captured or a
 timeout (default 30s) is reached.
