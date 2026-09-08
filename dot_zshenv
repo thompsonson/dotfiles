@@ -1,3 +1,6 @@
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
 export PATH="$HOME/.local/bin:$PATH"
 [ -d "/home/linuxbrew/.linuxbrew" ] && export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+# opencode (installed via opencode.ai/install to ~/.opencode/bin, pinned version).
+# In .zshenv so non-interactive shells (dev-launched panes, scripts) resolve it too.
+[ -d "$HOME/.opencode/bin" ] && export PATH="$HOME/.opencode/bin:$PATH"
