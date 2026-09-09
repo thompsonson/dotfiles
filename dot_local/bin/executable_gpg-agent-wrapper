@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Exec the newest available gpg-agent, preferring Homebrew's, so the
+# systemd --user socket-activated gpg-agent.service matches the gpg client
+# version instead of the distro's LTS-frozen apt package.
+#
+# Ubuntu/Debian LTS freezes gpg's major.minor at release (see
+# run_once_install-packages.sh.tmpl's $brewPackages "gnupg" entry, added
+# because jammy ships 2.2.27 and several devagent provisioning paths now
+# require >= 2.4). The gpg *client* picks up brew's newer build via PATH in
+# interactive shells, but gpg-agent.service is socket-activated by systemd
+# with a hardcoded ExecStart= pointing at /usr/bin/gpg-agent — PATH never
+# enters into it. This wrapper resolves the same way at exec time instead of
+# baking an absolute path into the systemd unit override, so it keeps
+# working whether Homebrew is installed to ~/.linuxbrew or
+# /home/linuxbrew/.linuxbrew, and fails open to the system gpg-agent if
+# Homebrew's is ever missing (never breaks the agent socket entirely).
+#
+# See dot_config/systemd/user/gpg-agent.service.d/override.conf.tmpl, which
+# points ExecStart at this wrapper.
+
+for candidate in \
+  "$HOME/.linuxbrew/bin/gpg-agent" \
+  "/home/linuxbrew/.linuxbrew/bin/gpg-agent" \
+; do
+  if [ -x "$candidate" ]; then
+    exec "$candidate" "$@"
+  fi
+done
+
+exec /usr/bin/gpg-agent "$@"
