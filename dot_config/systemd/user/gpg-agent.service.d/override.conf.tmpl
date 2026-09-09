@@ -1,0 +1,10 @@
+{{ if and (eq .chezmoi.os "linux") (not .is_termux) -}}
+# Point the socket-activated gpg-agent.service at Homebrew's gpg-agent
+# (via the resolver wrapper) instead of the distro's LTS-frozen apt build.
+# See dot_local/bin/executable_gpg-agent-wrapper for why a wrapper instead
+# of a hardcoded path, and run_once_install-packages.sh.tmpl's $brewPackages
+# "gnupg" entry for the upgrade this keeps in sync with.
+[Service]
+ExecStart=
+ExecStart={{ .chezmoi.homeDir }}/.local/bin/gpg-agent-wrapper --supervised
+{{ end -}}
