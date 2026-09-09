@@ -17,14 +17,40 @@
 #
 # See dot_config/systemd/user/gpg-agent.service.d/override.conf.tmpl, which
 # points ExecStart at this wrapper.
+#
+# GnuPG's dev branch (2.5.x, what Homebrew currently ships) renamed the
+# systemd socket-activation flag from --supervised to --deprecated-supervised
+# — the old name is now flatly rejected ("invalid option"), while apt's
+# stable 2.2.x still only knows --supervised. Detect which one the resolved
+# binary actually accepts rather than hardcoding either.
+pick_supervised_flag() {
+  if "$1" --dump-options 2>/dev/null | grep -qx -- '--supervised'; then
+    printf '%s\n' '--supervised'
+  else
+    printf '%s\n' '--deprecated-supervised'
+  fi
+}
+
+run() {
+  local bin="$1" flag i
+  shift
+  local args=("$@")
+  flag="$(pick_supervised_flag "$bin")"
+  if [ "$flag" != '--supervised' ]; then
+    for i in "${!args[@]}"; do
+      [ "${args[$i]}" = '--supervised' ] && args[i]="$flag"
+    done
+  fi
+  exec "$bin" "${args[@]}"
+}
 
 for candidate in \
   "$HOME/.linuxbrew/bin/gpg-agent" \
   "/home/linuxbrew/.linuxbrew/bin/gpg-agent" \
 ; do
   if [ -x "$candidate" ]; then
-    exec "$candidate" "$@"
+    run "$candidate" "$@"
   fi
 done
 
-exec /usr/bin/gpg-agent "$@"
+run /usr/bin/gpg-agent "$@"
