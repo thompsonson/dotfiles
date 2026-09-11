@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.1](https://github.com/thompsonson/dotfiles/compare/v1.2.0...v1.2.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **gnupg:** point brew's gpg-agent at the distro pinentry ([#84](https://github.com/thompsonson/dotfiles/issues/84)) ([cda139a](https://github.com/thompsonson/dotfiles/commit/cda139ad2f632e9ca66ba77f619b5c971bbe3154))
+* **gnupg:** point gpg-agent.service at brew's gpg-agent, not apt's ([#81](https://github.com/thompsonson/dotfiles/issues/81)) ([5a38776](https://github.com/thompsonson/dotfiles/commit/5a38776933480180a7b548121ed5777ef077cdf3))
+* **gnupg:** translate --supervised for GnuPG's dev-branch gpg-agent ([#82](https://github.com/thompsonson/dotfiles/issues/82)) ([fff89b4](https://github.com/thompsonson/dotfiles/commit/fff89b4edee03b6e972eb084cc7a60cd1d33c427))
+* **zsh:** make `h` search full history, not just the last 16 ([#76](https://github.com/thompsonson/dotfiles/issues/76)) ([5547e24](https://github.com/thompsonson/dotfiles/commit/5547e24f3e0e7ef654aa0d1412eb97746594332b))
+* **zsh:** put ~/.opencode/bin on PATH ([#77](https://github.com/thompsonson/dotfiles/issues/77)) ([ad21b7a](https://github.com/thompsonson/dotfiles/commit/ad21b7a09874a5288dce1fac1eff7f4e3a23515f))
+
+
+### Performance
+
+* **shell,tmux:** faster prompt startup + fewer render triggers ([#75](https://github.com/thompsonson/dotfiles/issues/75)) ([8266e6f](https://github.com/thompsonson/dotfiles/commit/8266e6fb85afb97885fc69f80d2925f0da1242bf))
+
 ## [1.2.0](https://github.com/thompsonson/dotfiles/compare/v1.1.0...v1.2.0) (2026-08-26)
 
 
