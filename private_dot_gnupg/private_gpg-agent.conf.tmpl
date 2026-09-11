@@ -1,0 +1,10 @@
+default-cache-ttl 86400
+max-cache-ttl 172800
+{{- if and (eq .chezmoi.os "linux") (not .is_termux) (stat "/usr/bin/pinentry") }}
+
+# gpg-agent.service runs Homebrew's gpg-agent (dot_local/bin/executable_gpg-agent-wrapper),
+# which defaults to Homebrew's pinentry: curses/tty only, so signing from an
+# editor or agent with no terminal fails with "Inappropriate ioctl for device".
+# /usr/bin/pinentry is the distro's alternatives link (pinentry-gnome3 on desktops).
+pinentry-program /usr/bin/pinentry
+{{- end }}
