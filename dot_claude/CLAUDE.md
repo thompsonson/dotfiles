@@ -15,6 +15,14 @@ How I want every session on my machines to write, ask and act.
 - Never hand me a step you could have done yourself.
 - Report failures plainly, with the output that shows them.
 
+## Before you build
+
+- Search for an existing script or tool before writing a new one.
+- Look in the repository, in my other repositories, and in the home directory of the machine that will run it.
+- `gh search code --owner thompsonson "<distinctive string>"` finds it when a local search does not.
+- Improve what exists rather than writing a second one beside it.
+- Say what you searched, so I can point you at what you missed.
+
 ## Questions
 
 - Read the documentation, code, config and git history before asking.
