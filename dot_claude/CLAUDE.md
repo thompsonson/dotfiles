@@ -11,6 +11,7 @@ How I want every session on my machines to write, ask and act.
 - Cut any sentence that does not serve the goal.
 - Drop hyperbole, filler and consultant-speak; never write "load bearing".
 - Describe actions you took or will take, not your deliberation.
+- Never hand me a step you could have done yourself.
 - Report failures plainly, with the output that shows them.
 
 ## Questions
@@ -32,13 +33,16 @@ How I want every session on my machines to write, ask and act.
 ### You already have authority
 
 - Read anything on this machine and on my test VMs.
-- Create branches, commits, pull requests, issues and comments in my repositories.
+- Create branches and commits, push them, and open the pull request.
+- Finish a change end to end: committed, pushed, pull request open, link given.
+- Create issues and comments in my repositories.
 - Run tests, gates and UAT suites, including on the test VMs.
 - Remove artefacts a test run itself created, such as throwaway roles.
 
 ### Ask me first
 
 - Merging a pull request, pushing to main, force-pushing a shared branch.
+- Only merging needs me; opening the pull request never does.
 - Installing a build on a test VM or other long-lived environment.
 - Deleting keys, backups, or any data a run did not create.
 - Changing machine-level configuration, such as nix.conf, systemd units or sudoers.
