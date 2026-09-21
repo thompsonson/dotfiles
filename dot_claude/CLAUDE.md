@@ -28,6 +28,9 @@ How I want every session on my machines to write, ask and act.
 - Read the documentation, code, config and git history before asking.
 - Never ask what those sources already answer; state what you found.
 - Never re-ask a question the documentation has already settled.
+- This applies to every question, including ones you put to another agent.
+- Search the documentation exhaustively before asking, and again before answering.
+- Name the files you searched, so the gap is visible when there is one.
 - Ask only about genuine choices, or judgements that are mine.
 - Use the repository's glossary terms, and check them before you ask.
 - Put your question last, so the work reads first.
