@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.3.0](https://github.com/thompsonson/dotfiles/compare/v1.2.0...v1.3.0) (2026-09-21)
+
+
+### Features
+
+* **claude:** manage the global Claude Code instructions ([#86](https://github.com/thompsonson/dotfiles/issues/86)) ([608aad8](https://github.com/thompsonson/dotfiles/commit/608aad81a54b0e3cc640a61eaa83359073cbb202))
+* **claude:** search for an existing tool before writing one ([#88](https://github.com/thompsonson/dotfiles/issues/88)) ([fe31109](https://github.com/thompsonson/dotfiles/commit/fe31109644b395f7fe4d9c44fcdb6d4fe48d023b))
+* **claude:** the search-first rule applies to agents too, not just to you ([#89](https://github.com/thompsonson/dotfiles/issues/89)) ([2e663b4](https://github.com/thompsonson/dotfiles/commit/2e663b449fb1d366287ff7a63bb2f7f8e1827abf))
+
+
+### Bug Fixes
+
+* **gnupg:** point brew's gpg-agent at the distro pinentry ([#84](https://github.com/thompsonson/dotfiles/issues/84)) ([cda139a](https://github.com/thompsonson/dotfiles/commit/cda139ad2f632e9ca66ba77f619b5c971bbe3154))
+* **gnupg:** point gpg-agent.service at brew's gpg-agent, not apt's ([#81](https://github.com/thompsonson/dotfiles/issues/81)) ([5a38776](https://github.com/thompsonson/dotfiles/commit/5a38776933480180a7b548121ed5777ef077cdf3))
+* **gnupg:** translate --supervised for GnuPG's dev-branch gpg-agent ([#82](https://github.com/thompsonson/dotfiles/issues/82)) ([fff89b4](https://github.com/thompsonson/dotfiles/commit/fff89b4edee03b6e972eb084cc7a60cd1d33c427))
+* **zsh:** make `h` search full history, not just the last 16 ([#76](https://github.com/thompsonson/dotfiles/issues/76)) ([5547e24](https://github.com/thompsonson/dotfiles/commit/5547e24f3e0e7ef654aa0d1412eb97746594332b))
+* **zsh:** put ~/.opencode/bin on PATH ([#77](https://github.com/thompsonson/dotfiles/issues/77)) ([ad21b7a](https://github.com/thompsonson/dotfiles/commit/ad21b7a09874a5288dce1fac1eff7f4e3a23515f))
+
+
+### Performance
+
+* **shell,tmux:** faster prompt startup + fewer render triggers ([#75](https://github.com/thompsonson/dotfiles/issues/75)) ([8266e6f](https://github.com/thompsonson/dotfiles/commit/8266e6fb85afb97885fc69f80d2925f0da1242bf))
+
 ## [1.2.0](https://github.com/thompsonson/dotfiles/compare/v1.1.0...v1.2.0) (2026-08-26)
 
 
