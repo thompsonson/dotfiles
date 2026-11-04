@@ -1,0 +1,200 @@
+#!/bin/bash
+# ============================================================================
+# claude-tmp-clean - Remove idle Claude Code session temp folders
+# ============================================================================
+# Claude Code gives each session a folder under /tmp/claude-<uid>/<project>/,
+# holding its scratchpad and task output. Nothing removes them, and test
+# builds inside them can reach many gigabytes.
+#
+# A session folder is removed only when both hold:
+#   - its transcript was last written more than --days days ago;
+#   - no process uses it, by working directory, open file or command line.
+# gpg-agent, scdaemon, keyboxd and dirmngr do not count as use: a test
+# keyring leaves them running. They are stopped before the folder goes.
+#
+# Usage: claude-tmp-clean [--delete] [--days N]
+#   claude-tmp-clean              List what would be removed (no changes)
+#   claude-tmp-clean --delete     Remove it
+#
+# Environment (for tests):
+#   CLAUDE_TMP_ROOT       default /tmp/claude-<uid>
+#   CLAUDE_PROJECTS_DIR   default ~/.claude/projects
+# ============================================================================
+
+set -euo pipefail
+
+VERSION="1.0.0"
+ROOT="${CLAUDE_TMP_ROOT:-/tmp/claude-$(id -u)}"
+PROJECTS="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+DAYS=7
+DELETE=false
+
+usage() {
+  cat <<EOF
+claude-tmp-clean $VERSION - remove idle Claude Code session temp folders
+
+USAGE
+  claude-tmp-clean [--delete] [--days N]
+
+OPTIONS
+  --delete     Remove the idle folders. Without it, only list them.
+  --days N     Idle means no transcript write for N days (default $DAYS).
+  -h, --help   Show this help.
+  --version    Show the version.
+
+A folder is kept while any process uses it, or while its session wrote to
+its transcript in the last N days. gpg daemons left by test keyrings are
+stopped, not counted as use.
+
+Root:     $ROOT
+Sessions: $PROJECTS
+EOF
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --delete) DELETE=true ;;
+    --days)
+      [ $# -ge 2 ] || { echo "claude-tmp-clean: --days needs a number" >&2; exit 2; }
+      DAYS="$2"; shift ;;
+    -h|--help|help) usage; exit 0 ;;
+    --version|version) echo "claude-tmp-clean $VERSION"; exit 0 ;;
+    *) echo "claude-tmp-clean: unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+case "$DAYS" in
+  ''|*[!0-9]*) echo "claude-tmp-clean: --days must be a whole number, got '$DAYS'" >&2; exit 2 ;;
+esac
+
+if [ ! -d /proc/self/fd ]; then
+  echo "claude-tmp-clean: needs Linux /proc to tell which folders are in use; nothing done"
+  exit 0
+fi
+
+if [ ! -d "$ROOT" ]; then
+  echo "claude-tmp-clean: $ROOT does not exist; nothing to do"
+  exit 0
+fi
+
+human() {
+  awk -v b="$1" 'BEGIN { split("B KB MB GB TB", u); i = 1
+    while (b >= 1024 && i < 5) { b /= 1024; i++ }
+    printf (i == 1 ? "%d %s" : "%.1f %s"), b, u[i] }'
+}
+
+# One line per reference a process of ours holds: "<pid>\t<comm>\t<path or cmdline>".
+uses=$(mktemp)
+trap 'rm -f "$uses"' EXIT
+for p in /proc/[0-9]*; do
+  [ -O "$p" ] || continue
+  comm=$(cat "$p/comm" 2>/dev/null) || continue
+  {
+    readlink "$p/cwd" 2>/dev/null || true
+    for fd in "$p"/fd/*; do readlink "$fd" 2>/dev/null || true; done
+    tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
+  } | grep -F -- "$ROOT/" | sed "s|^|${p#/proc/}\t$comm\t|" >> "$uses" || true
+done
+
+is_gpg_daemon() {
+  case "$1" in gpg-agent|scdaemon|keyboxd|dirmngr) return 0 ;; esac
+  return 1
+}
+
+# Homedirs, under $1, of gpg daemons still running there.
+gpg_homedirs() {
+  { grep -F -- "$1/" "$uses" || true; } | while IFS=$'\t' read -r _ comm ref; do
+    is_gpg_daemon "$comm" || continue
+    sed -n 's/.*--homedir \([^ ]*\).*/\1/p' <<<"$ref"
+  done | sort -u
+}
+
+# Prints the first non-gpg process using $1, if any.
+user_of() {
+  while IFS=$'\t' read -r _ comm ref; do
+    case "$ref" in "$1" | *"$1/"* | *"$1 "*) ;; *) continue ;; esac
+    is_gpg_daemon "$comm" || { echo "$comm"; return; }
+  done < "$uses"
+}
+
+now=$(date +%s)
+limit=$((DAYS * 86400))
+total=0
+count=0
+kept_busy=0
+kept_recent=0
+
+uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
+for dir in "$ROOT"/-*/*/; do
+  dir="${dir%/}"
+  [ -d "$dir" ] && [ ! -L "$dir" ] || continue
+  session="${dir##*/}"
+  project="${dir%/*}"; project="${project##*/}"
+  [[ "$session" =~ $uuid_re ]] || continue
+
+  transcript="$PROJECTS/$project/$session.jsonl"
+  if [ -f "$transcript" ]; then
+    last=$(stat -c %Y "$transcript")
+  else
+    last=$(find "$dir" -maxdepth 2 -printf '%T@\n' 2>/dev/null | sort -n | tail -1)
+    last="${last%.*}"
+  fi
+  age=$(( (now - ${last:-$now}) / 86400 ))
+
+  if [ $((now - ${last:-$now})) -lt "$limit" ]; then
+    kept_recent=$((kept_recent + 1))
+    continue
+  fi
+  busy=$(user_of "$dir" | head -1)
+  if [ -n "$busy" ]; then
+    printf 'keep  %4sd  in use by %-12s %s\n' "$age" "$busy" "$project/$session"
+    kept_busy=$((kept_busy + 1))
+    continue
+  fi
+
+  bytes=$(du -sb -- "$dir" 2>/dev/null | cut -f1)
+  total=$((total + ${bytes:-0}))
+  count=$((count + 1))
+  homes=$(gpg_homedirs "$dir")
+
+  if [ "$DELETE" = true ]; then
+    while read -r h; do
+      [ -n "$h" ] && gpgconf --homedir "$h" --kill all 2>/dev/null || true
+    done <<<"$homes"
+    rm -rf --one-file-system -- "$dir"
+    rmdir -- "$ROOT/$project" 2>/dev/null || true
+    verb="removed"
+  else
+    verb="idle"
+  fi
+  printf '%-7s %4sd  %9s  %s%s\n' "$verb" "$age" "$(human "${bytes:-0}")" "$project/$session" \
+    "$([ -n "$homes" ] && echo "  (+ $(wc -l <<<"$homes") gpg homedir(s))")"
+done
+
+# gpg daemons whose homedir under the root is already gone: gpgconf cannot
+# reach them, so they are signalled directly.
+orphans=0
+while IFS=$'\t' read -r pid comm ref; do
+  is_gpg_daemon "$comm" || continue
+  h=$(sed -n 's/.*--homedir \([^ ]*\).*/\1/p' <<<"$ref")
+  case "$h" in "$ROOT"/*) ;; *) continue ;; esac
+  [ -e "$h" ] && continue
+  orphans=$((orphans + 1))
+  if [ "$DELETE" = true ]; then
+    kill "$pid" 2>/dev/null || true
+    printf 'stopped %s %s (homedir gone: %s)\n' "$comm" "$pid" "$h"
+  else
+    printf 'orphan  %s %s (homedir gone: %s)\n' "$comm" "$pid" "$h"
+  fi
+done < <(sort -u -t$'\t' -k1,1n "$uses")
+
+echo
+if [ "$DELETE" = true ]; then
+  echo "Removed $count folder(s), $(human "$total")."
+else
+  echo "$count idle folder(s), $(human "$total"). Run with --delete to remove them."
+fi
+echo "Kept $kept_recent active in the last $DAYS day(s), $kept_busy in use."
+[ "$orphans" -eq 0 ] || echo "$orphans gpg daemon(s) had lost their homedir."

@@ -78,6 +78,7 @@ Modules are checked in the order listed below. Each module is **skipped** if its
 | `npm` | `npm cache clean --force` | Cached npm packages |
 | `docker` | `docker builder prune -a -f` | Build cache only (images/containers untouched) |
 | `go` | `go clean -modcache` | Downloaded Go modules |
+| `claude-tmp-clean` | `claude-tmp-clean --delete` | Idle Claude Code session folders under `/tmp/claude-<uid>`; see [claude-tmp-clean.md](claude-tmp-clean.md) |
 
 Each tool is skipped if not installed. A total freed summary is shown at the end.
 
