@@ -258,6 +258,30 @@ smoke_claude_tmp_clean() {
     done
     touch "$projects/$p/$recent.jsonl"
 
+    # Git checkouts in idle folders, made from one parent repo.
+    local wt_dirty=55555555-5555-5555-5555-555555555555
+    local wt_detached=66666666-6666-6666-6666-666666666666
+    local wt_clean=77777777-7777-7777-7777-777777777777
+    local clone=88888888-8888-8888-8888-888888888888
+    local stash=99999999-9999-9999-9999-999999999999
+    local g=(git -c user.name=t -c user.email=t@t -c init.defaultBranch=main)
+    "${g[@]}" init -q "$t/repo" && "${g[@]}" -C "$t/repo" commit -q --allow-empty -m one
+    for s in $wt_dirty $wt_detached $wt_clean $clone $stash; do
+        mkdir -p "$root/$p/$s/scratchpad"
+        touch -d '10 days ago' "$projects/$p/$s.jsonl"
+    done
+    "${g[@]}" -C "$t/repo" worktree add -q -b dirty "$root/$p/$wt_dirty/scratchpad/w"
+    echo edit > "$root/$p/$wt_dirty/scratchpad/w/file"
+    "${g[@]}" -C "$t/repo" worktree add -q --detach "$root/$p/$wt_detached/scratchpad/w"
+    "${g[@]}" -C "$root/$p/$wt_detached/scratchpad/w" commit -q --allow-empty -m detached
+    "${g[@]}" -C "$t/repo" worktree add -q -b clean "$root/$p/$wt_clean/scratchpad/w"
+    "${g[@]}" clone -q "$t/repo" "$root/$p/$clone/scratchpad/c"
+    "${g[@]}" -C "$root/$p/$clone/scratchpad/c" commit -q --allow-empty -m unpushed
+    "${g[@]}" -C "$t/repo" commit -q --allow-empty -m two
+    "${g[@]}" clone -q "$t/repo" "$root/$p/$stash/scratchpad/c"
+    echo work > "$root/$p/$stash/scratchpad/c/file"
+    "${g[@]}" -C "$root/$p/$stash/scratchpad/c" stash push -q -u
+
     # Named gpg-agent so the process name matches. The orphan needs a
     # --homedir in its command line, so it is bash; -c keeps bash from exec'ing sleep.
     cp "$(command -v sleep)" "$t/sbin/gpg-agent"
@@ -290,6 +314,20 @@ smoke_claude_tmp_clean() {
     else fail "claude-tmp-clean kept a folder only gpg-agent used"; failed=1; fi
     if ! kill -0 "$orphan_pid" 2>/dev/null; then pass "claude-tmp-clean stops an orphaned gpg daemon"
     else fail "claude-tmp-clean left an orphaned gpg daemon"; failed=1; fi
+
+    if [[ -d "$root/$p/$wt_dirty" ]]; then pass "claude-tmp-clean keeps a worktree with uncommitted changes"
+    else fail "claude-tmp-clean removed a worktree with uncommitted changes"; failed=1; fi
+    if [[ -d "$root/$p/$wt_detached" ]]; then pass "claude-tmp-clean keeps commits no branch holds"
+    else fail "claude-tmp-clean removed commits no branch holds"; failed=1; fi
+    if [[ -d "$root/$p/$clone" ]]; then pass "claude-tmp-clean keeps a clone with unpushed commits"
+    else fail "claude-tmp-clean removed a clone with unpushed commits"; failed=1; fi
+    if [[ -d "$root/$p/$stash" ]]; then pass "claude-tmp-clean keeps a clone with a stash"
+    else fail "claude-tmp-clean removed a clone with a stash"; failed=1; fi
+    if [[ ! -e "$root/$p/$wt_clean" ]] && ! git -C "$t/repo" worktree list | grep -qF "$wt_clean"; then
+        pass "claude-tmp-clean removes a clean worktree and unregisters it"
+    else
+        fail "claude-tmp-clean left a clean worktree or its registration"; failed=1
+    fi
 
     if CLAUDE_TMP_ROOT="$root" bash "$script" --days x >/dev/null 2>&1; then
         fail "claude-tmp-clean accepted --days x"; failed=1

@@ -9,6 +9,8 @@
 # A session folder is removed only when both hold:
 #   - its transcript was last written more than --days days ago;
 #   - no process uses it, by working directory, open file or command line.
+#   - no git checkout in it holds work found nowhere else: uncommitted
+#     changes, commits no branch holds, unpushed commits or a stash.
 # gpg-agent, scdaemon, keyboxd and dirmngr do not count as use: a test
 # keyring leaves them running. They are stopped before the folder goes.
 #
@@ -42,8 +44,9 @@ OPTIONS
   -h, --help   Show this help.
   --version    Show the version.
 
-A folder is kept while any process uses it, or while its session wrote to
-its transcript in the last N days. gpg daemons left by test keyrings are
+A folder is kept while any process uses it, while its session wrote to its
+transcript in the last N days, or while a git checkout in it holds work found
+nowhere else. Worktrees are unregistered from their repo before removal. gpg daemons left by test keyrings are
 stopped, not counted as use.
 
 Root:     $ROOT
@@ -118,12 +121,40 @@ user_of() {
   done < "$uses"
 }
 
+# Git checkouts under $1. Build output is skipped: it holds no checkouts.
+git_checkouts() {
+  find "$1" \( -name target -o -name node_modules \) -prune -o -name .git -print -prune 2>/dev/null |
+    sed 's|/\.git$||'
+}
+
+# Prints why a checkout under $1 holds work that exists nowhere else, if one does.
+unsaved_git_work() {
+  local co st
+  while read -r co; do
+    [ -n "$co" ] || continue
+    st=$(git -C "$co" status --porcelain 2>/dev/null) || { echo "unreadable checkout ${co#"$1"/}"; return; }
+    [ -z "$st" ] || { echo "uncommitted changes in ${co#"$1"/}"; return; }
+    if [ -f "$co/.git" ]; then
+      # A worktree's branches live in its parent repo; a detached HEAD may be held by nothing.
+      [ -n "$(git -C "$co" for-each-ref --contains HEAD --count=1 2>/dev/null)" ] ||
+        { echo "commits no branch holds in ${co#"$1"/}"; return; }
+    else
+      # A clone's refs go with the folder.
+      [ -z "$(git -C "$co" rev-list -n1 --branches --tags --not --remotes 2>/dev/null)" ] ||
+        { echo "unpushed commits in ${co#"$1"/}"; return; }
+      ! git -C "$co" rev-parse -q --verify refs/stash >/dev/null ||
+        { echo "a stash in ${co#"$1"/}"; return; }
+    fi
+  done <<<"$(git_checkouts "$1")"
+}
+
 now=$(date +%s)
 limit=$((DAYS * 86400))
 total=0
 count=0
 kept_busy=0
 kept_recent=0
+kept_git=0
 
 uuid_re='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
 
@@ -153,6 +184,12 @@ for dir in "$ROOT"/-*/*/; do
     kept_busy=$((kept_busy + 1))
     continue
   fi
+  unsaved=$(unsaved_git_work "$dir")
+  if [ -n "$unsaved" ]; then
+    printf 'keep  %4sd  %s: %s\n' "$age" "$project/$session" "$unsaved"
+    kept_git=$((kept_git + 1))
+    continue
+  fi
 
   bytes=$(du -sb -- "$dir" 2>/dev/null | cut -f1)
   total=$((total + ${bytes:-0}))
@@ -163,6 +200,12 @@ for dir in "$ROOT"/-*/*/; do
     while read -r h; do
       [ -n "$h" ] && gpgconf --homedir "$h" --kill all 2>/dev/null || true
     done <<<"$homes"
+    # Unregister worktrees, so the parent repo keeps no entry for a missing folder.
+    while read -r co; do
+      [ -f "$co/.git" ] || continue
+      git -C "$co" worktree remove --force "$co" 2>/dev/null ||
+        echo "warning: could not unregister worktree $co; run 'git worktree prune' in its repo" >&2
+    done <<<"$(git_checkouts "$dir")"
     rm -rf --one-file-system -- "$dir"
     rmdir -- "$ROOT/$project" 2>/dev/null || true
     verb="removed"
@@ -196,5 +239,5 @@ if [ "$DELETE" = true ]; then
 else
   echo "$count idle folder(s), $(human "$total"). Run with --delete to remove them."
 fi
-echo "Kept $kept_recent active in the last $DAYS day(s), $kept_busy in use."
+echo "Kept $kept_recent active in the last $DAYS day(s), $kept_busy in use, $kept_git holding unsaved git work."
 [ "$orphans" -eq 0 ] || echo "$orphans gpg daemon(s) had lost their homedir."
