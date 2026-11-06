@@ -78,7 +78,7 @@ sysbak restore ~/Projects/myapp/src/main.py 1
 
 ## Git Bundle
 
-`sysbak git-bundle` creates portable git bundles for all repositories under `~/Projects/`. This complements rsnapshot (which excludes `.git/objects/`) by preserving full git history on the USB drive.
+`sysbak git-bundle` creates portable git bundles for all repositories under `~/Projects/`. rsnapshot already keeps `.git/objects/`, so snapshots hold each repo's history. A bundle is a single portable file per repo, for cloning elsewhere.
 
 ```bash
 sysbak git-bundle
@@ -141,12 +141,12 @@ backup_dirs=(
     ~/.local/share/chezmoi
 )
 
-# Exclude patterns — defaults cover node_modules, __pycache__, caches, .git/objects.
+# Exclude patterns — defaults cover node_modules, __pycache__, caches and cargo target/.
 # When /nix/store exists, the script also auto-appends the Nix store + caches
 # (reproducible from flake.lock, never worth backing up). Setting this key
 # replaces the defaults entirely, so include Nix yourself if you customize it:
 # exclude_patterns=(
-#     "node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/"
+#     "node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" "target/"
 #     "/nix/store" "/nix/var" "~/.cache/nix" "~/.local/state/nix"
 # )
 
