@@ -309,6 +309,20 @@ get_latest_snapshot_age() {
 # Collect unique file versions across snapshots, deduplicated by inode.
 # Outputs lines of: "inode|epoch|size|snap_name|snap_file_path"
 # sorted by epoch descending, deduplicated by inode.
+# Print the copy of ~/<rel_path> inside one snapshot, if it has one.
+# rsnapshot keeps the absolute path under a host dir (<snapshot>/localhost/home/...),
+# so look there directly. Searching with find was slow, and under pipefail one
+# unreadable directory in the snapshot made it fail and hide every version.
+snapshot_file() {
+  local snapshot_dir="$1" rel_path="$2" candidate
+  for candidate in "$snapshot_dir"/*"$HOME/$rel_path"; do
+    if [[ -f "$candidate" ]]; then
+      echo "$candidate"
+      return
+    fi
+  done
+}
+
 collect_unique_versions() {
   local rel_path="$1"
   local -a entries=()
@@ -319,9 +333,8 @@ collect_unique_versions() {
     local snap_name
     snap_name=$(basename "$snapshot_dir")
 
-    # Find the file inside this snapshot
     local snap_file
-    snap_file=$(find "$snapshot_dir" -path "*/$rel_path" -type f 2>/dev/null | head -1)
+    snap_file=$(snapshot_file "$snapshot_dir" "$rel_path")
     [[ -z "$snap_file" ]] && continue
 
     local inode epoch size
@@ -517,7 +530,7 @@ cmd_list() {
   local snapshot_dir
   for snapshot_dir in "$SNAPSHOT_ROOT"/alpha.* "$SNAPSHOT_ROOT"/beta.* "$SNAPSHOT_ROOT"/gamma.*; do
     [[ -d "$snapshot_dir" ]] || continue
-    if find "$snapshot_dir" -path "*/$rel_path" -type f 2>/dev/null | grep -q .; then
+    if [[ -n "$(snapshot_file "$snapshot_dir" "$rel_path")" ]]; then
       total_count=$((total_count + 1))
     fi
   done
