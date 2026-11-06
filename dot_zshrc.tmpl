@@ -324,3 +324,6 @@ fi
 
 # opencode (installed via opencode.ai/install to ~/.opencode/bin)
 [[ -d "$HOME/.opencode/bin" ]] && export PATH="$HOME/.opencode/bin:$PATH"
+
+# Keep ~/.local/bin ahead of Homebrew and the tools added above.
+export PATH="$HOME/.local/bin:$PATH"
