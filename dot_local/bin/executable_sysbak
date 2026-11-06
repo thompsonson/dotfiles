@@ -113,7 +113,8 @@ fi
 if [[ -n "${exclude_patterns+x}" ]]; then
   EXCLUDE_PATTERNS=("${exclude_patterns[@]}")
 else
-  EXCLUDE_PATTERNS=("node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" ".git/objects/")
+  # target/ is cargo's build output, rebuilt by cargo. .git/objects/ is kept, so a restored repo has its history.
+  EXCLUDE_PATTERNS=("node_modules/" ".cache/" "__pycache__/" ".venv/" "*.pyc" "target/")
   # Nix store is fully reproducible from flake.lock — never back it up.
   # Auto-append when Nix is present so default backups don't balloon.
   if [[ -d /nix/store ]]; then
