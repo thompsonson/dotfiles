@@ -1,0 +1,16 @@
+[Unit]
+Description=Consistent nightly copy of the LeStash database for sysbak
+Documentation=file://%h/.local/share/chezmoi/docs/sysbak.md
+# Only machines that run LeStash have the database.
+ConditionPathExists=%h/.config/lestash/lestash.db
+
+[Service]
+Type=oneshot
+# rsnapshot copies lestash.db mid-write and can miss its WAL. The SQLite backup API
+# gives a self-consistent file; a fixed name lets each snapshot keep one version.
+ExecStartPre=/usr/bin/mkdir -p %h/.config/lestash/backups
+ExecStart=/home/linuxbrew/.linuxbrew/bin/sqlite3 -cmd ".timeout 60000" %h/.config/lestash/lestash.db ".backup %h/.config/lestash/backups/lestash-nightly.db.tmp"
+ExecStart=/bin/sh -c 'test "$$(/home/linuxbrew/.linuxbrew/bin/sqlite3 %h/.config/lestash/backups/lestash-nightly.db.tmp "pragma quick_check")" = ok'
+ExecStart=/usr/bin/mv -f %h/.config/lestash/backups/lestash-nightly.db.tmp %h/.config/lestash/backups/lestash-nightly.db
+Nice=10
+IOSchedulingClass=idle

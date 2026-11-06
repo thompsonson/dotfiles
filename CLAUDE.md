@@ -89,6 +89,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 ### Backup
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
 - `dot_config/sysbak/config`: Per-machine backup configuration
+- `dot_config/systemd/user/lestash-db-backup.{service,timer}`: Nightly SQLite-API copy of the LeStash DB, so snapshots hold a consistent file
 
 ### Telemetry
 - `dot_local/bin/executable_otel-stats`: Query/report tool over the local Claude Code telemetry SQLite store

@@ -115,6 +115,21 @@ After `sysbak setup`, cron jobs run backups on this schedule (Linux only):
 
 Each job gates on `mountpoint -q` — silently skipped if the drive is disconnected.
 
+### Live SQLite databases
+
+rsnapshot copies files as they are, so a database being written can land torn.
+Its `-wal` sidecar may also be missed. Copy such databases with the SQLite
+backup API before the snapshot runs, and restore from that copy.
+
+- `lestash-db-backup.timer` copies `~/.config/lestash/lestash.db` daily at 02:45.
+- The copy is `~/.config/lestash/backups/lestash-nightly.db`, checked with `pragma quick_check`.
+- The unit only runs where `lestash.db` exists; enable it there:
+
+```bash
+systemctl --user enable --now lestash-db-backup.timer
+sysbak list ~/.config/lestash/backups/lestash-nightly.db
+```
+
 ## Cross-Platform Support
 
 | Feature | macOS | Linux/WSL |

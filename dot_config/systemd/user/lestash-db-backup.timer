@@ -1,0 +1,10 @@
+[Unit]
+Description=Copy the LeStash database nightly, before the 03:30 beta snapshot
+
+[Timer]
+OnCalendar=*-*-* 02:45
+Persistent=true
+Unit=lestash-db-backup.service
+
+[Install]
+WantedBy=timers.target
