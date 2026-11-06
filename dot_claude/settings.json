@@ -31,13 +31,22 @@
       "Grep(*)",
       "LS(*)",
       "Read(*)"
-    ]
+    ],
+    "deny": [
+      "AskUserQuestion"
+    ],
+    "defaultMode": "auto"
   },
   "statusLine": {
     "type": "command",
     "command": "sh ~/.claude/statusline-command.sh"
   },
-  "agentPushNotifEnabled": true,
+  "enabledPlugins": {
+    "rust-analyzer-lsp@claude-plugins-official": true
+  },
   "theme": "dark-ansi",
-  "autoCompactEnabled": false
+  "feedbackDrafts": "off",
+  "autoCompactEnabled": true,
+  "remoteControlAtStartup": true,
+  "agentPushNotifEnabled": true
 }
