@@ -11,7 +11,7 @@
 #   sysup upgrade      Apply all updates
 #   sysup repair       Fix broken packages and resolve dependency issues
 #   sysup doctor       Check which tools are installed + versions
-#   sysup clean        Clear package manager and tool caches
+#   sysup clean        Clear package manager and tool caches, and idle Claude temp folders
 #   sysup help         Show usage text
 
 set -euo pipefail
@@ -512,6 +512,12 @@ clean_docker() {
   success "    Build cache cleared"
 }
 
+clean_claude_tmp() {
+  if ! has claude-tmp-clean; then return; fi
+  info "  Idle Claude Code session folders..."
+  claude-tmp-clean --delete 2>&1 | tail -3 | sed 's/^/    /'
+}
+
 clean_go() {
   if ! has go; then return; fi
   local before
@@ -603,6 +609,7 @@ cmd_clean() {
   clean_npm
   clean_docker
   clean_go
+  clean_claude_tmp
 
   # Calculate total after
   local total_after=0
@@ -825,6 +832,7 @@ CLEAN (sysup clean)
   npm                npm cache clean --force
   docker             docker builder prune (build cache only)
   go                 go clean -modcache
+  claude tmp         claude-tmp-clean --delete (idle session folders)
 
 EXAMPLES
   sysup              # Quick check: what needs updating?

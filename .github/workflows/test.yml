@@ -37,6 +37,9 @@ jobs:
       - name: Shellcheck - sysbak
         run: shellcheck -x -s bash dot_local/bin/executable_sysbak
 
+      - name: Shellcheck - claude-tmp-clean
+        run: shellcheck -x -s bash dot_local/bin/executable_claude-tmp-clean
+
       - name: Shellcheck - run_once scripts
         run: |
           for script in run_once_*.sh; do
@@ -60,6 +63,9 @@ jobs:
 
       - name: Syntax - sysbak
         run: bash -n dot_local/bin/executable_sysbak
+
+      - name: Syntax - claude-tmp-clean
+        run: bash -n dot_local/bin/executable_claude-tmp-clean
 
       # Template validation
       - name: Templates - validate all
@@ -95,6 +101,9 @@ jobs:
       - name: Shellcheck - sysbak
         run: shellcheck -x -s bash dot_local/bin/executable_sysbak
 
+      - name: Shellcheck - claude-tmp-clean
+        run: shellcheck -x -s bash dot_local/bin/executable_claude-tmp-clean
+
       # Syntax checks (zsh is pre-installed on macOS)
       - name: Syntax - zshrc
         run: |
@@ -109,6 +118,9 @@ jobs:
 
       - name: Syntax - sysbak
         run: bash -n dot_local/bin/executable_sysbak
+
+      - name: Syntax - claude-tmp-clean
+        run: bash -n dot_local/bin/executable_claude-tmp-clean
 
       # Template validation
       - name: Templates - validate all

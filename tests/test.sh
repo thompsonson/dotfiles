@@ -70,6 +70,7 @@ run_lint() {
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
         "$REPO_DIR/dot_local/bin/executable_sysbak"
+        "$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
     )
 
     # Add run_once scripts (only pure shell, not .tmpl - Go templates confuse shellcheck)
@@ -124,6 +125,7 @@ run_syntax() {
         "$REPO_DIR/dot_local/bin/executable_dev"
         "$REPO_DIR/dot_local/bin/executable_sysmon"
         "$REPO_DIR/dot_local/bin/executable_sysbak"
+        "$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
     )
 
     for script in "${scripts[@]}"; do
@@ -229,7 +231,114 @@ run_smoke() {
         pass "sysmon bogus (rejected invalid subcommand)"
     fi
 
+    smoke_claude_tmp_clean || smoke_failed=1
+
     return $smoke_failed
+}
+
+# claude-tmp-clean against a fake /tmp/claude-<uid> tree.
+smoke_claude_tmp_clean() {
+    local script="$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
+    if [[ ! -d /proc/self/fd ]]; then
+        skip "claude-tmp-clean (needs Linux /proc)"
+        return 0
+    fi
+
+    local t failed=0
+    t=$(mktemp -d)
+    local root="$t/root" projects="$t/projects" p="-home-x-proj"
+    local idle=11111111-1111-1111-1111-111111111111
+    local recent=22222222-2222-2222-2222-222222222222
+    local busy=33333333-3333-3333-3333-333333333333
+    local keyring=44444444-4444-4444-4444-444444444444
+    mkdir -p "$projects/$p" "$t/bin" "$t/sbin"
+    for s in $idle $recent $busy $keyring; do
+        mkdir -p "$root/$p/$s/scratchpad"
+        touch -d '10 days ago' "$projects/$p/$s.jsonl"
+    done
+    touch "$projects/$p/$recent.jsonl"
+
+    # Git checkouts in idle folders, made from one parent repo.
+    local wt_dirty=55555555-5555-5555-5555-555555555555
+    local wt_detached=66666666-6666-6666-6666-666666666666
+    local wt_clean=77777777-7777-7777-7777-777777777777
+    local clone=88888888-8888-8888-8888-888888888888
+    local stash=99999999-9999-9999-9999-999999999999
+    local g=(git -c user.name=t -c user.email=t@t -c init.defaultBranch=main)
+    "${g[@]}" init -q "$t/repo" && "${g[@]}" -C "$t/repo" commit -q --allow-empty -m one
+    for s in $wt_dirty $wt_detached $wt_clean $clone $stash; do
+        mkdir -p "$root/$p/$s/scratchpad"
+        touch -d '10 days ago' "$projects/$p/$s.jsonl"
+    done
+    "${g[@]}" -C "$t/repo" worktree add -q -b dirty "$root/$p/$wt_dirty/scratchpad/w"
+    echo edit > "$root/$p/$wt_dirty/scratchpad/w/file"
+    "${g[@]}" -C "$t/repo" worktree add -q --detach "$root/$p/$wt_detached/scratchpad/w"
+    "${g[@]}" -C "$root/$p/$wt_detached/scratchpad/w" commit -q --allow-empty -m detached
+    "${g[@]}" -C "$t/repo" worktree add -q -b clean "$root/$p/$wt_clean/scratchpad/w"
+    "${g[@]}" clone -q "$t/repo" "$root/$p/$clone/scratchpad/c"
+    "${g[@]}" -C "$root/$p/$clone/scratchpad/c" commit -q --allow-empty -m unpushed
+    "${g[@]}" -C "$t/repo" commit -q --allow-empty -m two
+    "${g[@]}" clone -q "$t/repo" "$root/$p/$stash/scratchpad/c"
+    echo work > "$root/$p/$stash/scratchpad/c/file"
+    "${g[@]}" -C "$root/$p/$stash/scratchpad/c" stash push -q -u
+
+    # Named gpg-agent so the process name matches. The orphan needs a
+    # --homedir in its command line, so it is bash; -c keeps bash from exec'ing sleep.
+    cp "$(command -v sleep)" "$t/sbin/gpg-agent"
+    cp "$(command -v bash)" "$t/bin/gpg-agent"
+    (cd "$root/$p/$busy" && exec sleep 60) &
+    local busy_pid=$!
+    (cd "$root/$p/$keyring" && exec "$t/sbin/gpg-agent" 60) &
+    local agent_pid=$!
+    "$t/bin/gpg-agent" -c 'sleep 60; :' --homedir "$root/$p/gone/h" &
+    local orphan_pid=$!
+    sleep 0.5
+
+    local run=(env CLAUDE_TMP_ROOT="$root" CLAUDE_PROJECTS_DIR="$projects" bash "$script")
+    "${run[@]}" >/dev/null 2>&1
+    if [[ -d "$root/$p/$idle" ]] && kill -0 "$orphan_pid" 2>/dev/null; then
+        pass "claude-tmp-clean dry run changes nothing"
+    else
+        fail "claude-tmp-clean dry run changed something"; failed=1
+    fi
+
+    "${run[@]}" --delete >/dev/null 2>&1
+    sleep 0.2
+    if [[ ! -e "$root/$p/$idle" ]]; then pass "claude-tmp-clean removes an idle folder"
+    else fail "claude-tmp-clean left an idle folder"; failed=1; fi
+    if [[ -d "$root/$p/$recent" ]]; then pass "claude-tmp-clean keeps a recent session"
+    else fail "claude-tmp-clean removed a recent session"; failed=1; fi
+    if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
+    else fail "claude-tmp-clean removed a folder in use"; failed=1; fi
+    if [[ ! -e "$root/$p/$keyring" ]]; then pass "claude-tmp-clean ignores gpg daemons as use"
+    else fail "claude-tmp-clean kept a folder only gpg-agent used"; failed=1; fi
+    if ! kill -0 "$orphan_pid" 2>/dev/null; then pass "claude-tmp-clean stops an orphaned gpg daemon"
+    else fail "claude-tmp-clean left an orphaned gpg daemon"; failed=1; fi
+
+    if [[ -d "$root/$p/$wt_dirty" ]]; then pass "claude-tmp-clean keeps a worktree with uncommitted changes"
+    else fail "claude-tmp-clean removed a worktree with uncommitted changes"; failed=1; fi
+    if [[ -d "$root/$p/$wt_detached" ]]; then pass "claude-tmp-clean keeps commits no branch holds"
+    else fail "claude-tmp-clean removed commits no branch holds"; failed=1; fi
+    if [[ -d "$root/$p/$clone" ]]; then pass "claude-tmp-clean keeps a clone with unpushed commits"
+    else fail "claude-tmp-clean removed a clone with unpushed commits"; failed=1; fi
+    if [[ -d "$root/$p/$stash" ]]; then pass "claude-tmp-clean keeps a clone with a stash"
+    else fail "claude-tmp-clean removed a clone with a stash"; failed=1; fi
+    if [[ ! -e "$root/$p/$wt_clean" ]] && ! git -C "$t/repo" worktree list | grep -qF "$wt_clean"; then
+        pass "claude-tmp-clean removes a clean worktree and unregisters it"
+    else
+        fail "claude-tmp-clean left a clean worktree or its registration"; failed=1
+    fi
+
+    if CLAUDE_TMP_ROOT="$root" bash "$script" --days x >/dev/null 2>&1; then
+        fail "claude-tmp-clean accepted --days x"; failed=1
+    else
+        pass "claude-tmp-clean rejects a bad --days"
+    fi
+
+    kill "$busy_pid" "$agent_pid" "$orphan_pid" 2>/dev/null || true
+    wait 2>/dev/null || true
+    rm -rf "$t"
+    return $failed
 }
 
 # Print summary

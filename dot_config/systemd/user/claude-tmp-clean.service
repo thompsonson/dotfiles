@@ -1,0 +1,9 @@
+[Unit]
+Description=Remove idle Claude Code session temp folders
+Documentation=file://%h/.local/share/chezmoi/docs/claude-tmp-clean.md
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/claude-tmp-clean --delete
+Nice=10
+IOSchedulingClass=idle

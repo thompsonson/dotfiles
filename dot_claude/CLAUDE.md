@@ -23,6 +23,12 @@ How I want every session on my machines to write, ask and act.
 - Improve what exists rather than writing a second one beside it.
 - Say what you searched, so I can point you at what you missed.
 
+## Disk space
+
+- When the disk runs low, run `claude-tmp-clean` to list idle session temp folders.
+- Run `claude-tmp-clean --delete` to remove them; it keeps any folder still in use.
+- Never delete another session's temp folder by hand.
+
 ## Questions
 
 - Read the documentation, code, config and git history before asking.
