@@ -5,3 +5,7 @@ bin/
 
 output/
 scripts/__pycache__/
+
+# Python bytecode, anywhere
+__pycache__/
+*.pyc

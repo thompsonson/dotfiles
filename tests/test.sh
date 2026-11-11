@@ -129,10 +129,12 @@ run_syntax() {
     )
 
     if has_cmd python3; then
-        if python3 -m py_compile "$REPO_DIR/dot_local/bin/executable_review-round" 2>/dev/null; then
-            pass "executable_review-round (py_compile)"
+        # compile() checks syntax without writing a .pyc next to the script
+        if python3 -c 'import sys; compile(open(sys.argv[1]).read(), sys.argv[1], "exec")' \
+            "$REPO_DIR/dot_local/bin/executable_review-round" 2>/dev/null; then
+            pass "executable_review-round (python syntax)"
         else
-            fail "executable_review-round (py_compile)"
+            fail "executable_review-round (python syntax)"
             syntax_failed=1
         fi
     fi
