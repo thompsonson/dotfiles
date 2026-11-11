@@ -36,6 +36,14 @@ The comment's address goes in the run's log line (`posted`), or the failure (`po
 
 Exit codes: 0 no high findings, 1 high findings, 2 error, 3 refused (over the limit).
 
+## Repeats
+
+- Each finding gets an id, `r<round>.<n>`, shown in the output and the PR comment.
+- The reviewer sees the branch's earlier findings by id.
+- When a finding is the same defect as an earlier one, or what an incomplete fix left, it sets `repeat_of`.
+- So a high in every round shows whether it is one defect not yet fixed, or a new one each time.
+- `stats` counts repeats, and how many are high.
+
 ## Origins
 
 Each finding is tagged by `git blame` on the line it names:

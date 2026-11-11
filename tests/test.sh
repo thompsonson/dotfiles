@@ -279,7 +279,7 @@ cat <<'JSON'
  "structured_output":{"findings":[
   {"severity":"low","file":"f.txt","line":1,"summary":"old","scenario":"x"},
   {"severity":"medium","file":"f.txt","line":4,"summary":"new","scenario":"x"},
-  {"severity":"high","file":"f.txt","line":5,"summary":"fixbug","scenario":"x"}]}}
+  {"severity":"high","file":"f.txt","line":5,"summary":"fixbug","scenario":"x","repeat_of":"r1.3"}]}}
 JSON
 FAKE
     chmod +x "$t/claude"
@@ -319,11 +319,21 @@ PY
         fail "review-round origins (rc=$rc): $out"; failed=1
     fi
 
+    # Round 2 sees round 1's findings by id, and a repeat shows in the comment
+    (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
+    (cd "$t/repo" && "${rr[@]}" run --pr 7 >/dev/null 2>&1)
+    if grep -q -- "- r1.3 \[high\] f.txt: fixbug" "$t/claude-args" \
+        && grep -q "| r2.3 | high | fix (round 1) | r1.3 |" "$t/comment.md"; then
+        pass "review-round shows earlier findings and marks repeats"
+    else
+        fail "review-round repeats: $(cat "$t/comment.md")"; failed=1
+    fi
+
     # A reply with no findings data is an error, and errors use up no rounds
     printf '#!/bin/sh\necho "{\\"result\\": \\"no data\\"}"\n' > "$t/claude-bad"
     chmod +x "$t/claude-bad"
     out=$(cd "$t/repo" && "${rr[@]/#REVIEW_ROUND_CLAUDE=*/REVIEW_ROUND_CLAUDE=$t/claude-bad}" run 2>&1); rc=$?
-    if [[ $rc -eq 2 ]] && grep -q "round 2/2: error" <<<"$out"; then
+    if [[ $rc -eq 2 ]] && grep -q "round 3/3: error" <<<"$out"; then
         pass "review-round logs an empty reply as an error"
     else
         fail "review-round empty reply (rc=$rc): $out"; failed=1
@@ -341,7 +351,7 @@ PY
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p1" 2>&1) &
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p2" 2>&1) &
     wait
-    if cat "$t/p1" "$t/p2" | grep -q "round 2/4" && cat "$t/p1" "$t/p2" | grep -q "round 3/4"; then
+    if cat "$t/p1" "$t/p2" | grep -q "round 3/5" && cat "$t/p1" "$t/p2" | grep -q "round 4/5"; then
         pass "review-round gives parallel runs different rounds"
     else
         fail "review-round parallel: $(cat "$t/p1" "$t/p2")"; failed=1
@@ -357,7 +367,7 @@ PY
     fi
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
-    if [[ $rc -eq 1 ]] && grep -q "round 5/5" <<<"$out"; then
+    if [[ $rc -eq 1 ]] && grep -q "round 6/6" <<<"$out"; then
         pass "review-round runs again once a person allows it"
     else
         fail "review-round allow (rc=$rc): $out"; failed=1
@@ -375,8 +385,8 @@ PY
     "${rr[@]}" rotate --force >/dev/null
     "${rr[@]}" rotate --keep 1 >/dev/null
     after=$("${rr[@]}" stats 2>&1)
-    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 5 rounds" <<<"$before" \
-        && grep -q "Runs: 7 rounds" <<<"$after" && grep -q "Introduced by fixes: 6 of 19" <<<"$after"; then
+    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 6 rounds" <<<"$before" \
+        && grep -q "Runs: 8 rounds" <<<"$after" && grep -q "Introduced by fixes: 7 of 22" <<<"$after"; then
         pass "review-round rotate archives and keeps running totals"
     else
         fail "review-round rotate: before=[$before] after=[$after]"; failed=1

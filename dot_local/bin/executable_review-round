@@ -84,6 +84,11 @@ FINDINGS_SCHEMA = {
                         "enum": ["pre-existing", "original", "fix"],
                         "description": "where you judge the defect came from",
                     },
+                    "repeat_of": {
+                        "type": "string",
+                        "description": "id of an earlier round's finding this is the same "
+                        "defect as, or what an incomplete fix left (e.g. r2.1)",
+                    },
                 },
                 "required": ["severity", "summary", "scenario"],
             },
@@ -333,6 +338,18 @@ def find_method(info: dict, arg: str | None) -> tuple[str, str]:
 MAX_DIFF = 200_000  # characters of diff put in the prompt; past it, the reviewer reads files
 
 
+def earlier_findings(info: dict) -> list[dict]:
+    """Findings from this branch's earlier rounds, each with its id (r<round>.<n>)."""
+    found, seen = [], {}
+    for f in read_rows("findings"):
+        if f.get("repo") != info["repo"] or f.get("branch") != info["branch"]:
+            continue
+        n = seen[f.get("run_id")] = seen.get(f.get("run_id"), 0) + 1
+        # Rows logged before ids existed get theirs from round and order in the run
+        found.append({**f, "id": f.get("id") or f"r{f.get('round')}.{n}"})
+    return found
+
+
 def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
     span = f"{info['merge_base']}..HEAD"
     log = git("log", "--format=%h %s%n%b", span)
@@ -340,6 +357,9 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
     if len(diff) > MAX_DIFF:
         diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
                 " read the changed files with the Read tool.)")
+    earlier = "\n".join(
+        f"- {f['id']} [{f['severity']}] {f.get('file') or '-'}: {f.get('summary', '')}"
+        for f in earlier_findings(info)) or "(none)"
     prompt = f"""{method}
 
 ## This round
@@ -350,6 +370,11 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
   check whether they introduced anything.
 - You can read, search and list files; you can't run commands or change anything.
 - Return every finding in the structured output; an empty list when there are none.
+- Earlier rounds' findings are listed below. When a finding is the same defect as one of
+  them, or what an incomplete fix of one left behind, set repeat_of to its id.
+
+## Earlier findings
+{earlier}
 
 ## Commits
 {log}
@@ -419,6 +444,8 @@ def summary_line(run: dict) -> str:
     fixes = run.get("fix_rounds", [])
     intro = sum(c[s]["fix"] for s in SEVERITIES)
     tail = f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})" if intro else ""
+    if run.get("repeats"):
+        tail += f"; {run['repeats']} repeat earlier findings"
     if run.get("disagree"):
         tail += f"; reviewer disagrees on {run['disagree']} origins"
     return (
@@ -433,14 +460,16 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     if run.get("error"):
         lines += ["", f"Error: {run['error'][:300]}"]
     if rows:
-        lines += ["", "| severity | origin | where | finding |", "|---|---|---|---|"]
+        lines += ["", "| id | severity | origin | repeat of | where | finding |",
+                  "|---|---|---|---|---|---|"]
         for r in rows:
             tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
             if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
                 tag += f" (reviewer: {r['claimed_origin']})"
             where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
             text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
-            lines.append(f"| {r['severity']} | {tag} | {where} | {text[:300]} |")
+            lines.append(f"| {r.get('id', '')} | {r['severity']} | {tag} | {r.get('repeat_of') or ''}"
+                         f" | {where} | {text[:300]} |")
     bits = [f"run `{run['run_id']}`", f"head `{run['head'][:7]}`", f"by {run.get('agent')}"]
     if run.get("reviewer"):
         bits.append(f"reviewer {run['reviewer']}" + (f" ({run['method']})" if run.get("method") else ""))
@@ -527,6 +556,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             rows.append(
                 {
                     "run_id": run["run_id"],
+                    "id": f"r{rnd}.{len(rows) + 1}",
+                    "repeat_of": f.get("repeat_of") or None,
                     "repo": info["repo"],
                     "branch": info["branch"],
                     "round": rnd,
@@ -561,6 +592,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         counts=c,
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
+        repeats=sum(1 for r in rows if r["repeat_of"]),
     )
     post(args, run, rows)
     with locked():
@@ -571,7 +603,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
         if r["claimed_origin"] and r["claimed_origin"] != r["origin"]:
             tag += f" [reviewer: {r['claimed_origin']}]"
-        print(f"  {r['severity']:<6} {tag:<16} {where}  {r['summary']}")
+        again = f" (repeat of {r['repeat_of']})" if r.get("repeat_of") else ""
+        print(f"  {r['id']:<6} {r['severity']:<6} {tag:<16} {where}  {r['summary']}{again}")
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
@@ -655,6 +688,11 @@ def cmd_stats(args) -> int:
     if total:
         print(f"\nIntroduced by fixes: {intro} of {total} findings ({100 * intro / total:.0f}%),"
               f" {c['high']['fix']} of them high.")
+        repeats = [f for f in finds if f.get("repeat_of")]
+        if repeats:
+            highs = sum(1 for f in repeats if f.get("severity") == "high")
+            print(f"Repeats of earlier findings (same defect, or a fix left incomplete): "
+                  f"{len(repeats)}, {highs} of them high.")
     return 0
 
 
