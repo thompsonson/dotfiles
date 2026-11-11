@@ -272,6 +272,8 @@ smoke_review_round() {
     # Fake claude: one finding on each of lines 1 (base), 4 (feat), 5 (round 1 fix)
     cat > "$t/claude" <<'FAKE'
 #!/bin/sh
+printf '%s\n' "$@" > "$(dirname "$0")/claude-args"
+[ -n "$SLOW" ] && sleep 1
 cat <<'JSON'
 {"session_id":"s1","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":5},
  "structured_output":{"findings":[
@@ -308,6 +310,12 @@ PY
         && grep -q '"posted": "https://github.com/o/r/pull/7#issuecomment-1"' "$t/log/runs.jsonl"; then
         pass "review-round comments on the PR and logs the comment"
     else
+        fail "review-round PR comment: $(cat "$t/comment.md" 2>/dev/null)"; failed=1
+    fi
+    if grep -qx dontAsk "$t/claude-args" && grep -qx "Read,Grep,Glob,Bash" "$t/claude-args" \
+        && grep -qx -- --strict-mcp-config "$t/claude-args"; then
+        pass "review-round starts the reviewer read-only"
+    else
         fail "review-round origins (rc=$rc): $out"; failed=1
     fi
 
@@ -328,6 +336,17 @@ PY
         fail "review-round record --round (rc=$rc): $out"; failed=1
     fi
 
+    # Two runs at once take different rounds
+    (cd "$t/repo" && "${rr[@]}" allow feat 2 --by person >/dev/null)
+    (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p1" 2>&1) &
+    (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p2" 2>&1) &
+    wait
+    if cat "$t/p1" "$t/p2" | grep -q "round 2/4" && cat "$t/p1" "$t/p2" | grep -q "round 3/4"; then
+        pass "review-round gives parallel runs different rounds"
+    else
+        fail "review-round parallel: $(cat "$t/p1" "$t/p2")"; failed=1
+    fi
+
     printf '[{"severity":"low","summary":"r","scenario":"x"}]' > "$t/f.json"
     (cd "$t/repo" && "${rr[@]}" record --findings "$t/f.json" --reviewer sub >/dev/null 2>&1)
     out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
@@ -338,7 +357,7 @@ PY
     fi
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
-    if [[ $rc -eq 1 ]] && grep -q "round 3/3" <<<"$out"; then
+    if [[ $rc -eq 1 ]] && grep -q "round 5/5" <<<"$out"; then
         pass "review-round runs again once a person allows it"
     else
         fail "review-round allow (rc=$rc): $out"; failed=1
@@ -356,8 +375,8 @@ PY
     "${rr[@]}" rotate --force >/dev/null
     "${rr[@]}" rotate --keep 1 >/dev/null
     after=$("${rr[@]}" stats 2>&1)
-    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 3 rounds" <<<"$before" \
-        && grep -q "Runs: 5 rounds" <<<"$after" && grep -q "Introduced by fixes: 4 of 13" <<<"$after"; then
+    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 5 rounds" <<<"$before" \
+        && grep -q "Runs: 7 rounds" <<<"$after" && grep -q "Introduced by fixes: 6 of 19" <<<"$after"; then
         pass "review-round rotate archives and keeps running totals"
     else
         fail "review-round rotate: before=[$before] after=[$after]"; failed=1

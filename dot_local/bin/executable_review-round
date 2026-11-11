@@ -248,11 +248,20 @@ def branch_info(base: str | None) -> dict:
     }
 
 
+def latest_runs() -> list[dict]:
+    """One row per run: a run logs a "running" row when it starts and its result when done."""
+    by_id: dict[str, dict] = {}
+    for r in read_rows("runs"):
+        by_id[r.get("run_id") or uuid.uuid4().hex] = r
+    return list(by_id.values())
+
+
 def rounds_so_far(repo: str, branch: str) -> int:
-    runs = [r for r in read_rows("runs") if r.get("repo") == repo and r.get("branch") == branch]
+    runs = [r for r in latest_runs() if r.get("repo") == repo and r.get("branch") == branch]
     carried = load_carried()["runs"]
     # Only rounds that reviewed count: a refusal or an error uses up nothing
-    counted = [r for r in runs if r.get("result") in ("clean", "findings")]
+    # A running round holds its number, so a parallel run takes the next one
+    counted = [r for r in runs if r.get("result") in ("clean", "findings", "running")]
     pruned = sum(n for rp, br, res, n in carried
                  if rp == repo and br == branch and res in ("clean", "findings"))
     top = max([n for rp, br, res, n in carried if rp == repo and br == branch and res == "max_round"]
@@ -341,8 +350,15 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         "json",
         "--json-schema",
         json.dumps(FINDINGS_SCHEMA),
+        # Read-only, whatever the user's settings: only these tools exist, nothing
+        # outside the pre-approved list runs, and no MCP servers load
+        "--tools",
+        "Read,Grep,Glob,Bash",
         "--allowedTools",
         "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*)",
+        "--permission-mode",
+        "dontAsk",
+        "--strict-mcp-config",
     ]
     if model:
         cmd += ["--model", model]
@@ -437,12 +453,14 @@ def post(args, run: dict, rows: list[dict]) -> None:
 
 def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     info = branch_info(args.base)
-    with locked():
-        rotate()
-        done = rounds_so_far(info["repo"], info["branch"])
-        limit = allowed(info["repo"], info["branch"])
+    lock = locked()
+    lock.__enter__()  # held until this round's number is reserved, or the run is refused
+    rotate()
+    done = rounds_so_far(info["repo"], info["branch"])
+    limit = allowed(info["repo"], info["branch"])
     given = getattr(args, "round", None)
     if given is not None and given <= done:
+        lock.__exit__(None, None, None)
         die(f"round {given} is already recorded on {info['branch']} (rounds so far: {done})")
     rnd = given or done + 1
     run = {
@@ -461,9 +479,12 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     }
     if rnd > limit:
         run.update(result="refused", ended=now(), counts=counts([]), fix_rounds=[])
+        append(RUNS, [run])
+        lock.__exit__(None, None, None)
         post(args, run, [])
-        with locked():
-            append(RUNS, [run])
+        if run.get("posted") or run.get("post_error"):
+            with locked():
+                append(RUNS, [run])
         print(summary_line(run))
         print(
             f"review-round: {done} rounds done on {info['branch']}; a person allows more with "
@@ -471,6 +492,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             file=sys.stderr,
         )
         return 3
+    append(RUNS, [{**run, "result": "running"}])
+    lock.__exit__(None, None, None)
     start = time.monotonic()
     try:
         if findings_in is None:
@@ -557,7 +580,7 @@ def cmd_record(args) -> int:
 
 
 def cmd_status(args) -> int:
-    runs = read_rows("runs")
+    runs = sorted(latest_runs(), key=lambda r: r.get("started", ""))
     by_branch: dict[tuple, list] = {}
     for r in runs:
         by_branch.setdefault((r.get("repo"), r.get("branch")), []).append(r)
@@ -585,7 +608,7 @@ def cmd_status(args) -> int:
 
 def cmd_stats(args) -> int:
     finds = [f for f in read_rows("findings") if not args.repo or f.get("repo") == args.repo]
-    runs = [r for r in read_rows("runs") if not args.repo or r.get("repo") == args.repo]
+    runs = [r for r in latest_runs() if not args.repo or r.get("repo") == args.repo]
     done = [r for r in runs if r.get("result") in ("clean", "findings")]
     c = counts(finds)
     carried = load_carried()

@@ -79,13 +79,14 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 - `status` and `stats` read the archives too, and `carried.json`, so totals stay whole after pruning.
 - `allows.jsonl` archives are never pruned, since they set how many rounds a branch may run.
 - Writes take a lock, so parallel runs don't interleave lines.
+- A run logs a `running` line when it starts, which holds its round number, and its result when done. Readers keep the last line per run. A run killed mid-review stays `running` and keeps its round.
 
 ## The review
 
 - `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` on the base branch, then in `~/.claude`.
 - The repo's copy is read from the base branch, so a branch can't rewrite its own review rules.
 - Otherwise it uses a short built-in method. `--method FILE` names another.
-- The reviewer may read files and run `git diff`, `log`, `show` and `blame` only.
+- The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob,Bash`, `--permission-mode dontAsk` and `--strict-mcp-config`. Bash runs only `git diff`, `log`, `show` and `blame`.
 - Findings come back as structured JSON (`--json-schema`). A reply without them is an error, not a clean round.
 - A severity other than high, medium or low counts as low; the raw value is kept as `raw_severity`.
 
