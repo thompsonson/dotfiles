@@ -86,7 +86,9 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 - `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` on the base branch, then in `~/.claude`.
 - The repo's copy is read from the base branch, so a branch can't rewrite its own review rules.
 - Otherwise it uses a short built-in method. `--method FILE` names another.
-- The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob,Bash`, `--permission-mode dontAsk` and `--strict-mcp-config`. Bash runs only `git diff`, `log`, `show` and `blame`.
+- The script puts the commits and the diff in the prompt (past 200,000 characters, the `--stat` and a note to read the files).
+- The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob`, `--permission-mode dontAsk` and `--strict-mcp-config`. It has no shell, since git's own options can read and write any file.
+- Read can still open files outside the repository. A branch's text could ask the reviewer to quote one into its findings, which are posted to the PR.
 - Findings come back as structured JSON (`--json-schema`). A reply without them is an error, not a clean round.
 - A severity other than high, medium or low counts as low; the raw value is kept as `raw_severity`.
 

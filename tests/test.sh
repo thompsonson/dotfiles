@@ -312,7 +312,7 @@ PY
     else
         fail "review-round PR comment: $(cat "$t/comment.md" 2>/dev/null)"; failed=1
     fi
-    if grep -qx dontAsk "$t/claude-args" && grep -qx "Read,Grep,Glob,Bash" "$t/claude-args" \
+    if ! grep -q Bash "$t/claude-args" && grep -qx dontAsk "$t/claude-args" && grep -qx "Read,Grep,Glob" "$t/claude-args" \
         && grep -qx -- --strict-mcp-config "$t/claude-args"; then
         pass "review-round starts the reviewer read-only"
     else

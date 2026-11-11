@@ -330,17 +330,34 @@ def find_method(info: dict, arg: str | None) -> tuple[str, str]:
     return DEFAULT_METHOD, "built-in"
 
 
+MAX_DIFF = 200_000  # characters of diff put in the prompt; past it, the reviewer reads files
+
+
 def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
+    span = f"{info['merge_base']}..HEAD"
+    log = git("log", "--format=%h %s%n%b", span)
+    diff = git("diff", span)
+    if len(diff) > MAX_DIFF:
+        diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
+                " read the changed files with the Read tool.)")
     prompt = f"""{method}
 
 ## This round
-- Repository: {info["repo"]}, checked out at {info["root"]}.
+- Repository: {info["repo"]}, checked out at {info["root"]}; paths are relative to it.
 - Branch {info["branch"]} at {info["head"][:12]}, reviewed against {info["base"]}
-  (merge base {info["merge_base"][:12]}). Run `git diff {info["merge_base"][:12]}..HEAD`
-  and `git log --oneline {info["merge_base"][:12]}..HEAD` to see the change.
+  (merge base {info["merge_base"][:12]}).
 - This is review round {rnd}. Commits named "review round N" are earlier rounds' fixes;
   check whether they introduced anything.
+- You can read, search and list files; you can't run commands or change anything.
 - Return every finding in the structured output; an empty list when there are none.
+
+## Commits
+{log}
+
+## Diff
+```diff
+{diff}
+```
 """
     cmd = [
         os.environ.get("REVIEW_ROUND_CLAUDE", "claude"),
@@ -350,12 +367,12 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         "json",
         "--json-schema",
         json.dumps(FINDINGS_SCHEMA),
-        # Read-only, whatever the user's settings: only these tools exist, nothing
-        # outside the pre-approved list runs, and no MCP servers load
+        # Read-only, whatever the user's settings: no shell (git's own options can
+        # write files), only these tools exist, nothing else runs, no MCP servers load
         "--tools",
-        "Read,Grep,Glob,Bash",
+        "Read,Grep,Glob",
         "--allowedTools",
-        "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git blame:*)",
+        "Read,Grep,Glob",
         "--permission-mode",
         "dontAsk",
         "--strict-mcp-config",
@@ -500,7 +517,33 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             method, method_src = find_method(info, getattr(args, "method", None))
             findings_in, extra = review(info, rnd, method, getattr(args, "model", None))
             meta = {**meta, **extra, "method": method_src}
-    except Exception as e:  # the run is still recorded
+        rows = []
+        for f in findings_in:
+            raw_sev = str(f.get("severity", "")).strip()
+            sev = raw_sev.lower() if raw_sev.lower() in SEVERITIES else "low"
+            line = f.get("line")
+            line = int(line) if isinstance(line, (int, str)) and str(line).isdigit() else None
+            origin, commit, fix_round = origin_of(info, f.get("file"), line)
+            rows.append(
+                {
+                    "run_id": run["run_id"],
+                    "repo": info["repo"],
+                    "branch": info["branch"],
+                    "round": rnd,
+                    "severity": sev,
+                    "raw_severity": raw_sev if raw_sev != sev else None,
+                    "file": f.get("file"),
+                    "line": line,
+                    "origin": origin,
+                    "claimed_origin": f.get("origin"),
+                    "commit": commit,
+                    "fix_round": fix_round,
+                    "summary": f.get("summary", ""),
+                    "scenario": f.get("scenario", ""),
+                    "fix": f.get("fix", ""),
+                }
+            )
+    except Exception as e:  # the run is still recorded, and its round freed
         run.update(result="error", error=str(e)[:500], ended=now(), counts=counts([]), fix_rounds=[])
         run["seconds"] = round(time.monotonic() - start, 1)
         post(args, run, [])
@@ -509,32 +552,6 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         print(summary_line(run))
         print(f"review-round: {e}", file=sys.stderr)
         return 2
-    rows = []
-    for f in findings_in:
-        raw_sev = str(f.get("severity", "")).strip()
-        sev = raw_sev.lower() if raw_sev.lower() in SEVERITIES else "low"
-        line = f.get("line")
-        line = int(line) if isinstance(line, (int, str)) and str(line).isdigit() else None
-        origin, commit, fix_round = origin_of(info, f.get("file"), line)
-        rows.append(
-            {
-                "run_id": run["run_id"],
-                "repo": info["repo"],
-                "branch": info["branch"],
-                "round": rnd,
-                "severity": sev,
-                "raw_severity": raw_sev if raw_sev != sev else None,
-                "file": f.get("file"),
-                "line": line,
-                "origin": origin,
-                "claimed_origin": f.get("origin"),
-                "commit": commit,
-                "fix_round": fix_round,
-                "summary": f.get("summary", ""),
-                "scenario": f.get("scenario", ""),
-                "fix": f.get("fix", ""),
-            }
-        )
     c = counts(rows)
     run.update(meta)
     run.update(
