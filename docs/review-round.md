@@ -96,9 +96,9 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 - Otherwise it uses a short built-in method. `--method FILE` names another.
 - The script puts the commits and the diff in the prompt (past 200,000 characters, the `--stat` and a note to read the files).
 - The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob`, `--permission-mode dontAsk` and `--strict-mcp-config`. It has no shell, since git's own options can read and write any file.
-- Reads stay inside the repository: only `Read(/<repo root>/**)` is allowed, and in `dontAsk` mode a Read or Grep anywhere else is refused. A branch's text can't get the reviewer to quote a file from elsewhere into the PR comment.
+- The reviewer works in a copy of the branch's tracked files at HEAD (`git archive`), in a temporary folder removed afterwards. The copy has no `.git` and no untracked or ignored files, and each symlink is a note of where it pointed.
+- Reads stay inside that copy: only `Read(/<copy>/**)` is allowed, and in `dontAsk` mode a Read or Grep anywhere else is refused. So a branch's text can't get the reviewer to quote anything but the reviewed files into the PR comment.
 - A comment that can't be posted (no `gh`, a timeout) is logged as `post_error`; the run is still logged.
-- A tracked symlink that leads outside the repository stops the review (logged as an error, no round used), since the read limit checks the path asked for, not where it leads.
 - Findings come back as structured JSON (`--json-schema`). A reply without them is an error, not a clean round.
 - A severity other than high, medium or low counts as low; the raw value is kept as `raw_severity`.
 

@@ -273,6 +273,7 @@ smoke_review_round() {
     cat > "$t/claude" <<'FAKE'
 #!/bin/sh
 printf '%s\n' "$@" > "$(dirname "$0")/claude-args"
+{ pwd; [ -e .git ] && echo HAS-GIT; [ -L out ] && echo LINK; [ -f out ] && cat out; } > "$(dirname "$0")/claude-saw"
 [ -n "$SLOW" ] && sleep 1
 cat <<'JSON'
 {"session_id":"s1","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":5},
@@ -313,8 +314,10 @@ PY
         fail "review-round PR comment: $(cat "$t/comment.md" 2>/dev/null)"; failed=1
     fi
     if ! grep -q Bash "$t/claude-args" && grep -qx dontAsk "$t/claude-args" && grep -qx "Read,Grep,Glob" "$t/claude-args" \
-        && grep -qx -- --strict-mcp-config "$t/claude-args" && grep -qx "Read(/$t/repo/\*\*)" "$t/claude-args"; then
-        pass "review-round starts the reviewer read-only, inside the repository"
+        && grep -qx -- --strict-mcp-config "$t/claude-args" \
+        && grep -qx "Read(/$(head -1 "$t/claude-saw")/\*\*)" "$t/claude-args" \
+        && head -1 "$t/claude-saw" | grep -q "review-round-" && ! grep -q HAS-GIT "$t/claude-saw"; then
+        pass "review-round starts the reviewer read-only, in a copy of the tracked files"
     else
         fail "review-round origins (rc=$rc): $out"; failed=1
     fi
@@ -339,21 +342,32 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
-    # A symlink leading outside the repository stops the review
+    # A symlink is a note in the reviewer's copy, never followed; the copy is removed
     ln -s /etc/hostname "$t/repo/out" && "${g[@]}" -C "$t/repo" add out && "${g[@]}" -C "$t/repo" commit -q -m link
+    (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     out=$(cd "$t/repo" && "${rr[@]}" run --no-post 2>&1); rc=$?
     "${g[@]}" -C "$t/repo" reset -q --hard HEAD~1
-    if [[ $rc -eq 2 ]] && grep -q "symlinks lead outside the repository: out -> /etc/hostname" <<<"$out"; then
-        pass "review-round won't review a branch whose symlinks leave the repository"
+    if [[ $rc -eq 1 ]] && ! grep -q LINK "$t/claude-saw" \
+        && grep -q "a symlink to /etc/hostname, not followed" "$t/claude-saw" \
+        && [[ ! -e "$(head -1 "$t/claude-saw")" ]]; then
+        pass "review-round shows the reviewer symlinks as notes, and removes its copy"
     else
-        fail "review-round symlink (rc=$rc): $out"; failed=1
+        fail "review-round symlink (rc=$rc): $out / $(cat "$t/claude-saw")"; failed=1
+    fi
+
+    # An exit inside the run (here a missing --method file) still closes its line
+    out=$(cd "$t/repo" && "${rr[@]}" run --no-post --method "$t/no-such-method" 2>&1); rc=$?
+    if [[ $rc -eq 2 ]] && tail -1 "$t/log/runs.jsonl" | grep -q '"result": "error"'; then
+        pass "review-round closes the run when it exits early"
+    else
+        fail "review-round early exit (rc=$rc): $out"; failed=1
     fi
 
     # A reply with no findings data is an error, and errors use up no rounds
     printf '#!/bin/sh\necho "{\\"result\\": \\"no data\\"}"\n' > "$t/claude-bad"
     chmod +x "$t/claude-bad"
     out=$(cd "$t/repo" && "${rr[@]/#REVIEW_ROUND_CLAUDE=*/REVIEW_ROUND_CLAUDE=$t/claude-bad}" run 2>&1); rc=$?
-    if [[ $rc -eq 2 ]] && grep -q "round 4/4: error" <<<"$out"; then
+    if [[ $rc -eq 2 ]] && grep -q "round 5/5: error" <<<"$out"; then
         pass "review-round logs an empty reply as an error"
     else
         fail "review-round empty reply (rc=$rc): $out"; failed=1
@@ -371,7 +385,7 @@ PY
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p1" 2>&1) &
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p2" 2>&1) &
     wait
-    if cat "$t/p1" "$t/p2" | grep -q "round 4/6" && cat "$t/p1" "$t/p2" | grep -q "round 5/6"; then
+    if cat "$t/p1" "$t/p2" | grep -q "round 5/7" && cat "$t/p1" "$t/p2" | grep -q "round 6/7"; then
         pass "review-round gives parallel runs different rounds"
     else
         fail "review-round parallel: $(cat "$t/p1" "$t/p2")"; failed=1
@@ -387,7 +401,7 @@ PY
     fi
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
-    if [[ $rc -eq 1 ]] && grep -q "round 7/7" <<<"$out"; then
+    if [[ $rc -eq 1 ]] && grep -q "round 8/8" <<<"$out"; then
         pass "review-round runs again once a person allows it"
     else
         fail "review-round allow (rc=$rc): $out"; failed=1
@@ -405,8 +419,8 @@ PY
     "${rr[@]}" rotate --force >/dev/null
     "${rr[@]}" rotate --keep 1 >/dev/null
     after=$("${rr[@]}" stats 2>&1)
-    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 7 rounds" <<<"$before" \
-        && grep -q "Runs: 9 rounds" <<<"$after" && grep -q "Introduced by fixes: 8 of 25" <<<"$after"; then
+    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 8 rounds" <<<"$before" \
+        && grep -q "Runs: 10 rounds" <<<"$after" && grep -q "Introduced by fixes: 9 of 28" <<<"$after"; then
         pass "review-round rotate archives and keeps running totals"
     else
         fail "review-round rotate: before=[$before] after=[$after]"; failed=1

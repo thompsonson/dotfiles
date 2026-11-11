@@ -45,9 +45,12 @@ import gzip
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
 import uuid
 from pathlib import Path
@@ -350,26 +353,35 @@ def earlier_findings(info: dict) -> list[dict]:
     return found
 
 
-def escaping_links(root: str) -> list[str]:
-    """Tracked symlinks that lead outside the repository. The read limit checks the path
-    asked for, not where it leads, so a link could open any file."""
-    out = []
-    base = Path(root).resolve()
-    for line in git("ls-files", "-s").splitlines():
-        mode, _, rest = line.partition(" ")
-        if mode != "120000":
-            continue
-        path = rest.split("\t", 1)[-1]
-        target = (Path(root) / path).resolve()
-        if not target.is_relative_to(base):
-            out.append(f"{path} -> {target}")
-    return out
+@contextlib.contextmanager
+def snapshot(root: str):
+    """A copy of the tracked files at HEAD in a temporary folder: no .git, no untracked or
+    ignored files, and each symlink replaced by a note of where it pointed. The reviewer
+    reads only this, so nothing outside what is under review can reach a PR comment."""
+    tmp = Path(tempfile.mkdtemp(prefix="review-round-")).resolve()
+    try:
+        proc = subprocess.Popen(["git", "archive", "--format=tar", "HEAD"], cwd=root,
+                                stdout=subprocess.PIPE)
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
+            for m in tf:
+                if m.issym() or m.islnk():
+                    dest = tmp / m.name
+                    if dest.parent.resolve().is_relative_to(tmp):
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_text(f"(review-round: a symlink to {m.linkname}, not followed)\n")
+                elif m.isfile() or m.isdir():
+                    try:
+                        tf.extract(m, tmp, filter="data")
+                    except TypeError:  # Python before 3.11.4: no filters; git's paths are safe
+                        tf.extract(m, tmp)
+        if proc.wait() != 0:
+            raise RuntimeError("git archive HEAD failed")
+        yield tmp
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
 
 
 def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
-    links = escaping_links(info["root"])
-    if links:
-        raise RuntimeError("not reviewed: symlinks lead outside the repository: " + "; ".join(links[:5]))
     span = f"{info['merge_base']}..HEAD"
     log = git("log", "--format=%h %s%n%b", span)
     diff = git("diff", span)
@@ -382,7 +394,8 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
     prompt = f"""{method}
 
 ## This round
-- Repository: {info["repo"]}, checked out at {info["root"]}; paths are relative to it.
+- Repository: {info["repo"]}. Your working folder holds its tracked files at HEAD;
+  give paths relative to it.
 - Branch {info["branch"]} at {info["head"][:12]}, reviewed against {info["base"]}
   (merge base {info["merge_base"][:12]}).
 - This is review round {rnd}. Commits named "review round N" are earlier rounds' fixes;
@@ -417,14 +430,16 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         "--tools",
         "Read,Grep,Glob",
         "--allowedTools",
-        f"Read(/{info['root']}/**)",
+        "Read(/{snap}/**)",
         "--permission-mode",
         "dontAsk",
         "--strict-mcp-config",
     ]
     if model:
         cmd += ["--model", model]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    with snapshot(info["root"]) as snap:
+        cmd = [a.replace("{snap}", str(snap)) for a in cmd]
+        res = subprocess.run(cmd, capture_output=True, text=True, cwd=snap)
     if res.returncode != 0:
         raise RuntimeError(f"claude exited {res.returncode}: {res.stderr.strip()[:500]}")
     out = json.loads(res.stdout)
@@ -600,14 +615,18 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                     "fix": f.get("fix", ""),
                 }
             )
-    except Exception as e:  # the run is still recorded, and its round freed
-        run.update(result="error", error=str(e)[:500], ended=now(), counts=counts([]), fix_rounds=[])
+    except BaseException as e:  # the run is still recorded, and its round freed
+        reason = f"exit {e.code}" if isinstance(e, SystemExit) else str(e) or type(e).__name__
+        run.update(result="error", error=reason[:500], ended=now(), counts=counts([]), fix_rounds=[])
         run["seconds"] = round(time.monotonic() - start, 1)
         post(args, run, [])
         with locked():
             append(RUNS, [run])
         print(summary_line(run))
-        print(f"review-round: {e}", file=sys.stderr)
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        if not isinstance(e, SystemExit):
+            print(f"review-round: {e}", file=sys.stderr)
         return 2
     c = counts(rows)
     run.update(meta)
