@@ -23,6 +23,17 @@ Runs one code-review round on a branch, and keeps a record of every run.
 `run` and `record` work in the current git checkout.
 Both print each finding and a one-line summary; agents relay that line to the person in charge.
 
+## The pull request comment
+
+With `--pr N`, each round comments on the pull request, refusals and errors included:
+
+- the summary line;
+- one table row per finding: severity, origin, file and line, summary;
+- the run id, head commit, agent, reviewer, time and cost.
+
+The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).
+`--no-post` skips the comment.
+
 Exit codes: 0 no high findings, 1 high findings, 2 error, 3 refused (over the limit).
 
 ## Origins
@@ -44,7 +55,9 @@ The summary says how many origins the two disagree on.
 ## The limit
 
 - A branch may run `REVIEW_ROUND_LIMIT` rounds (default 3).
+- Only rounds that reviewed count; a refusal or an error uses none up.
 - The next round is the highest round recorded plus one, so imported rounds count.
+- `record --round N` can't use a number already recorded.
 - Past the limit, `run` and `record` log a `refused` line and exit 3.
 - `allow` adds rounds, and records who allowed them.
 - The limit makes loops visible; it is not security. An agent could run `allow` itself, and the log would show that.
@@ -69,10 +82,12 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 
 ## The review
 
-- `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` in the repo, then in `~/.claude`.
+- `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` on the base branch, then in `~/.claude`.
+- The repo's copy is read from the base branch, so a branch can't rewrite its own review rules.
 - Otherwise it uses a short built-in method. `--method FILE` names another.
 - The reviewer may read files and run `git diff`, `log`, `show` and `blame` only.
-- Findings come back as structured JSON (`--json-schema`).
+- Findings come back as structured JSON (`--json-schema`). A reply without them is an error, not a clean round.
+- A severity other than high, medium or low counts as low; the raw value is kept as `raw_severity`.
 
 ## Environment
 
@@ -83,6 +98,7 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 | `REVIEW_ROUND_LIMIT` | `3` |
 | `REVIEW_ROUND_AGENT` | `$USER@host` |
 | `REVIEW_ROUND_MAX_MB` | `5` |
+| `REVIEW_ROUND_GH` | `gh` |
 
 ## Tests
 

@@ -281,8 +281,15 @@ cat <<'JSON'
 JSON
 FAKE
     chmod +x "$t/claude"
-    local rr=(env REVIEW_ROUND_HOME="$t/log" REVIEW_ROUND_CLAUDE="$t/claude"
-              REVIEW_ROUND_AGENT=smoke REVIEW_ROUND_LIMIT=2 python3 "$script")
+    # Fake gh: keeps the comment body, prints a comment address
+    cat > "$t/gh" <<FAKE
+#!/bin/sh
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/7#issuecomment-1"
+FAKE
+    chmod +x "$t/gh"
+    local rr=(env REVIEW_ROUND_HOME="$t/log" REVIEW_ROUND_CLAUDE="$t/claude" REVIEW_ROUND_GH="$t/gh"
+              REVIEW_ROUND_AGENT=smoke REVIEW_ROUND_LIMIT=2 python3 -B "$script")
 
     local out rc
     out=$(cd "$t/repo" && "${rr[@]}" run --pr 7 2>&1); rc=$?
@@ -296,6 +303,29 @@ PY
         pass "review-round tags pre-existing, original and fix findings"
     else
         fail "review-round origins (rc=$rc): $out"; failed=1
+    fi
+    if grep -q "round 1/2" "$t/comment.md" && grep -q "| high | fix (round 1) |" "$t/comment.md" \
+        && grep -q '"posted": "https://github.com/o/r/pull/7#issuecomment-1"' "$t/log/runs.jsonl"; then
+        pass "review-round comments on the PR and logs the comment"
+    else
+        fail "review-round origins (rc=$rc): $out"; failed=1
+    fi
+
+    # A reply with no findings data is an error, and errors use up no rounds
+    printf '#!/bin/sh\necho "{\\"result\\": \\"no data\\"}"\n' > "$t/claude-bad"
+    chmod +x "$t/claude-bad"
+    out=$(cd "$t/repo" && "${rr[@]/#REVIEW_ROUND_CLAUDE=*/REVIEW_ROUND_CLAUDE=$t/claude-bad}" run 2>&1); rc=$?
+    if [[ $rc -eq 2 ]] && grep -q "round 2/2: error" <<<"$out"; then
+        pass "review-round logs an empty reply as an error"
+    else
+        fail "review-round empty reply (rc=$rc): $out"; failed=1
+    fi
+    printf '[]' > "$t/none.json"
+    out=$(cd "$t/repo" && "${rr[@]}" record --findings "$t/none.json" --round 1 2>&1); rc=$?
+    if [[ $rc -eq 2 ]] && grep -q "already recorded" <<<"$out"; then
+        pass "review-round won't record a round number already used"
+    else
+        fail "review-round record --round (rc=$rc): $out"; failed=1
     fi
 
     printf '[{"severity":"low","summary":"r","scenario":"x"}]' > "$t/f.json"
@@ -321,9 +351,13 @@ PY
     (cd "$t/repo" && "${rr[@]}" run >/dev/null 2>&1)
     "${rr[@]}" rotate --force >/dev/null
     "${rr[@]}" rotate --keep 1 >/dev/null
+    (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
+    (cd "$t/repo" && "${rr[@]}" run >/dev/null 2>&1)
+    "${rr[@]}" rotate --force >/dev/null
+    "${rr[@]}" rotate --keep 1 >/dev/null
     after=$("${rr[@]}" stats 2>&1)
     if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 3 rounds" <<<"$before" \
-        && grep -q "Runs: 4 rounds" <<<"$after" && grep -q "Introduced by fixes: 3 of 10" <<<"$after"; then
+        && grep -q "Runs: 5 rounds" <<<"$after" && grep -q "Introduced by fixes: 4 of 13" <<<"$after"; then
         pass "review-round rotate archives and keeps running totals"
     else
         fail "review-round rotate: before=[$before] after=[$after]"; failed=1

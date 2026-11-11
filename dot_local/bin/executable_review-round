@@ -11,7 +11,8 @@ Each round:
                      (a commit whose subject says "review round N")
       unknown        no file or line, or the line can't be blamed
   - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
-  - prints a one-line summary for the person in charge.
+  - prints a one-line summary for the person in charge, and with --pr puts it, with one
+    line per finding, in a comment on the pull request (--no-post to skip).
 
 After a set number of rounds on one branch (default 3) it stops until a person
 allows more with `review-round allow`, so no agent loops unseen.
@@ -33,6 +34,7 @@ Environment:
   REVIEW_ROUND_LIMIT   rounds allowed per branch before asking (default 3)
   REVIEW_ROUND_AGENT   who is running it (default $USER@host)
   REVIEW_ROUND_MAX_MB  rotate a log once it passes this size (default 5)
+  REVIEW_ROUND_GH      the gh command, for PR comments (default gh)
 """
 
 import argparse
@@ -176,7 +178,7 @@ def carry(name: str, path: Path) -> None:
                     tally[key] = tally.get(key, 0) + 1
                     cost_key = (row.get("repo"), row.get("branch"), "cost")
                     tally[cost_key] = tally.get(cost_key, 0) + (row.get("cost_usd") or 0)
-                    if row.get("result") != "refused":
+                    if row.get("result") in ("clean", "findings"):
                         top = (row.get("repo"), row.get("branch"), "max_round")
                         tally[top] = max(tally.get(top, 0), row.get("round") or 0)
                 else:
@@ -221,12 +223,16 @@ def rotate(force: bool = False, keep: int | None = None) -> list[tuple[str, Path
 # ── The branch under review ───────────────────────────────────────────────────
 
 
+def repo_name(root: str) -> str:
+    remote = git("remote", "get-url", "origin", check=False)
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", remote)
+    return m.group(1) if m else Path(root).name
+
+
 def branch_info(base: str | None) -> dict:
     root = git("rev-parse", "--show-toplevel")
     os.chdir(root)
-    remote = git("remote", "get-url", "origin", check=False)
-    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", remote)
-    repo = m.group(1) if m else Path(root).name
+    repo = repo_name(root)
     branch = git("rev-parse", "--abbrev-ref", "HEAD")
     if not base:
         default = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
@@ -245,12 +251,14 @@ def branch_info(base: str | None) -> dict:
 def rounds_so_far(repo: str, branch: str) -> int:
     runs = [r for r in read_rows("runs") if r.get("repo") == repo and r.get("branch") == branch]
     carried = load_carried()["runs"]
+    # Only rounds that reviewed count: a refusal or an error uses up nothing
+    counted = [r for r in runs if r.get("result") in ("clean", "findings")]
     pruned = sum(n for rp, br, res, n in carried
-                 if rp == repo and br == branch and res not in ("refused", "cost", "max_round"))
+                 if rp == repo and br == branch and res in ("clean", "findings"))
     top = max([n for rp, br, res, n in carried if rp == repo and br == branch and res == "max_round"]
-              + [r.get("round", 0) for r in runs if r.get("result") != "refused"] + [0])
+              + [r.get("round", 0) for r in counted] + [0])
     # The highest round seen, so imported past rounds (record --round) count in full
-    return max(top, pruned + sum(1 for r in runs if r.get("result") != "refused"))
+    return max(top, pruned + len(counted))
 
 
 def allowed(repo: str, branch: str) -> int:
@@ -296,17 +304,20 @@ def agent_name(arg: str | None) -> str:
 # ── Reviewing ─────────────────────────────────────────────────────────────────
 
 
-def find_method(root: str, arg: str | None) -> tuple[str, str]:
-    candidates = [Path(arg)] if arg else []
-    candidates += [
-        Path(root) / ".claude/skills/pr-review/SKILL.md",
-        Path.home() / ".claude/skills/pr-review/SKILL.md",
-    ]
-    for p in candidates:
-        if p.is_file():
-            return p.read_text(), str(p)
+def find_method(info: dict, arg: str | None) -> tuple[str, str]:
+    """The review method. The repo's copy is read from the base branch, so the branch
+    under review can't rewrite its own review rules."""
     if arg:
-        die(f"no method file at {arg}")
+        if not Path(arg).is_file():
+            die(f"no method file at {arg}")
+        return Path(arg).read_text(), arg
+    skill = ".claude/skills/pr-review/SKILL.md"
+    res = subprocess.run(["git", "show", f"{info['merge_base']}:{skill}"], capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout, f"{info['base']}:{skill}"
+    home = Path.home() / skill
+    if home.is_file():
+        return home.read_text(), str(home)
     return DEFAULT_METHOD, "built-in"
 
 
@@ -343,7 +354,11 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
     if data is None:
         text = out.get("result", "")
         m = re.search(r"\{.*\}", text, re.DOTALL)
-        data = json.loads(m.group(0)) if m else {"findings": []}
+        if not m:
+            raise RuntimeError("the reviewer returned no findings data")
+        data = json.loads(m.group(0))
+    if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
+        raise RuntimeError("the reviewer's findings data has no findings list")
     usage = out.get("usage") or {}
     meta = {
         "reviewer": "claude -p" + (f" --model {model}" if model else ""),
@@ -351,6 +366,8 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         "cost_usd": out.get("total_cost_usd"),
         "tokens_in": usage.get("input_tokens"),
         "tokens_out": usage.get("output_tokens"),
+        "tokens_cache_read": usage.get("cache_read_input_tokens"),
+        "tokens_cache_write": usage.get("cache_creation_input_tokens"),
     }
     return list(data.get("findings", [])), meta
 
@@ -377,13 +394,57 @@ def summary_line(run: dict) -> str:
     )
 
 
+def comment_body(run: dict, rows: list[dict]) -> str:
+    """A short audit note for the pull request: the summary, one line per finding."""
+    lines = [f"**review-round** · {summary_line(run).split(': ', 1)[1]}"]
+    if run.get("error"):
+        lines += ["", f"Error: {run['error'][:300]}"]
+    if rows:
+        lines += ["", "| severity | origin | where | finding |", "|---|---|---|---|"]
+        for r in rows:
+            tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
+            if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
+                tag += f" (reviewer: {r['claimed_origin']})"
+            where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
+            text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
+            lines.append(f"| {r['severity']} | {tag} | {where} | {text[:300]} |")
+    bits = [f"run `{run['run_id']}`", f"head `{run['head'][:7]}`", f"by {run.get('agent')}"]
+    if run.get("reviewer"):
+        bits.append(f"reviewer {run['reviewer']}" + (f" ({run['method']})" if run.get("method") else ""))
+    if run.get("seconds") is not None:
+        bits.append(f"{run['seconds']:.0f} s")
+    if run.get("cost_usd"):
+        bits.append(f"${run['cost_usd']:.2f}")
+    lines += ["", "<sub>" + " · ".join(bits) + "</sub>"]
+    return "\n".join(lines)
+
+
+def post(args, run: dict, rows: list[dict]) -> None:
+    """Comment on the pull request, when one is named; the run records the outcome."""
+    if not run.get("pr") or getattr(args, "no_post", False):
+        return
+    res = subprocess.run(
+        [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "comment", str(run["pr"]),
+         "--repo", run["repo"], "--body-file", "-"],
+        input=comment_body(run, rows), capture_output=True, text=True,
+    )
+    if res.returncode == 0:
+        run["posted"] = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else True
+    else:
+        run["post_error"] = res.stderr.strip()[:300]
+        print(f"review-round: could not comment on PR {run['pr']}: {run['post_error']}", file=sys.stderr)
+
+
 def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     info = branch_info(args.base)
     with locked():
         rotate()
         done = rounds_so_far(info["repo"], info["branch"])
         limit = allowed(info["repo"], info["branch"])
-    rnd = getattr(args, "round", None) or done + 1
+    given = getattr(args, "round", None)
+    if given is not None and given <= done:
+        die(f"round {given} is already recorded on {info['branch']} (rounds so far: {done})")
+    rnd = given or done + 1
     run = {
         "run_id": uuid.uuid4().hex[:12],
         "started": now(),
@@ -400,6 +461,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     }
     if rnd > limit:
         run.update(result="refused", ended=now(), counts=counts([]), fix_rounds=[])
+        post(args, run, [])
         with locked():
             append(RUNS, [run])
         print(summary_line(run))
@@ -412,12 +474,13 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     start = time.monotonic()
     try:
         if findings_in is None:
-            method, method_src = find_method(info["root"], getattr(args, "method", None))
+            method, method_src = find_method(info, getattr(args, "method", None))
             findings_in, extra = review(info, rnd, method, getattr(args, "model", None))
             meta = {**meta, **extra, "method": method_src}
     except Exception as e:  # the run is still recorded
         run.update(result="error", error=str(e)[:500], ended=now(), counts=counts([]), fix_rounds=[])
         run["seconds"] = round(time.monotonic() - start, 1)
+        post(args, run, [])
         with locked():
             append(RUNS, [run])
         print(summary_line(run))
@@ -425,6 +488,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         return 2
     rows = []
     for f in findings_in:
+        raw_sev = str(f.get("severity", "")).strip()
+        sev = raw_sev.lower() if raw_sev.lower() in SEVERITIES else "low"
         line = f.get("line")
         line = int(line) if isinstance(line, (int, str)) and str(line).isdigit() else None
         origin, commit, fix_round = origin_of(info, f.get("file"), line)
@@ -434,7 +499,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                 "repo": info["repo"],
                 "branch": info["branch"],
                 "round": rnd,
-                "severity": f.get("severity", "low"),
+                "severity": sev,
+                "raw_severity": raw_sev if raw_sev != sev else None,
                 "file": f.get("file"),
                 "line": line,
                 "origin": origin,
@@ -456,6 +522,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
     )
+    post(args, run, rows)
     with locked():
         append(RUNS, [run])
         append(FINDINGS, rows)
@@ -466,6 +533,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             tag += f" [reviewer: {r['claimed_origin']}]"
         print(f"  {r['severity']:<6} {tag:<16} {where}  {r['summary']}")
     print(summary_line(run))
+    if run.get("posted"):
+        print(f"review-round: posted {run['posted']}")
     return 1 if c["high"] and sum(c["high"].values()) else 0
 
 
@@ -477,8 +546,13 @@ def cmd_run(args) -> int:
 
 
 def cmd_record(args) -> int:
-    data = json.loads(Path(args.findings).read_text())
-    found = data["findings"] if isinstance(data, dict) else data
+    try:
+        data = json.loads(Path(args.findings).read_text())
+        found = data["findings"] if isinstance(data, dict) else data
+        if not isinstance(found, list):
+            raise ValueError("not a list")
+    except (OSError, ValueError, KeyError) as e:
+        die(f"{args.findings}: expected {{\"findings\": [...]}} or a list ({e})")
     return do_round(args, found, {"reviewer": args.reviewer or "recorded"})
 
 
@@ -512,22 +586,24 @@ def cmd_status(args) -> int:
 def cmd_stats(args) -> int:
     finds = [f for f in read_rows("findings") if not args.repo or f.get("repo") == args.repo]
     runs = [r for r in read_rows("runs") if not args.repo or r.get("repo") == args.repo]
-    done = [r for r in runs if r.get("result") not in ("refused",)]
+    done = [r for r in runs if r.get("result") in ("clean", "findings")]
     c = counts(finds)
     carried = load_carried()
     for rp, sev, origin, n in carried["findings"]:
         if (not args.repo or rp == args.repo) and sev in c and origin in c[sev]:
             c[sev][origin] += n
-    old = {(rp, br, res): n for rp, br, res, n in carried["runs"] if not args.repo or rp == args.repo}
-    n_done = len(done) + sum(
-        n for (_, _, res), n in old.items() if res not in ("refused", "cost", "max_round"))
+    old: dict[tuple, float] = {}
+    for rp, br, res, n in carried["runs"]:
+        if (not args.repo or rp == args.repo) and res != "max_round":
+            old[(rp, br, res)] = old.get((rp, br, res), 0) + n
+    n_done = len(done) + sum(n for (_, _, res), n in old.items() if res in ("clean", "findings"))
     n_refused = sum(1 for r in runs if r.get("result") == "refused") + sum(
         n for (_, _, res), n in old.items() if res == "refused")
     n_error = sum(1 for r in runs if r.get("result") == "error") + sum(
         n for (_, _, res), n in old.items() if res == "error")
     branches = {(r.get("repo"), r.get("branch")) for r in done} | {(rp, br) for rp, br, _ in old}
     print(f"Runs: {n_done} rounds on {len(branches)} branches ({n_refused} refused, {n_error} errors)")
-    cost = sum(r.get("cost_usd") or 0 for r in done) + sum(
+    cost = sum(r.get("cost_usd") or 0 for r in runs) + sum(
         n for (_, _, res), n in old.items() if res == "cost")
     if cost:
         print(f"Cost: ${cost:.2f}")
@@ -545,8 +621,7 @@ def cmd_stats(args) -> int:
 def cmd_allow(args) -> int:
     repo = args.repo
     if not repo:
-        info = branch_info(None)
-        repo = info["repo"]
+        repo = repo_name(git("rev-parse", "--show-toplevel"))
     row = {"at": now(), "repo": repo, "branch": args.branch, "rounds": args.n,
            "by": args.by or agent_name(None)}
     with locked():
@@ -575,6 +650,7 @@ def main() -> int:
         sp.add_argument("--base", help="branch to compare with (default origin's HEAD)")
         sp.add_argument("--pr", type=int, help="pull request number, for the record")
         sp.add_argument("--agent", help="who is running the round")
+        sp.add_argument("--no-post", action="store_true", help="don't comment on the pull request")
 
     r = sub.add_parser("run", help="review the current branch with claude -p")
     common(r)
