@@ -416,30 +416,32 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
 {diff}
 ```
 """
-    cmd = [
-        os.environ.get("REVIEW_ROUND_CLAUDE", "claude"),
-        "-p",
-        prompt,
-        "--output-format",
-        "json",
-        "--json-schema",
-        json.dumps(FINDINGS_SCHEMA),
-        # Read-only, whatever the user's settings: no shell (git's own options can
-        # write files), only these tools exist, reads stay inside the repository (the
-        # findings go to a PR comment), nothing else runs, no MCP servers load
-        "--tools",
-        "Read,Grep,Glob",
-        "--allowedTools",
-        "Read(/{snap}/**)",
-        "--permission-mode",
-        "dontAsk",
-        "--strict-mcp-config",
-    ]
-    if model:
-        cmd += ["--model", model]
     with snapshot(info["root"]) as snap:
-        cmd = [a.replace("{snap}", str(snap)) for a in cmd]
-        res = subprocess.run(cmd, capture_output=True, text=True, cwd=snap)
+        cmd = [
+            os.environ.get("REVIEW_ROUND_CLAUDE", "claude"),
+            "-p",  # the prompt goes on stdin: a big diff overflows one argument
+            "--output-format",
+            "json",
+            "--json-schema",
+            json.dumps(FINDINGS_SCHEMA),
+            # Read-only, whatever the user's settings: no shell (git's own options can
+            # write files), only these tools exist, reads stay inside the copy (the
+            # findings go to a PR comment), nothing else runs, no MCP servers load
+            "--tools",
+            "Read,Grep,Glob",
+            "--allowedTools",
+            f"Read(/{snap}/**)",
+            "--permission-mode",
+            "dontAsk",
+            "--strict-mcp-config",
+            # No settings files: the branch's own .claude/settings.json could hold hooks,
+            # which run commands; and the user's CLAUDE.md stays out of a PR comment
+            "--setting-sources",
+            "",
+        ]
+        if model:
+            cmd += ["--model", model]
+        res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=snap)
     if res.returncode != 0:
         raise RuntimeError(f"claude exited {res.returncode}: {res.stderr.strip()[:500]}")
     out = json.loads(res.stdout)

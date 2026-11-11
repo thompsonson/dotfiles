@@ -273,6 +273,7 @@ smoke_review_round() {
     cat > "$t/claude" <<'FAKE'
 #!/bin/sh
 printf '%s\n' "$@" > "$(dirname "$0")/claude-args"
+cat > "$(dirname "$0")/claude-prompt"
 { pwd; [ -e .git ] && echo HAS-GIT; [ -L out ] && echo LINK; [ -f out ] && cat out; } > "$(dirname "$0")/claude-saw"
 [ -n "$SLOW" ] && sleep 1
 cat <<'JSON'
@@ -313,7 +314,9 @@ PY
     else
         fail "review-round PR comment: $(cat "$t/comment.md" 2>/dev/null)"; failed=1
     fi
-    if ! grep -q Bash "$t/claude-args" && grep -qx dontAsk "$t/claude-args" && grep -qx "Read,Grep,Glob" "$t/claude-args" \
+    if ! grep -q Bash "$t/claude-args" && grep -qx dontAsk "$t/claude-args" \
+        && grep -A1 -x -- --setting-sources "$t/claude-args" | tail -1 | grep -qx "" \
+        && grep -q "## Diff" "$t/claude-prompt" && grep -qx "Read,Grep,Glob" "$t/claude-args" \
         && grep -qx -- --strict-mcp-config "$t/claude-args" \
         && grep -qx "Read(/$(head -1 "$t/claude-saw")/\*\*)" "$t/claude-args" \
         && head -1 "$t/claude-saw" | grep -q "review-round-" && ! grep -q HAS-GIT "$t/claude-saw"; then
@@ -325,7 +328,7 @@ PY
     # Round 2 sees round 1's findings by id, and a repeat shows in the comment
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     (cd "$t/repo" && "${rr[@]}" run --pr 7 >/dev/null 2>&1)
-    if grep -q -- "- r1.3 \[high\] f.txt: fixbug" "$t/claude-args" \
+    if grep -q -- "- r1.3 \[high\] f.txt: fixbug" "$t/claude-prompt" \
         && grep -q "| r2.3 | high | fix (round 1) | r1.3 |" "$t/comment.md"; then
         pass "review-round shows earlier findings and marks repeats"
     else
