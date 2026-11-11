@@ -84,6 +84,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
 - `dot_local/bin/executable_opencode-vacuum`: Reclaims dead space from `~/.local/share/opencode/opencode.db` (SQLite doesn't auto-compact); refuses to run while opencode is active unless `--kill` is passed
 - `dot_local/bin/executable_claude-tmp-clean`: Removes idle Claude Code session folders under `/tmp/claude-<uid>`; dry run unless `--delete`; daily user timer `claude-tmp-clean.timer` (installed, not enabled)
+- `dot_local/bin/executable_review-round`: Runs one code-review round with `claude -p` or records one done elsewhere; tags each finding pre-existing, original or introduced by a fix (git blame); logs every run to `~/.local/share/review-round/`; stops after 3 rounds per branch until a person runs `review-round allow`
 - `dot_local/bin/executable_wol`: Wake-on-LAN sender + reachability poller (name → MAC/IP registry, magic packet, poll-ping)
 
 ### Backup
@@ -176,6 +177,7 @@ Detailed usage guides are in `docs/`:
 - [`docs/sysmon.md`](docs/sysmon.md) — System health monitor reference
 - [`docs/sysbak.md`](docs/sysbak.md) — Backup manager reference
 - [`docs/claude-tmp-clean.md`](docs/claude-tmp-clean.md) — Idle Claude Code session temp folder cleaner
+- [`docs/review-round.md`](docs/review-round.md) — Code-review rounds with a run log, finding origins and a round limit
 - [`docs/wol.md`](docs/wol.md) — Wake-on-LAN sender + reachability poller reference
 - [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage

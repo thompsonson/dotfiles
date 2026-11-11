@@ -1,0 +1,818 @@
+#!/usr/bin/env python3
+"""review-round - run one code-review round on a branch, and keep a record of every run.
+
+Each round:
+  - reviews the branch's diff against its base with `claude -p`, or records findings
+    from a review done elsewhere (`record`);
+  - tags each finding with its origin, using git blame on the flagged line:
+      pre-existing   the line is already on the base branch
+      original       the line came from the branch's own build
+      fix            the line came from an earlier round's fix commit
+                     (a commit whose subject says "review round N")
+      unknown        no file or line, or the line can't be blamed
+  - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
+  - prints a one-line summary for the person in charge, and with --pr puts it, with one
+    line per finding, in a comment on the pull request (--no-post to skip).
+
+After a set number of rounds on one branch (default 3) it stops until a person
+allows more with `review-round allow`, so no agent loops unseen.
+
+Usage:
+  review-round run    [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
+  review-round record --findings FILE [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
+  review-round status [--all]
+  review-round stats  [--repo NAME]
+  review-round allow  BRANCH N [--repo NAME] [--by NAME]
+  review-round rotate [--keep N] [--force]
+
+Run and record work in the current git checkout. Fix commits must name their round,
+e.g. "fix(app): review round 2 - ...", so later rounds can tell what a fix introduced.
+
+Environment:
+  REVIEW_ROUND_HOME    log folder (default ~/.local/share/review-round)
+  REVIEW_ROUND_CLAUDE  the claude command (default claude)
+  REVIEW_ROUND_LIMIT   rounds allowed per branch before asking (default 3)
+  REVIEW_ROUND_AGENT   who is running it (default $USER@host)
+  REVIEW_ROUND_MAX_MB  rotate a log once it passes this size (default 5)
+  REVIEW_ROUND_GH      the gh command, for PR comments (default gh)
+"""
+
+import argparse
+import contextlib
+import datetime as dt
+import fcntl
+import gzip
+import json
+import os
+import re
+import shutil
+import socket
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import uuid
+from pathlib import Path
+
+VERSION = "1.0.0"
+HOME = Path(os.environ.get("REVIEW_ROUND_HOME", Path.home() / ".local/share/review-round"))
+RUNS = HOME / "runs.jsonl"
+FINDINGS = HOME / "findings.jsonl"
+ALLOWS = HOME / "allows.jsonl"
+CARRIED = HOME / "carried.json"  # totals of archives pruned by rotate --keep
+ARCHIVE = HOME / "archive"
+LOCK = HOME / ".lock"
+LIMIT = int(os.environ.get("REVIEW_ROUND_LIMIT", "3"))
+MAX_BYTES = float(os.environ.get("REVIEW_ROUND_MAX_MB", "5")) * 1024 * 1024
+SEVERITIES = ("high", "medium", "low")
+ORIGINS = ("pre-existing", "original", "fix", "unknown")
+FIX_SUBJECT = re.compile(r"review round (\d+)", re.IGNORECASE)
+
+FINDINGS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "severity": {"enum": list(SEVERITIES)},
+                    "file": {"type": "string"},
+                    "line": {"type": "integer"},
+                    "summary": {"type": "string"},
+                    "scenario": {"type": "string"},
+                    "fix": {"type": "string"},
+                    "origin": {
+                        "enum": ["pre-existing", "original", "fix"],
+                        "description": "where you judge the defect came from",
+                    },
+                    "repeat_of": {
+                        "type": "string",
+                        "description": "id of an earlier round's finding this is the same "
+                        "defect as, or what an incomplete fix left (e.g. r2.1)",
+                    },
+                },
+                "required": ["severity", "summary", "scenario"],
+            },
+        }
+    },
+    "required": ["findings"],
+}
+
+DEFAULT_METHOD = """\
+Review the diff for correctness and security bugs.
+- Read what the change is for first (commit messages, linked issue), then the diff.
+- For each finding, state a concrete failure: which input or state gives which wrong result.
+- Re-read the line in the file before reporting it; give the file path relative to the
+  repository root and the line in the current file.
+- Severity: high = wrong result, broken feature, lost data or input, or a security hole;
+  medium = confusing or partial breakage; low = polish.
+- Merge findings that share one cause. Name the fix.
+- Say where each defect came from: pre-existing (already on the base branch), original
+  (the branch's first build), or fix (an earlier review round's fix commit).
+- Do not edit files.
+"""
+
+
+def now() -> str:
+    return dt.datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def die(msg: str, code: int = 2) -> None:
+    print(f"review-round: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def git(*args: str, check: bool = True) -> str:
+    res = subprocess.run(["git", *args], capture_output=True, text=True)
+    if check and res.returncode != 0:
+        die(f"git {' '.join(args)}: {res.stderr.strip()}")
+    return res.stdout.strip()
+
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+
+
+@contextlib.contextmanager
+def locked():
+    HOME.mkdir(parents=True, exist_ok=True)
+    with open(LOCK, "w") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def append(path: Path, rows: list[dict]) -> None:
+    with open(path, "a") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def read_rows(name: str, archived: bool = True) -> list[dict]:
+    """Rows of a log, oldest first, from the archive and the live file."""
+    paths = sorted(ARCHIVE.glob(f"{name}-*.jsonl.gz")) if archived and ARCHIVE.is_dir() else []
+    live = HOME / f"{name}.jsonl"
+    rows: list[dict] = []
+    for p in [*paths, live]:
+        if not p.exists():
+            continue
+        opener = gzip.open if p.suffix == ".gz" else open
+        with opener(p, "rt") as fh:
+            for line in fh:
+                line = line.strip()
+                if line:
+                    with contextlib.suppress(json.JSONDecodeError):
+                        rows.append(json.loads(line))
+    return rows
+
+
+def load_carried() -> dict:
+    if CARRIED.exists():
+        with contextlib.suppress(json.JSONDecodeError):
+            return json.loads(CARRIED.read_text())
+    return {"runs": [], "findings": []}
+
+
+def carry(name: str, path: Path) -> None:
+    """Fold a pruned archive's counts into carried.json, so running totals stay whole."""
+    data = load_carried()
+    tally: dict[tuple, int] = {}
+    with gzip.open(path, "rt") as fh:
+        for line in fh:
+            with contextlib.suppress(json.JSONDecodeError):
+                row = json.loads(line)
+                if name == "runs":
+                    key = (row.get("repo"), row.get("branch"), row.get("result"))
+                    tally[key] = tally.get(key, 0) + 1
+                    cost_key = (row.get("repo"), row.get("branch"), "cost")
+                    tally[cost_key] = tally.get(cost_key, 0) + (row.get("cost_usd") or 0)
+                    if row.get("result") in ("clean", "findings"):
+                        top = (row.get("repo"), row.get("branch"), "max_round")
+                        tally[top] = max(tally.get(top, 0), row.get("round") or 0)
+                else:
+                    key = (row.get("repo"), row.get("severity"), row.get("origin"))
+                    tally[key] = tally.get(key, 0) + 1
+    for key, n in tally.items():
+        data[name].append([*key, n])
+    tmp = CARRIED.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data))
+    tmp.replace(CARRIED)
+
+
+def rotate(force: bool = False, keep: int | None = None) -> list[tuple[str, Path]]:
+    """Move live logs over MAX_BYTES (or all, with force) into the archive, gzipped."""
+    moved: list[tuple[str, Path]] = []
+    ARCHIVE.mkdir(parents=True, exist_ok=True)
+    for live in (RUNS, FINDINGS, ALLOWS):
+        if not live.exists() or live.stat().st_size == 0:
+            continue
+        if not force and live.stat().st_size < MAX_BYTES:
+            continue
+        # Microseconds keep names unique and in order; never overwrite an archive
+        dest = ARCHIVE / f"{live.stem}-{dt.datetime.now():%Y%m%dT%H%M%S%f}.jsonl.gz"
+        while dest.exists():
+            time.sleep(0.001)
+            dest = ARCHIVE / f"{live.stem}-{dt.datetime.now():%Y%m%dT%H%M%S%f}.jsonl.gz"
+        with open(live, "rb") as src, gzip.open(dest, "wb") as out:
+            out.write(src.read())
+        live.unlink()
+        moved.append(("archived", dest))
+    if keep is not None:
+        # allows are never pruned: they set how many rounds a branch may run
+        for name in ("runs", "findings"):
+            old = sorted(ARCHIVE.glob(f"{name}-*.jsonl.gz"))
+            for p in old[: max(0, len(old) - keep)]:
+                carry(name, p)
+                p.unlink()
+                moved.append(("removed", p))
+    return moved
+
+
+# ── The branch under review ───────────────────────────────────────────────────
+
+
+def repo_name(root: str) -> str:
+    remote = git("remote", "get-url", "origin", check=False)
+    m = re.search(r"[:/]([^/:]+/[^/]+?)(?:\.git)?$", remote)
+    return m.group(1) if m else Path(root).name
+
+
+def branch_info(base: str | None) -> dict:
+    root = git("rev-parse", "--show-toplevel")
+    os.chdir(root)
+    repo = repo_name(root)
+    branch = git("rev-parse", "--abbrev-ref", "HEAD")
+    if not base:
+        default = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD", check=False)
+        base = default or "origin/main"
+    merge_base = git("merge-base", base, "HEAD")
+    return {
+        "root": root,
+        "repo": repo,
+        "branch": branch,
+        "base": base,
+        "merge_base": merge_base,
+        "head": git("rev-parse", "HEAD"),
+    }
+
+
+def latest_runs() -> list[dict]:
+    """One row per run: a run logs a "running" row when it starts and its result when done."""
+    by_id: dict[str, dict] = {}
+    for r in read_rows("runs"):
+        by_id[r.get("run_id") or uuid.uuid4().hex] = r
+    return list(by_id.values())
+
+
+def rounds_so_far(repo: str, branch: str) -> int:
+    runs = [r for r in latest_runs() if r.get("repo") == repo and r.get("branch") == branch]
+    carried = load_carried()["runs"]
+    # Only rounds that reviewed count: a refusal or an error uses up nothing
+    # A running round holds its number, so a parallel run takes the next one
+    counted = [r for r in runs if r.get("result") in ("clean", "findings", "running")]
+    pruned = sum(n for rp, br, res, n in carried
+                 if rp == repo and br == branch and res in ("clean", "findings"))
+    top = max([n for rp, br, res, n in carried if rp == repo and br == branch and res == "max_round"]
+              + [r.get("round", 0) for r in counted] + [0])
+    # The highest round seen, so imported past rounds (record --round) count in full
+    return max(top, pruned + len(counted))
+
+
+def allowed(repo: str, branch: str) -> int:
+    extra = sum(
+        int(a.get("rounds", 0))
+        for a in read_rows("allows")
+        if a.get("repo") == repo and a.get("branch") == branch
+    )
+    return LIMIT + extra
+
+
+def origin_of(info: dict, path: str | None, line: int | None) -> tuple[str, str | None, int | None]:
+    """Origin of a flagged line: (origin, commit, fix round)."""
+    if not path or not line or line < 1:
+        return "unknown", None, None
+    res = subprocess.run(
+        ["git", "blame", "--porcelain", "-L", f"{line},{line}", "HEAD", "--", path],
+        capture_output=True,
+        text=True,
+    )
+    if res.returncode != 0 or not res.stdout:
+        return "unknown", None, None
+    commit = res.stdout.split()[0]
+    if set(commit) == {"0"}:
+        return "unknown", None, None  # not committed yet
+    on_base = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", commit, info["merge_base"]], capture_output=True
+    )
+    if on_base.returncode == 0:
+        return "pre-existing", commit, None
+    subject = git("log", "-1", "--format=%s", commit, check=False)
+    m = FIX_SUBJECT.search(subject)
+    if m:
+        return "fix", commit, int(m.group(1))
+    return "original", commit, None
+
+
+def agent_name(arg: str | None) -> str:
+    user = os.environ.get("USER", "?")
+    return arg or os.environ.get("REVIEW_ROUND_AGENT") or f"{user}@{socket.gethostname()}"
+
+
+# ── Reviewing ─────────────────────────────────────────────────────────────────
+
+
+def find_method(info: dict, arg: str | None) -> tuple[str, str]:
+    """The review method. The repo's copy is read from the base branch, so the branch
+    under review can't rewrite its own review rules."""
+    if arg:
+        if not Path(arg).is_file():
+            die(f"no method file at {arg}")
+        return Path(arg).read_text(), arg
+    skill = ".claude/skills/pr-review/SKILL.md"
+    res = subprocess.run(["git", "show", f"{info['merge_base']}:{skill}"], capture_output=True, text=True)
+    if res.returncode == 0 and res.stdout.strip():
+        return res.stdout, f"{info['base']}:{skill}"
+    home = Path.home() / skill
+    if home.is_file():
+        return home.read_text(), str(home)
+    return DEFAULT_METHOD, "built-in"
+
+
+MAX_DIFF = 200_000  # characters of diff put in the prompt; past it, the reviewer reads files
+
+
+def earlier_findings(info: dict) -> list[dict]:
+    """Findings from this branch's earlier rounds, each with its id (r<round>.<n>)."""
+    found, seen = [], {}
+    for f in read_rows("findings"):
+        if f.get("repo") != info["repo"] or f.get("branch") != info["branch"]:
+            continue
+        n = seen[f.get("run_id")] = seen.get(f.get("run_id"), 0) + 1
+        # Rows logged before ids existed get theirs from round and order in the run
+        found.append({**f, "id": f.get("id") or f"r{f.get('round')}.{n}"})
+    return found
+
+
+@contextlib.contextmanager
+def snapshot(root: str):
+    """A copy of the tracked files at HEAD in a temporary folder: no .git, no untracked or
+    ignored files, and each symlink replaced by a note of where it pointed. The reviewer
+    reads only this, so nothing outside what is under review can reach a PR comment."""
+    tmp = Path(tempfile.mkdtemp(prefix="review-round-")).resolve()
+    try:
+        proc = subprocess.Popen(["git", "archive", "--format=tar", "HEAD"], cwd=root,
+                                stdout=subprocess.PIPE)
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tf:
+            for m in tf:
+                if m.issym() or m.islnk():
+                    dest = tmp / m.name
+                    if dest.parent.resolve().is_relative_to(tmp):
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        dest.write_text(f"(review-round: a symlink to {m.linkname}, not followed)\n")
+                elif m.isfile() or m.isdir():
+                    try:
+                        tf.extract(m, tmp, filter="data")
+                    except TypeError:  # Python before 3.11.4: no filters; git's paths are safe
+                        tf.extract(m, tmp)
+        if proc.wait() != 0:
+            raise RuntimeError("git archive HEAD failed")
+        yield tmp
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
+    span = f"{info['merge_base']}..HEAD"
+    log = git("log", "--format=%h %s%n%b", span)
+    diff = git("diff", span)
+    if len(diff) > MAX_DIFF:
+        diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
+                " read the changed files with the Read tool.)")
+    earlier = "\n".join(
+        f"- {f['id']} [{f['severity']}] {f.get('file') or '-'}: {f.get('summary', '')}"
+        for f in earlier_findings(info)) or "(none)"
+    prompt = f"""{method}
+
+## This round
+- Repository: {info["repo"]}. Your working folder holds its tracked files at HEAD;
+  give paths relative to it.
+- Branch {info["branch"]} at {info["head"][:12]}, reviewed against {info["base"]}
+  (merge base {info["merge_base"][:12]}).
+- This is review round {rnd}. Commits named "review round N" are earlier rounds' fixes;
+  check whether they introduced anything.
+- You can read, search and list files; you can't run commands or change anything.
+- Return every finding in the structured output; an empty list when there are none.
+- Earlier rounds' findings are listed below. When a finding is the same defect as one of
+  them, or what an incomplete fix of one left behind, set repeat_of to its id.
+
+## Earlier findings
+{earlier}
+
+## Commits
+{log}
+
+## Diff
+```diff
+{diff}
+```
+"""
+    with snapshot(info["root"]) as snap:
+        cmd = [
+            os.environ.get("REVIEW_ROUND_CLAUDE", "claude"),
+            "-p",  # the prompt goes on stdin: a big diff overflows one argument
+            "--output-format",
+            "json",
+            "--json-schema",
+            json.dumps(FINDINGS_SCHEMA),
+            # Read-only, whatever the user's settings: no shell (git's own options can
+            # write files), only these tools exist, reads stay inside the copy (the
+            # findings go to a PR comment), nothing else runs, no MCP servers load
+            "--tools",
+            "Read,Grep,Glob",
+            "--allowedTools",
+            f"Read(/{snap}/**)",
+            "--permission-mode",
+            "dontAsk",
+            "--strict-mcp-config",
+            # No settings files: the branch's own .claude/settings.json could hold hooks,
+            # which run commands; and the user's CLAUDE.md stays out of a PR comment
+            "--setting-sources",
+            "",
+        ]
+        if model:
+            cmd += ["--model", model]
+        res = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=snap)
+    if res.returncode != 0:
+        raise RuntimeError(f"claude exited {res.returncode}: {res.stderr.strip()[:500]}")
+    out = json.loads(res.stdout)
+    data = out.get("structured_output")
+    if data is None:
+        text = out.get("result", "")
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            raise RuntimeError("the reviewer returned no findings data")
+        data = json.loads(m.group(0))
+    if not isinstance(data, dict) or not isinstance(data.get("findings"), list):
+        raise RuntimeError("the reviewer's findings data has no findings list")
+    usage = out.get("usage") or {}
+    meta = {
+        "reviewer": "claude -p" + (f" --model {model}" if model else ""),
+        "reviewer_session": out.get("session_id"),
+        "cost_usd": out.get("total_cost_usd"),
+        "tokens_in": usage.get("input_tokens"),
+        "tokens_out": usage.get("output_tokens"),
+        "tokens_cache_read": usage.get("cache_read_input_tokens"),
+        "tokens_cache_write": usage.get("cache_creation_input_tokens"),
+    }
+    return list(data.get("findings", [])), meta
+
+
+def counts(findings: list[dict]) -> dict:
+    c = {s: {o: 0 for o in ORIGINS} for s in SEVERITIES}
+    for f in findings:
+        sev = f.get("severity") if f.get("severity") in SEVERITIES else "low"
+        c[sev][f.get("origin", "unknown")] += 1
+    return c
+
+
+def summary_line(run: dict) -> str:
+    c = run["counts"]
+    sev = ", ".join(f"{sum(c[s].values())} {s}" for s in SEVERITIES)
+    fixes = run.get("fix_rounds", [])
+    intro = sum(c[s]["fix"] for s in SEVERITIES)
+    tail = f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})" if intro else ""
+    if run.get("repeats"):
+        tail += f"; {run['repeats']} repeat earlier findings"
+    if run.get("disagree"):
+        tail += f"; reviewer disagrees on {run['disagree']} origins"
+    return (
+        f"review-round: {run['repo']} {run['branch']} round {run['round']}/{run['allowed']}: "
+        f"{run['result']} — {sev}{tail}"
+    )
+
+
+def comment_body(run: dict, rows: list[dict]) -> str:
+    """A short audit note for the pull request: the summary, one line per finding."""
+    lines = [f"**review-round** · {summary_line(run).split(': ', 1)[1]}"]
+    if run.get("error"):
+        lines += ["", f"Error: {run['error'][:300]}"]
+    if rows:
+        lines += ["", "| id | severity | origin | repeat of | where | finding |",
+                  "|---|---|---|---|---|---|"]
+        for r in rows:
+            tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
+            if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
+                tag += f" (reviewer: {r['claimed_origin']})"
+            where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
+            text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
+            lines.append(f"| {r.get('id', '')} | {r['severity']} | {tag} | {r.get('repeat_of') or ''}"
+                         f" | {where} | {text[:300]} |")
+    bits = [f"run `{run['run_id']}`", f"head `{run['head'][:7]}`", f"by {run.get('agent')}"]
+    if run.get("reviewer"):
+        bits.append(f"reviewer {run['reviewer']}" + (f" ({run['method']})" if run.get("method") else ""))
+    if run.get("seconds") is not None:
+        bits.append(f"{run['seconds']:.0f} s")
+    if run.get("cost_usd"):
+        bits.append(f"${run['cost_usd']:.2f}")
+    lines += ["", "<sub>" + " · ".join(bits) + "</sub>"]
+    return "\n".join(lines)
+
+
+def post(args, run: dict, rows: list[dict]) -> None:
+    """Comment on the pull request, when one is named; the run records the outcome."""
+    if not run.get("pr") or getattr(args, "no_post", False):
+        return
+    try:
+        res = subprocess.run(
+            [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "comment", str(run["pr"]),
+             "--repo", run["repo"], "--body-file", "-"],
+            input=comment_body(run, rows), capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        # A comment that can't be posted never costs the run its log line
+        run["post_error"] = str(e)[:300]
+        print(f"review-round: could not comment on PR {run['pr']}: {e}", file=sys.stderr)
+        return
+    if res.returncode == 0:
+        run["posted"] = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else True
+    else:
+        run["post_error"] = res.stderr.strip()[:300]
+        print(f"review-round: could not comment on PR {run['pr']}: {run['post_error']}", file=sys.stderr)
+
+
+def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
+    info = branch_info(args.base)
+    lock = locked()
+    lock.__enter__()  # held until this round's number is reserved, or the run is refused
+    rotate()
+    done = rounds_so_far(info["repo"], info["branch"])
+    limit = allowed(info["repo"], info["branch"])
+    given = getattr(args, "round", None)
+    if given is not None and given <= done:
+        lock.__exit__(None, None, None)
+        die(f"round {given} is already recorded on {info['branch']} (rounds so far: {done})")
+    rnd = given or done + 1
+    run = {
+        "run_id": uuid.uuid4().hex[:12],
+        "started": now(),
+        "agent": agent_name(args.agent),
+        "host": socket.gethostname(),
+        "repo": info["repo"],
+        "branch": info["branch"],
+        "pr": args.pr,
+        "base": info["base"],
+        "merge_base": info["merge_base"],
+        "head": info["head"],
+        "round": rnd,
+        "allowed": limit,
+    }
+    if rnd > limit:
+        run.update(result="refused", ended=now(), counts=counts([]), fix_rounds=[])
+        append(RUNS, [run])
+        lock.__exit__(None, None, None)
+        post(args, run, [])
+        if run.get("posted") or run.get("post_error"):
+            with locked():
+                append(RUNS, [run])
+        print(summary_line(run))
+        print(
+            f"review-round: {done} rounds done on {info['branch']}; a person allows more with "
+            f"`review-round allow {info['branch']} N`",
+            file=sys.stderr,
+        )
+        return 3
+    append(RUNS, [{**run, "result": "running"}])
+    lock.__exit__(None, None, None)
+    start = time.monotonic()
+    try:
+        if findings_in is None:
+            method, method_src = find_method(info, getattr(args, "method", None))
+            findings_in, extra = review(info, rnd, method, getattr(args, "model", None))
+            meta = {**meta, **extra, "method": method_src}
+        rows = []
+        for f in findings_in:
+            raw_sev = str(f.get("severity", "")).strip()
+            sev = raw_sev.lower() if raw_sev.lower() in SEVERITIES else "low"
+            line = f.get("line")
+            line = int(line) if isinstance(line, (int, str)) and str(line).isdigit() else None
+            origin, commit, fix_round = origin_of(info, f.get("file"), line)
+            rows.append(
+                {
+                    "run_id": run["run_id"],
+                    "id": f"r{rnd}.{len(rows) + 1}",
+                    "repeat_of": f.get("repeat_of") or None,
+                    "repo": info["repo"],
+                    "branch": info["branch"],
+                    "round": rnd,
+                    "severity": sev,
+                    "raw_severity": raw_sev if raw_sev != sev else None,
+                    "file": f.get("file"),
+                    "line": line,
+                    "origin": origin,
+                    "claimed_origin": f.get("origin"),
+                    "commit": commit,
+                    "fix_round": fix_round,
+                    "summary": f.get("summary", ""),
+                    "scenario": f.get("scenario", ""),
+                    "fix": f.get("fix", ""),
+                }
+            )
+    except BaseException as e:  # the run is still recorded, and its round freed
+        reason = f"exit {e.code}" if isinstance(e, SystemExit) else str(e) or type(e).__name__
+        run.update(result="error", error=reason[:500], ended=now(), counts=counts([]), fix_rounds=[])
+        run["seconds"] = round(time.monotonic() - start, 1)
+        post(args, run, [])
+        with locked():
+            append(RUNS, [run])
+        print(summary_line(run))
+        if isinstance(e, KeyboardInterrupt):
+            raise
+        if not isinstance(e, SystemExit):
+            print(f"review-round: {e}", file=sys.stderr)
+        return 2
+    c = counts(rows)
+    run.update(meta)
+    run.update(
+        ended=now(),
+        seconds=round(time.monotonic() - start, 1),
+        result="findings" if any(c[s][o] for s in ("high", "medium") for o in ORIGINS) else "clean",
+        counts=c,
+        fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
+        disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
+        repeats=sum(1 for r in rows if r["repeat_of"]),
+    )
+    post(args, run, rows)
+    with locked():
+        append(RUNS, [run])
+        append(FINDINGS, rows)
+    for r in rows:
+        where = f"{r['file']}:{r['line']}" if r["file"] else "-"
+        tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
+        if r["claimed_origin"] and r["claimed_origin"] != r["origin"]:
+            tag += f" [reviewer: {r['claimed_origin']}]"
+        again = f" (repeat of {r['repeat_of']})" if r.get("repeat_of") else ""
+        print(f"  {r['id']:<6} {r['severity']:<6} {tag:<16} {where}  {r['summary']}{again}")
+    print(summary_line(run))
+    if run.get("posted"):
+        print(f"review-round: posted {run['posted']}")
+    return 1 if c["high"] and sum(c["high"].values()) else 0
+
+
+# ── Commands ──────────────────────────────────────────────────────────────────
+
+
+def cmd_run(args) -> int:
+    return do_round(args, None, {})
+
+
+def cmd_record(args) -> int:
+    try:
+        data = json.loads(Path(args.findings).read_text())
+        found = data["findings"] if isinstance(data, dict) else data
+        if not isinstance(found, list):
+            raise ValueError("not a list")
+    except (OSError, ValueError, KeyError) as e:
+        die(f"{args.findings}: expected {{\"findings\": [...]}} or a list ({e})")
+    return do_round(args, found, {"reviewer": args.reviewer or "recorded"})
+
+
+def cmd_status(args) -> int:
+    runs = sorted(latest_runs(), key=lambda r: r.get("started", ""))
+    by_branch: dict[tuple, list] = {}
+    for r in runs:
+        by_branch.setdefault((r.get("repo"), r.get("branch")), []).append(r)
+    rows = sorted(by_branch.items(), key=lambda kv: kv[1][-1].get("started", ""), reverse=True)
+    if not args.all:
+        rows = rows[:15]
+    if not rows:
+        print("No review rounds recorded.")
+        return 0
+    print(f"{'repo':<28} {'branch':<28} {'rounds':>6}  {'H':>3} {'M':>3} {'L':>3}  {'by fix':>6}  last")
+    for (repo, branch), rs in rows:
+        done = [r for r in rs if r.get("result") != "refused"]
+        last = rs[-1]
+        lc = last.get("counts") or counts([])
+        intro = sum(sum(r["counts"][s]["fix"] for s in SEVERITIES) for r in done if r.get("counts"))
+        print(
+            f"{repo or '-':<28.28} {branch or '-':<28.28} "
+            f"{rounds_so_far(repo, branch):>3}/{allowed(repo, branch):<2}  "
+            f"{sum(lc['high'].values()):>3} {sum(lc['medium'].values()):>3} {sum(lc['low'].values()):>3}  "
+            f"{intro:>6}  {last.get('started', '')[:16]} {last.get('result')} ({last.get('agent')})"
+        )
+    print("H/M/L: the last round's findings. by fix: findings introduced by fix commits, all rounds.")
+    return 0
+
+
+def cmd_stats(args) -> int:
+    finds = [f for f in read_rows("findings") if not args.repo or f.get("repo") == args.repo]
+    runs = [r for r in latest_runs() if not args.repo or r.get("repo") == args.repo]
+    done = [r for r in runs if r.get("result") in ("clean", "findings")]
+    c = counts(finds)
+    carried = load_carried()
+    for rp, sev, origin, n in carried["findings"]:
+        if (not args.repo or rp == args.repo) and sev in c and origin in c[sev]:
+            c[sev][origin] += n
+    old: dict[tuple, float] = {}
+    for rp, br, res, n in carried["runs"]:
+        if (not args.repo or rp == args.repo) and res != "max_round":
+            old[(rp, br, res)] = old.get((rp, br, res), 0) + n
+    n_done = len(done) + sum(n for (_, _, res), n in old.items() if res in ("clean", "findings"))
+    n_refused = sum(1 for r in runs if r.get("result") == "refused") + sum(
+        n for (_, _, res), n in old.items() if res == "refused")
+    n_error = sum(1 for r in runs if r.get("result") == "error") + sum(
+        n for (_, _, res), n in old.items() if res == "error")
+    branches = {(r.get("repo"), r.get("branch")) for r in done} | {(rp, br) for rp, br, _ in old}
+    print(f"Runs: {n_done} rounds on {len(branches)} branches ({n_refused} refused, {n_error} errors)")
+    cost = sum(r.get("cost_usd") or 0 for r in runs) + sum(
+        n for (_, _, res), n in old.items() if res == "cost")
+    if cost:
+        print(f"Cost: ${cost:.2f}")
+    print(f"\n{'':<8}" + "".join(f"{o:>14}" for o in ORIGINS) + f"{'total':>8}")
+    for s in SEVERITIES:
+        print(f"{s:<8}" + "".join(f"{c[s][o]:>14}" for o in ORIGINS) + f"{sum(c[s].values()):>8}")
+    total = sum(sum(c[s].values()) for s in SEVERITIES)
+    intro = sum(c[s]["fix"] for s in SEVERITIES)
+    if total:
+        print(f"\nIntroduced by fixes: {intro} of {total} findings ({100 * intro / total:.0f}%),"
+              f" {c['high']['fix']} of them high.")
+        repeats = [f for f in finds if f.get("repeat_of")]
+        if repeats:
+            highs = sum(1 for f in repeats if f.get("severity") == "high")
+            print(f"Repeats of earlier findings (same defect, or a fix left incomplete): "
+                  f"{len(repeats)}, {highs} of them high.")
+    return 0
+
+
+def cmd_allow(args) -> int:
+    repo = args.repo
+    if not repo:
+        repo = repo_name(git("rev-parse", "--show-toplevel"))
+    row = {"at": now(), "repo": repo, "branch": args.branch, "rounds": args.n,
+           "by": args.by or agent_name(None)}
+    with locked():
+        append(ALLOWS, [row])
+    print(f"review-round: {repo} {args.branch} may run {allowed(repo, args.branch)} rounds in all "
+          f"(allowed by {row['by']})")
+    return 0
+
+
+def cmd_rotate(args) -> int:
+    with locked():
+        moved = rotate(force=args.force, keep=args.keep)
+    for what, p in moved:
+        print(f"{what} {p}")
+    if not moved:
+        print("Nothing to rotate.")
+    return 0
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="review-round", description=__doc__.split("\n\n")[0])
+    p.add_argument("--version", action="version", version=VERSION)
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    def common(sp):
+        sp.add_argument("--base", help="branch to compare with (default origin's HEAD)")
+        sp.add_argument("--pr", type=int, help="pull request number, for the record")
+        sp.add_argument("--agent", help="who is running the round")
+        sp.add_argument("--no-post", action="store_true", help="don't comment on the pull request")
+
+    r = sub.add_parser("run", help="review the current branch with claude -p")
+    common(r)
+    r.add_argument("--method", help="review method file (default: the pr-review skill)")
+    r.add_argument("--model")
+    r.set_defaults(func=cmd_run)
+
+    rec = sub.add_parser("record", help="record findings from a review done elsewhere")
+    common(rec)
+    rec.add_argument("--findings", required=True, help='JSON file: {"findings": [...]} or a list')
+    rec.add_argument("--reviewer", help="what did the review, e.g. a subagent")
+    rec.add_argument("--round", type=int, help="the round number, when importing past rounds")
+    rec.set_defaults(func=cmd_record)
+
+    s = sub.add_parser("status", help="rounds per branch, newest first")
+    s.add_argument("--all", action="store_true")
+    s.set_defaults(func=cmd_status)
+
+    st = sub.add_parser("stats", help="running totals by severity and origin")
+    st.add_argument("--repo")
+    st.set_defaults(func=cmd_stats)
+
+    a = sub.add_parser("allow", help="allow N more rounds on a branch (a person's call)")
+    a.add_argument("branch")
+    a.add_argument("n", type=int)
+    a.add_argument("--repo", help="owner/name (default: this checkout's)")
+    a.add_argument("--by", help="who allows it")
+    a.set_defaults(func=cmd_allow)
+
+    ro = sub.add_parser("rotate", help="archive the logs (gzipped); old archives can be pruned")
+    ro.add_argument("--force", action="store_true", help="archive now, whatever the size")
+    ro.add_argument("--keep", type=int, help="keep only the newest N archives of each log")
+    ro.set_defaults(func=cmd_rotate)
+
+    args = p.parse_args()
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
