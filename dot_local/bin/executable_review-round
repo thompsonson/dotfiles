@@ -350,7 +350,26 @@ def earlier_findings(info: dict) -> list[dict]:
     return found
 
 
+def escaping_links(root: str) -> list[str]:
+    """Tracked symlinks that lead outside the repository. The read limit checks the path
+    asked for, not where it leads, so a link could open any file."""
+    out = []
+    base = Path(root).resolve()
+    for line in git("ls-files", "-s").splitlines():
+        mode, _, rest = line.partition(" ")
+        if mode != "120000":
+            continue
+        path = rest.split("\t", 1)[-1]
+        target = (Path(root) / path).resolve()
+        if not target.is_relative_to(base):
+            out.append(f"{path} -> {target}")
+    return out
+
+
 def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
+    links = escaping_links(info["root"])
+    if links:
+        raise RuntimeError("not reviewed: symlinks lead outside the repository: " + "; ".join(links[:5]))
     span = f"{info['merge_base']}..HEAD"
     log = git("log", "--format=%h %s%n%b", span)
     diff = git("diff", span)

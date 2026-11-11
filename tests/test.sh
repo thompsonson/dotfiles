@@ -339,6 +339,16 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
+    # A symlink leading outside the repository stops the review
+    ln -s /etc/hostname "$t/repo/out" && "${g[@]}" -C "$t/repo" add out && "${g[@]}" -C "$t/repo" commit -q -m link
+    out=$(cd "$t/repo" && "${rr[@]}" run --no-post 2>&1); rc=$?
+    "${g[@]}" -C "$t/repo" reset -q --hard HEAD~1
+    if [[ $rc -eq 2 ]] && grep -q "symlinks lead outside the repository: out -> /etc/hostname" <<<"$out"; then
+        pass "review-round won't review a branch whose symlinks leave the repository"
+    else
+        fail "review-round symlink (rc=$rc): $out"; failed=1
+    fi
+
     # A reply with no findings data is an error, and errors use up no rounds
     printf '#!/bin/sh\necho "{\\"result\\": \\"no data\\"}"\n' > "$t/claude-bad"
     chmod +x "$t/claude-bad"
