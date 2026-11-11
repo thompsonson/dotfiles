@@ -29,6 +29,14 @@ How I want every session on my machines to write, ask and act.
 - Run `claude-tmp-clean --delete` to remove them; it keeps any folder still in use.
 - Never delete another session's temp folder by hand.
 
+## Code review rounds
+
+- Run each review round with `review-round run`, or log one done elsewhere with `review-round record`.
+- Name fix commits with their round: `fix(scope): review round N — …`.
+- Fix highs and mediums only; list lows in the pull request.
+- Relay the summary line of every round to me.
+- Past the round limit, ask me; never run `review-round allow` yourself.
+
 ## Questions
 
 - Read the documentation, code, config and git history before asking.

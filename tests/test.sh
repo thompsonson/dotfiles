@@ -128,6 +128,15 @@ run_syntax() {
         "$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
     )
 
+    if has_cmd python3; then
+        if python3 -m py_compile "$REPO_DIR/dot_local/bin/executable_review-round" 2>/dev/null; then
+            pass "executable_review-round (py_compile)"
+        else
+            fail "executable_review-round (py_compile)"
+            syntax_failed=1
+        fi
+    fi
+
     for script in "${scripts[@]}"; do
         if [[ -f "$script" ]]; then
             local name
@@ -232,8 +241,98 @@ run_smoke() {
     fi
 
     smoke_claude_tmp_clean || smoke_failed=1
+    smoke_review_round || smoke_failed=1
 
     return $smoke_failed
+}
+
+# review-round against a throwaway repo and a fake claude.
+smoke_review_round() {
+    local script="$REPO_DIR/dot_local/bin/executable_review-round"
+    if ! has_cmd python3; then
+        skip "review-round (needs python3)"
+        return 0
+    fi
+    local t failed=0
+    t=$(mktemp -d)
+    local g=(git -c user.name=t -c user.email=t@t -c init.defaultBranch=main)
+    "${g[@]}" init -q "$t/origin.git" --bare
+    "${g[@]}" clone -q "$t/origin.git" "$t/repo" 2>/dev/null
+    printf 'a\nb\nc\n' > "$t/repo/f.txt"
+    "${g[@]}" -C "$t/repo" add f.txt && "${g[@]}" -C "$t/repo" commit -q -m base
+    "${g[@]}" -C "$t/repo" push -q origin main 2>/dev/null
+    "${g[@]}" -C "$t/repo" checkout -q -b feat
+    printf 'a\nb\nc\nd\n' > "$t/repo/f.txt"
+    "${g[@]}" -C "$t/repo" commit -q -am "feat: add d"
+    printf 'a\nb\nc\nd\ne\n' > "$t/repo/f.txt"
+    "${g[@]}" -C "$t/repo" commit -q -am "fix: review round 1 - add e"
+
+    # Fake claude: one finding on each of lines 1 (base), 4 (feat), 5 (round 1 fix)
+    cat > "$t/claude" <<'FAKE'
+#!/bin/sh
+cat <<'JSON'
+{"session_id":"s1","total_cost_usd":0.5,"usage":{"input_tokens":10,"output_tokens":5},
+ "structured_output":{"findings":[
+  {"severity":"low","file":"f.txt","line":1,"summary":"old","scenario":"x"},
+  {"severity":"medium","file":"f.txt","line":4,"summary":"new","scenario":"x"},
+  {"severity":"high","file":"f.txt","line":5,"summary":"fixbug","scenario":"x"}]}}
+JSON
+FAKE
+    chmod +x "$t/claude"
+    local rr=(env REVIEW_ROUND_HOME="$t/log" REVIEW_ROUND_CLAUDE="$t/claude"
+              REVIEW_ROUND_AGENT=smoke REVIEW_ROUND_LIMIT=2 python3 "$script")
+
+    local out rc
+    out=$(cd "$t/repo" && "${rr[@]}" run --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "fix (round 1)" <<<"$out" && grep -q "round 1/2" <<<"$out" \
+        && python3 - "$t/log/findings.jsonl" <<'PY'
+import json, sys
+o = {json.loads(l)["summary"]: json.loads(l)["origin"] for l in open(sys.argv[1])}
+assert o == {"old": "pre-existing", "new": "original", "fixbug": "fix"}, o
+PY
+    then
+        pass "review-round tags pre-existing, original and fix findings"
+    else
+        fail "review-round origins (rc=$rc): $out"; failed=1
+    fi
+
+    printf '[{"severity":"low","summary":"r","scenario":"x"}]' > "$t/f.json"
+    (cd "$t/repo" && "${rr[@]}" record --findings "$t/f.json" --reviewer sub >/dev/null 2>&1)
+    out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
+    if [[ $rc -eq 3 ]] && grep -q refused <<<"$out"; then
+        pass "review-round refuses a round past the limit"
+    else
+        fail "review-round limit (rc=$rc): $out"; failed=1
+    fi
+    (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
+    out=$(cd "$t/repo" && "${rr[@]}" run 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "round 3/3" <<<"$out"; then
+        pass "review-round runs again once a person allows it"
+    else
+        fail "review-round allow (rc=$rc): $out"; failed=1
+    fi
+
+    local before after
+    before=$("${rr[@]}" stats 2>&1)
+    "${rr[@]}" rotate --force >/dev/null
+    (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
+    (cd "$t/repo" && "${rr[@]}" run >/dev/null 2>&1)
+    "${rr[@]}" rotate --force >/dev/null
+    "${rr[@]}" rotate --keep 1 >/dev/null
+    after=$("${rr[@]}" stats 2>&1)
+    if [[ ! -s "$t/log/runs.jsonl" ]] && grep -q "Runs: 3 rounds" <<<"$before" \
+        && grep -q "Runs: 4 rounds" <<<"$after" && grep -q "Introduced by fixes: 3 of 10" <<<"$after"; then
+        pass "review-round rotate archives and keeps running totals"
+    else
+        fail "review-round rotate: before=[$before] after=[$after]"; failed=1
+    fi
+    if "${rr[@]}" status | grep -q "feat"; then
+        pass "review-round status lists the branch"
+    else
+        fail "review-round status"; failed=1
+    fi
+    rm -rf "$t"
+    return $failed
 }
 
 # claude-tmp-clean against a fake /tmp/claude-<uid> tree.
