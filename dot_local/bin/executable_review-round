@@ -393,11 +393,12 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         "--json-schema",
         json.dumps(FINDINGS_SCHEMA),
         # Read-only, whatever the user's settings: no shell (git's own options can
-        # write files), only these tools exist, nothing else runs, no MCP servers load
+        # write files), only these tools exist, reads stay inside the repository (the
+        # findings go to a PR comment), nothing else runs, no MCP servers load
         "--tools",
         "Read,Grep,Glob",
         "--allowedTools",
-        "Read,Grep,Glob",
+        f"Read(/{info['root']}/**)",
         "--permission-mode",
         "dontAsk",
         "--strict-mcp-config",
@@ -485,11 +486,17 @@ def post(args, run: dict, rows: list[dict]) -> None:
     """Comment on the pull request, when one is named; the run records the outcome."""
     if not run.get("pr") or getattr(args, "no_post", False):
         return
-    res = subprocess.run(
-        [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "comment", str(run["pr"]),
-         "--repo", run["repo"], "--body-file", "-"],
-        input=comment_body(run, rows), capture_output=True, text=True,
-    )
+    try:
+        res = subprocess.run(
+            [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "comment", str(run["pr"]),
+             "--repo", run["repo"], "--body-file", "-"],
+            input=comment_body(run, rows), capture_output=True, text=True, timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        # A comment that can't be posted never costs the run its log line
+        run["post_error"] = str(e)[:300]
+        print(f"review-round: could not comment on PR {run['pr']}: {e}", file=sys.stderr)
+        return
     if res.returncode == 0:
         run["posted"] = res.stdout.strip().splitlines()[-1] if res.stdout.strip() else True
     else:
