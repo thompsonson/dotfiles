@@ -97,7 +97,6 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 - The script puts the commits and the diff in the prompt (past 200,000 characters, the `--stat` and a note to read the files).
 - The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob`, `--permission-mode dontAsk` and `--strict-mcp-config`. It has no shell, since git's own options can read and write any file.
 - It loads no settings files (`--setting-sources ""`). A branch's own `.claude/settings.json` could hold hooks, and hooks run commands; tested: a branch hook runs with the default sources and not with none. This also keeps the user's CLAUDE.md out of its context.
-- Claude Code still gives it the account's email address from the sign-in, so a branch could get that quoted into a PR comment.
 - The prompt goes on stdin, since one argument is capped at 128 KiB on Linux.
 - The reviewer works in a copy of the branch's tracked files at HEAD (`git archive`), in a temporary folder removed afterwards. The copy has no `.git` and no untracked or ignored files, and each symlink is a note of where it pointed.
 - Reads stay inside that copy: only `Read(/<copy>/**)` is allowed, and in `dontAsk` mode a Read or Grep anywhere else is refused. So a branch's text can't get the reviewer to quote anything but the reviewed files into the PR comment.
