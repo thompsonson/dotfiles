@@ -37,6 +37,13 @@ How I want every session on my machines to write, ask and act.
 - Relay the summary line of every round to me.
 - Past the round limit, ask me; never run `review-round allow` yourself.
 
+### Manta projects are excluded
+
+- Manta repositories (`mantatech/*`) do not use `review-round` or its round limit.
+- Their review is Claude Code Review, which runs in CI on every push.
+- Monitor it with the repository's `scripts/ci/check-pr-ready.sh`, looped after each push.
+- A Manta pull request is ready only when that review reports no issues found.
+
 ## Questions
 
 - Read the documentation, code, config and git history before asking.
