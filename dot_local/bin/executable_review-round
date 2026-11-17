@@ -11,8 +11,9 @@ Each round:
                      (a commit whose subject says "review round N")
       unknown        no file or line, or the line can't be blamed
   - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
-  - prints a one-line summary for the person in charge, and with --pr puts it, with one
-    line per finding, in a comment on the pull request (--no-post to skip).
+  - prints a one-line summary for the person in charge, and puts it, with one line per
+    finding, in a comment on the branch's open pull request (found with gh, or given with
+    --pr; --no-post to skip).
 
 After a set number of rounds on one branch (default 3) it stops until a person
 allows more with `review-round allow`, so no agent loops unseen.
@@ -518,8 +519,25 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def find_pr(branch: str) -> int | None:
+    """The open pull request for this branch, so each round posts without --pr."""
+    try:
+        res = subprocess.run(
+            [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "view", branch,
+             "--json", "number,state", "-q", 'select(.state == "OPEN") | .number'],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    out = res.stdout.strip()
+    return int(out) if res.returncode == 0 and out.isdigit() else None
+
+
 def post(args, run: dict, rows: list[dict]) -> None:
     """Comment on the pull request, when one is named; the run records the outcome."""
+    if not run.get("pr") and not getattr(args, "no_post", False):
+        print(f"review-round: no open pull request for {run['branch']}; not posted (use --pr N)",
+              file=sys.stderr)
     if not run.get("pr") or getattr(args, "no_post", False):
         return
     try:
@@ -559,7 +577,9 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         "host": socket.gethostname(),
         "repo": info["repo"],
         "branch": info["branch"],
-        "pr": args.pr,
+        # Found from the branch unless given, so every round posts by default
+        "pr": args.pr if args.pr is not None
+        else None if getattr(args, "no_post", False) else find_pr(info["branch"]),
         "base": info["base"],
         "merge_base": info["merge_base"],
         "head": info["head"],
@@ -773,7 +793,7 @@ def main() -> int:
 
     def common(sp):
         sp.add_argument("--base", help="branch to compare with (default origin's HEAD)")
-        sp.add_argument("--pr", type=int, help="pull request number, for the record")
+        sp.add_argument("--pr", type=int, help="pull request number (default: the branch's open one)")
         sp.add_argument("--agent", help="who is running the round")
         sp.add_argument("--no-post", action="store_true", help="don't comment on the pull request")
 

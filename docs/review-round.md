@@ -25,7 +25,10 @@ Both print each finding and a one-line summary; agents relay that line to the pe
 
 ## The pull request comment
 
-With `--pr N`, each round comments on the pull request, refusals and errors included:
+Each round comments on the branch's open pull request, refusals and errors included.
+It finds that pull request with `gh pr view <branch>`; `--pr N` names one instead.
+With no open pull request, it says so and posts nothing.
+The comment holds:
 
 - the summary line;
 - one table row per finding: severity, origin, file and line, summary;

@@ -345,6 +345,26 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
+    # With no --pr, the round finds the branch's open pull request and posts on it
+    cat > "$t/gh-find" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr view" ]; then echo 7; exit 0; fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/7#issuecomment-2"
+FAKE
+    chmod +x "$t/gh-find"
+    # (its own log, so the rounds counted by the tests below don't change)
+    : > "$t/comment.md"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-find" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-find" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "round 1/3" "$t/comment.md" \
+        && tail -1 "$t/log-find/runs.jsonl" | grep -q '"pr": 7' \
+        && tail -1 "$t/log-find/runs.jsonl" | grep -q 'issuecomment-2'; then
+        pass "review-round finds the branch's open PR and posts without --pr"
+    else
+        fail "review-round find PR (rc=$rc): $out"; failed=1
+    fi
+
     # A symlink is a note in the reviewer's copy, never followed; the copy is removed
     ln -s /etc/hostname "$t/repo/out" && "${g[@]}" -C "$t/repo" add out && "${g[@]}" -C "$t/repo" commit -q -m link
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
