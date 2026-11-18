@@ -397,13 +397,13 @@ PY
         && grep -q "round 2/2: findings — 0 high, 0 medium, 1 low; 1 bug" <<<"$o2" \
         && grep -q "round 3/3: findings — .*; 1 bug" <<<"$o3" \
         && grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl" \
-        && sed -i 's/"kind": "polish", //' "$t/log-kind/findings.jsonl" \
+        && python3 -c 'import sys; p = sys.argv[1]; s = open(p).read(); open(p, "w").write(s.replace("\"kind\": \"polish\", ", ""))' "$t/log-kind/findings.jsonl" \
         && ! grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl" \
         && (cd "$t/repo" && "${rk[@]}" allow feat 1 --by person >/dev/null \
-            && "${rk[@]}" run --no-post >/dev/null 2>&1; grep -q -- "- r1.1 \[low bug\]" "$t/claude-prompt"); then
+            && "${rk[@]}" run --no-post >"$t/kind-run" 2>&1; grep -q -- "- r1.1 \[low bug\]" "$t/claude-prompt"); then
         pass "review-round counts a low bug as a finding, and low polish as clean"
     else
-        fail "review-round kinds (rc $rc1 $rc2): $o1 / $o2 / $o3"; failed=1
+        fail "review-round kinds (rc $rc1 $rc2): $o1 / $o2 / $o3 / $(cat "$t/kind-run" 2>/dev/null) / $(grep -A5 '## Earlier' "$t/claude-prompt")"; failed=1
     fi
 
     # Two runs at once take different rounds
