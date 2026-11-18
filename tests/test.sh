@@ -353,7 +353,7 @@ PY
 #!/bin/sh
 if [ "\$1 \$2" = "pr list" ]; then
   printf '%s\\n' "\$@" > "$t/gh-find-args"
-  echo '[{"number":9,"isCrossRepository":true,"headRefOid":"other"},{"number":7,"isCrossRepository":false,"headRefOid":"x"}]'
+  echo '[{"number":9,"isCrossRepository":true},{"number":7,"isCrossRepository":false}]'
   exit 0
 fi
 cat > "$t/comment.md"
@@ -422,6 +422,18 @@ PY
         pass "review-round knows a GitHub origin by host or ssh alias"
     else
         fail "review-round on_github"; failed=1
+    fi
+
+    # A gh answer that is not a list of pull requests is logged, not a crash
+    printf '#!/bin/sh\necho %s\n' "'[{\"number\":\"seven\",\"isCrossRepository\":false}]'" > "$t/gh-odd"
+    chmod +x "$t/gh-odd"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-odd" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-odd" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "not a list of pull requests" <<<"$out" \
+        && tail -1 "$t/log-odd/runs.jsonl" | grep -q '"result": "findings"'; then
+        pass "review-round logs an odd gh answer rather than crashing"
+    else
+        fail "review-round odd gh answer (rc=$rc): $out"; failed=1
     fi
 
     # A gh that fails says so, and is logged, rather than reading as no pull request

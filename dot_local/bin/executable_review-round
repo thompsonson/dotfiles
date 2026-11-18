@@ -586,10 +586,11 @@ def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
     if res.returncode != 0:
         return None, f"could not ask gh for the pull request: {res.stderr.strip()}"[:300]
     try:
-        found = [p["number"] for p in json.loads(res.stdout or "[]") if not p["isCrossRepository"]]
+        found = [int(p["number"]) for p in json.loads(res.stdout or "[]")
+                 if not p["isCrossRepository"]]
     except (ValueError, TypeError, KeyError) as e:
         return None, f"gh's answer was not a list of pull requests: {e}"[:300]
-    return (int(found[0]) if found else None), None
+    return (found[0] if found else None), None
 
 
 def post(args, run: dict, rows: list[dict]) -> None:
