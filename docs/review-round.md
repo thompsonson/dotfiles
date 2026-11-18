@@ -35,6 +35,20 @@ The comment's address goes in the run's log line (`posted`), or the failure (`po
 `--no-post` skips the comment.
 
 Exit codes: 0 no high findings, 1 high findings, 2 error, 3 refused (over the limit).
+A low bug exits 0 but makes the round `findings`.
+
+## Bugs and polish
+
+- Each finding has a kind as well as a severity.
+- **bug**: some input or state gives a wrong result — a crash, a hang, a wrong answer, lost data, a leak, a security hole.
+- **polish**: nothing behaves wrongly — wording, naming, docs, a weak test, style.
+- Severity says how much harm; kind says whether there is any. An unlikely bug is a low bug, not polish.
+- A round is `clean` only when it has no bugs and no high or medium findings.
+- The summary line counts the bugs: `clean — 0 high, 0 medium, 1 low` is polish only.
+- A finding recorded without a kind counts as a bug.
+
+Why: severity alone let "low" mean both "rare bug" and "polish".
+A rule of "fix highs and mediums" then merged real bugs, such as a search that hangs on a FIFO.
 
 ## Repeats
 
