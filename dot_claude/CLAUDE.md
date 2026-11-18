@@ -11,6 +11,7 @@ How I want every session on my machines to write, ask and act.
 - Cut any sentence that does not serve the goal.
 - Drop hyperbole, filler and consultant-speak.
 - Ground every term in the local repository's glossary.
+- Give a head noun with several meanings a modifier: agent engine, belief kind.
 - Describe actions you took or will take, not your deliberation.
 - Never hand me a step you could have done yourself.
 - Report failures plainly, with the output that shows them.
