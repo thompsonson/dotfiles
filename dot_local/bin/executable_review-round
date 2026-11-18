@@ -541,25 +541,33 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def find_pr(branch: str) -> int | None:
-    """The open pull request for this branch, so each round posts without --pr."""
+def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
+    """The branch's open pull request, so each round posts without --pr; or why gh
+    could not say. Asked of `repo`, where the comment goes, and only one opened from
+    `repo` itself: a fork's pull request from a branch of the same name is not this one."""
     try:
         res = subprocess.run(
-            [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "view", branch,
-             "--json", "number,state", "-q", 'select(.state == "OPEN") | .number'],
+            [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "list", "--repo", repo,
+             "--head", branch, "--state", "open", "--json", "number,isCrossRepository"],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
         )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    out = res.stdout.strip()
-    return int(out) if res.returncode == 0 and out.isdigit() else None
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"could not ask gh for the pull request: {e}"[:300]
+    if res.returncode != 0:
+        return None, f"could not ask gh for the pull request: {res.stderr.strip()}"[:300]
+    try:
+        found = [p["number"] for p in json.loads(res.stdout or "[]") if not p["isCrossRepository"]]
+    except (ValueError, TypeError, KeyError) as e:
+        return None, f"gh's answer was not a list of pull requests: {e}"[:300]
+    return (int(found[0]) if found else None), None
 
 
 def post(args, run: dict, rows: list[dict]) -> None:
-    """Comment on the pull request, when one is named; the run records the outcome."""
+    """Comment on the pull request, given with --pr or found from the branch; the run
+    records the outcome."""
     if not run.get("pr") and not getattr(args, "no_post", False):
-        print(f"review-round: no open pull request for {run['branch']}; not posted (use --pr N)",
-              file=sys.stderr)
+        why = run.get("post_error") or f"no open pull request for {run['branch']}"
+        print(f"review-round: {why}; not posted (use --pr N)", file=sys.stderr)
     if not run.get("pr") or getattr(args, "no_post", False):
         return
     try:
@@ -582,6 +590,12 @@ def post(args, run: dict, rows: list[dict]) -> None:
 
 def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     info = branch_info(args.base)
+    # Found from the branch unless given, so every round posts by default. Asked before
+    # the lock: a call of up to a minute must not hold every other round and `allow`.
+    if args.pr is not None or getattr(args, "no_post", False):
+        pr, pr_error = args.pr, None
+    else:
+        pr, pr_error = find_pr(info["repo"], info["branch"])
     lock = locked()
     lock.__enter__()  # held until this round's number is reserved, or the run is refused
     rotate()
@@ -599,15 +613,15 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         "host": socket.gethostname(),
         "repo": info["repo"],
         "branch": info["branch"],
-        # Found from the branch unless given, so every round posts by default
-        "pr": args.pr if args.pr is not None
-        else None if getattr(args, "no_post", False) else find_pr(info["branch"]),
+        "pr": pr,
         "base": info["base"],
         "merge_base": info["merge_base"],
         "head": info["head"],
         "round": rnd,
         "allowed": limit,
     }
+    if pr_error:
+        run["post_error"] = pr_error
     if rnd > limit:
         run.update(result="refused", ended=now(), counts=counts([]), fix_rounds=[])
         append(RUNS, [run])

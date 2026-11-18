@@ -346,9 +346,14 @@ PY
     fi
 
     # With no --pr, the round finds the branch's open pull request and posts on it
+    # A fork's pull request from a branch of the same name comes first, and is not ours
     cat > "$t/gh-find" <<FAKE
 #!/bin/sh
-if [ "\$1 \$2" = "pr view" ]; then echo 7; exit 0; fi
+if [ "\$1 \$2" = "pr list" ]; then
+  printf '%s\\n' "\$@" > "$t/gh-find-args"
+  echo '[{"number":9,"isCrossRepository":true},{"number":7,"isCrossRepository":false}]'
+  exit 0
+fi
 cat > "$t/comment.md"
 echo "https://github.com/o/r/pull/7#issuecomment-2"
 FAKE
@@ -359,10 +364,24 @@ FAKE
         REVIEW_ROUND_GH="$t/gh-find" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
     if [[ $rc -eq 1 ]] && grep -q "round 1/3" "$t/comment.md" \
         && tail -1 "$t/log-find/runs.jsonl" | grep -q '"pr": 7' \
-        && tail -1 "$t/log-find/runs.jsonl" | grep -q 'issuecomment-2'; then
-        pass "review-round finds the branch's open PR and posts without --pr"
+        && tail -1 "$t/log-find/runs.jsonl" | grep -q 'issuecomment-2' \
+        && grep -qx -- --repo "$t/gh-find-args" && grep -qx feat "$t/gh-find-args" \
+        && grep -qx open "$t/gh-find-args"; then
+        pass "review-round finds the branch's open PR, not a fork's, and posts without --pr"
     else
         fail "review-round find PR (rc=$rc): $out"; failed=1
+    fi
+
+    # A gh that fails says so, and is logged, rather than reading as no pull request
+    printf '#!/bin/sh\necho "gh: not logged in" >&2\nexit 4\n' > "$t/gh-fail"
+    chmod +x "$t/gh-fail"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fail" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fail" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if grep -q "could not ask gh for the pull request: gh: not logged in; not posted" <<<"$out" \
+        && tail -1 "$t/log-fail/runs.jsonl" | grep -q '"post_error": "could not ask gh'; then
+        pass "review-round logs a failed PR lookup, rather than reporting no PR"
+    else
+        fail "review-round PR lookup failure (rc=$rc): $out"; failed=1
     fi
 
     # A symlink is a note in the reviewer's copy, never followed; the copy is removed
