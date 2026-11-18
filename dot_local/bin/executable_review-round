@@ -401,7 +401,7 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
                 " read the changed files with the Read tool.)")
     earlier = "\n".join(
-        f"- {f['id']} [{f['severity']}{'' if 'kind' not in f else ' ' + f['kind']}] "
+        f"- {f['id']} [{f['severity']} {f.get('kind', 'bug')}] "
         f"{f.get('file') or '-'}: {f.get('summary', '')}"
         for f in earlier_findings(info)) or "(none)"
     prompt = f"""{method}
