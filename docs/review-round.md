@@ -31,7 +31,7 @@ With no open pull request, it says so and posts nothing.
 The comment holds:
 
 - the summary line;
-- one table row per finding: severity, origin, file and line, summary;
+- one table row per finding: severity, kind, origin, file and line, summary;
 - the run id, head commit, agent, reviewer, time and cost.
 
 The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).
