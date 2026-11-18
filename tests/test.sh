@@ -353,7 +353,7 @@ PY
 #!/bin/sh
 if [ "\$1 \$2" = "pr list" ]; then
   printf '%s\\n' "\$@" > "$t/gh-find-args"
-  echo '[{"number":9,"isCrossRepository":true},{"number":7,"isCrossRepository":false}]'
+  echo '[{"number":9,"isCrossRepository":true,"baseRefName":"main"},{"number":7,"isCrossRepository":false,"baseRefName":"main"}]'
   exit 0
 fi
 cat > "$t/comment.md"
@@ -378,7 +378,7 @@ FAKE
     cat > "$t/gh-fork" <<FAKE
 #!/bin/sh
 if [ "\$1 \$2" = "pr list" ]; then
-  echo '[{"number":8,"isCrossRepository":true}]'
+  echo '[{"number":8,"isCrossRepository":true,"baseRefName":"main"}]'
   exit 0
 fi
 cat > "$t/comment.md"
@@ -424,8 +424,34 @@ PY
         fail "review-round on_github"; failed=1
     fi
 
+    # Of two open pull requests from the branch, the one into the reviewed base
+    cat > "$t/gh-two" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr list" ]; then
+  echo "\$TWO"
+  exit 0
+fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/6#issuecomment-4"
+FAKE
+    chmod +x "$t/gh-two"
+    local o_into o_none
+    o_into=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"},{"number":6,"isCrossRepository":false,"baseRefName":"main"}]' \
+        REVIEW_ROUND_HOME="$t/log-two" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1)
+    local into_pr; into_pr=$(tail -1 "$t/log-two/runs.jsonl")
+    o_none=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"},{"number":4,"isCrossRepository":false,"baseRefName":"next"}]' \
+        REVIEW_ROUND_HOME="$t/log-two-none" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1)
+    if grep -q '"pr": 6' <<<"$into_pr" \
+        && grep -q "several open pull requests (#5, #4); name one with --pr" <<<"$o_none"; then
+        pass "review-round picks the PR into the reviewed base, or asks"
+    else
+        fail "review-round two PRs: $o_into / $o_none"; failed=1
+    fi
+
     # A gh answer that is not a list of pull requests is logged, not a crash
-    printf '#!/bin/sh\necho %s\n' "'[{\"number\":\"seven\",\"isCrossRepository\":false}]'" > "$t/gh-odd"
+    printf '#!/bin/sh\necho %s\n' "'[{\"number\":\"seven\",\"isCrossRepository\":false,\"baseRefName\":\"main\"}]'" > "$t/gh-odd"
     chmod +x "$t/gh-odd"
     out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-odd" REVIEW_ROUND_CLAUDE="$t/claude" \
         REVIEW_ROUND_GH="$t/gh-odd" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?

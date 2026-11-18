@@ -569,16 +569,17 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
+def find_pr(repo: str, branch: str, base: str) -> tuple[int | None, str | None]:
     """The branch's open pull request, so each round posts without --pr; or why gh
     could not say. Asked of `repo`, where the comment goes, and only one opened from
     `repo` itself: a fork's may be a stranger's with the same branch name, so a fork's
-    pull request is named with --pr."""
+    pull request is named with --pr. Of several, the one into `base`, the branch
+    this round reviews against; with none of them into it, which is meant is unknown."""
     try:
         res = subprocess.run(
             [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "list", "--repo", repo,
              "--head", branch, "--state", "open",
-             "--json", "number,isCrossRepository"],
+             "--json", "number,isCrossRepository,baseRefName"],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -586,11 +587,18 @@ def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
     if res.returncode != 0:
         return None, f"could not ask gh for the pull request: {res.stderr.strip()}"[:300]
     try:
-        found = [int(p["number"]) for p in json.loads(res.stdout or "[]")
+        found = [(int(p["number"]), str(p["baseRefName"])) for p in json.loads(res.stdout or "[]")
                  if not p["isCrossRepository"]]
     except (ValueError, TypeError, KeyError) as e:
         return None, f"gh's answer was not a list of pull requests: {e}"[:300]
-    return (found[0] if found else None), None
+    if len(found) > 1:
+        # `base` is a ref such as origin/main; a pull request names the branch
+        into = [n for n, b in found if base in (b, f"origin/{b}", f"refs/remotes/origin/{b}")]
+        if len(into) != 1:
+            numbers = ", ".join(f"#{n}" for n, _ in found)
+            return None, f"{branch} has several open pull requests ({numbers}); name one with --pr"
+        return into[0], None
+    return (found[0][0] if found else None), None
 
 
 def post(args, run: dict, rows: list[dict]) -> None:
@@ -626,7 +634,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     if args.pr is not None or getattr(args, "no_post", False) or not info["on_github"]:
         pr, pr_error = args.pr, None
     else:
-        pr, pr_error = find_pr(info["repo"], info["branch"])
+        pr, pr_error = find_pr(info["repo"], info["branch"], info["base"])
     lock = locked()
     lock.__enter__()  # held until this round's number is reserved, or the run is refused
     rotate()
