@@ -39,6 +39,8 @@ How I want every session on my machines to write, ask and act.
 - Never leave a bug only in a pull request's text.
 - Relay the summary line of every round to me.
 - Past the round limit, ask me; never run `review-round allow` yourself.
+- Manta repositories (`mantatech/*`) are the exception: their review runs in CI, not locally.
+- There, the CI Claude review and `check-pr-ready` decide; `review-round` and its limit do not apply.
 
 ### Manta projects are excluded
 
