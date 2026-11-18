@@ -25,10 +25,17 @@ Both print each finding and a one-line summary; agents relay that line to the pe
 
 ## The pull request comment
 
-With `--pr N`, each round comments on the pull request, refusals and errors included:
+Each round comments on the branch's open pull request, refusals and errors included.
+It asks `gh pr list --repo <origin's repo> --head <branch> --state open`; `--pr N` names one instead.
+- Only one into the base this round reviews against counts, since the comment describes that diff. One into another base is named, with `--base` or `--pr N` as the way to post on it.
+- Only one opened from that repository counts. A fork's may be a stranger's with the same branch name, so a fork's pull request is named with `--pr N`.
+- With no open pull request, it says so and posts nothing. A failed lookup says why, and is logged as `post_error`.
+- When `origin` is not on GitHub, it looks for none and says nothing. An ssh host alias counts as GitHub when `ssh -G <alias>` names `github.com` as its host name.
+
+The comment holds:
 
 - the summary line;
-- one table row per finding: severity, origin, file and line, summary;
+- one table row per finding: severity, kind, origin, file and line, summary;
 - the run id, head commit, agent, reviewer, time and cost.
 
 The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).

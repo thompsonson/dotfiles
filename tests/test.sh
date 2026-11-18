@@ -345,6 +345,149 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
+    # With no --pr, the round finds the branch's open pull request and posts on it.
+    # Only a GitHub origin is asked, so these name one, and put the real one back after.
+    "${g[@]}" -C "$t/repo" remote set-url origin https://github.com/o/r.git
+    # A fork's pull request from a branch of the same name comes first, and is not ours
+    cat > "$t/gh-find" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr list" ]; then
+  printf '%s\\n' "\$@" > "$t/gh-find-args"
+  echo '[{"number":9,"isCrossRepository":true,"baseRefName":"main"},{"number":7,"isCrossRepository":false,"baseRefName":"main"}]'
+  exit 0
+fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/7#issuecomment-2"
+FAKE
+    chmod +x "$t/gh-find"
+    # (its own log, so the rounds counted by the tests below don't change)
+    : > "$t/comment.md"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-find" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-find" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "round 1/3" "$t/comment.md" \
+        && tail -1 "$t/log-find/runs.jsonl" | grep -q '"pr": 7' \
+        && tail -1 "$t/log-find/runs.jsonl" | grep -q 'issuecomment-2' \
+        && grep -qx -- --repo "$t/gh-find-args" && grep -qx feat "$t/gh-find-args" \
+        && grep -qx open "$t/gh-find-args"; then
+        pass "review-round finds the branch's open PR, not a fork's, and posts without --pr"
+    else
+        fail "review-round find PR (rc=$rc): $out"; failed=1
+    fi
+
+    # A fork's pull request alone is not posted on: it is named with --pr
+    cat > "$t/gh-fork" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr list" ]; then
+  echo '[{"number":8,"isCrossRepository":true,"baseRefName":"main"}]'
+  exit 0
+fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/8#issuecomment-3"
+FAKE
+    chmod +x "$t/gh-fork"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fork" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fork" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if grep -q "no open pull request for feat (use --pr N); not posted" <<<"$out" \
+        && tail -1 "$t/log-fork/runs.jsonl" | grep -q '"pr": null'; then
+        pass "review-round does not post on a fork's PR unless named"
+    else
+        fail "review-round fork PR (rc=$rc): $out"; failed=1
+    fi
+
+    # GitHub by host, or by the host an ssh alias resolves to; nothing else
+    mkdir -p "$t/bin"
+    printf '#!/bin/sh\n[ "$2" = gh-work ] && echo "hostname github.com" || echo "hostname $2"\n' > "$t/bin/ssh"
+    chmod +x "$t/bin/ssh"
+    if PATH="$t/bin:$PATH" python3 - "$script" <<'PY'
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("rr", sys.argv[1])
+spec = importlib.util.spec_from_loader("rr", loader)
+rr = importlib.util.module_from_spec(spec)
+loader.exec_module(rr)
+cases = {
+    "https://github.com/o/r.git": True,
+    "git@github.com:o/r.git": True,
+    "ssh://git@ssh.github.com:443/o/r.git": True,
+    "git@gh-work:o/r.git": True,
+    "ssh://git@gh-work/o/r.git": True,
+    "git@gitlab.com:o/r.git": False,
+    "https://gitlab.com/o/r.git": False,
+    "/srv/git/r.git": False,
+    "": False,
+}
+got = {u: rr.on_github(u) for u in cases}
+assert got == cases, got
+PY
+    then
+        pass "review-round knows a GitHub origin by host or ssh alias"
+    else
+        fail "review-round on_github"; failed=1
+    fi
+
+    # Of two open pull requests from the branch, the one into the reviewed base
+    cat > "$t/gh-two" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr list" ]; then
+  echo "\$TWO"
+  exit 0
+fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/6#issuecomment-4"
+FAKE
+    chmod +x "$t/gh-two"
+    local o_into o_none
+    o_into=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"},{"number":6,"isCrossRepository":false,"baseRefName":"main"}]' \
+        REVIEW_ROUND_HOME="$t/log-two" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1)
+    local into_pr; into_pr=$(tail -1 "$t/log-two/runs.jsonl")
+    o_none=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"},{"number":4,"isCrossRepository":false,"baseRefName":"next"}]' \
+        REVIEW_ROUND_HOME="$t/log-two-none" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1)
+    if grep -q '"pr": 6' <<<"$into_pr" \
+        && grep -q "no open pull request for feat into origin/main (#5 into dev, #4 into next); review against its base with --base, or name it with --pr; not posted$" <<<"$o_none" \
+        && o_one=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"}]' \
+            REVIEW_ROUND_HOME="$t/log-two-one" REVIEW_ROUND_CLAUDE="$t/claude" \
+            REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1; true) \
+        && grep -q "(#5 into dev)" <<<"$o_one" && tail -1 "$t/log-two-one/runs.jsonl" | grep -q '"pr": null'; then
+        pass "review-round posts only on the PR into the reviewed base, and names any other"
+    else
+        fail "review-round two PRs: $o_into / $o_none"; failed=1
+    fi
+
+    # A gh answer that is not a list of pull requests is logged, not a crash
+    printf '#!/bin/sh\necho %s\n' "'[{\"number\":\"seven\",\"isCrossRepository\":false,\"baseRefName\":\"main\"}]'" > "$t/gh-odd"
+    chmod +x "$t/gh-odd"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-odd" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-odd" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "not a list of pull requests" <<<"$out" \
+        && tail -1 "$t/log-odd/runs.jsonl" | grep -q '"result": "findings"'; then
+        pass "review-round logs an odd gh answer rather than crashing"
+    else
+        fail "review-round odd gh answer (rc=$rc): $out"; failed=1
+    fi
+
+    # A gh that fails says so, and is logged, rather than reading as no pull request
+    printf '#!/bin/sh\necho "gh: not logged in" >&2\nexit 4\n' > "$t/gh-fail"
+    chmod +x "$t/gh-fail"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fail" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fail" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if grep -q "could not ask gh for the pull request: gh: not logged in; not posted" <<<"$out" \
+        && tail -1 "$t/log-fail/runs.jsonl" | grep -q '"post_error": "could not ask gh'; then
+        pass "review-round logs a failed PR lookup, rather than reporting no PR"
+    else
+        fail "review-round PR lookup failure (rc=$rc): $out"; failed=1
+    fi
+    "${g[@]}" -C "$t/repo" remote set-url origin "$t/origin.git"
+
+    # An origin that is not on GitHub is not asked, and nothing is said about it
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-local" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fail" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if ! grep -q "not posted" <<<"$out" && ! grep -q post_error "$t/log-local/runs.jsonl"; then
+        pass "review-round looks for no PR when origin is not on GitHub"
+    else
+        fail "review-round non-GitHub origin (rc=$rc): $out"; failed=1
+    fi
+
     # A symlink is a note in the reviewer's copy, never followed; the copy is removed
     ln -s /etc/hostname "$t/repo/out" && "${g[@]}" -C "$t/repo" add out && "${g[@]}" -C "$t/repo" commit -q -m link
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
