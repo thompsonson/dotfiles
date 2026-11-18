@@ -387,7 +387,7 @@ FAKE
     chmod +x "$t/gh-fork"
     out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fork" REVIEW_ROUND_CLAUDE="$t/claude" \
         REVIEW_ROUND_GH="$t/gh-fork" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
-    if grep -q "no open pull request for feat; not posted (use --pr N)" <<<"$out" \
+    if grep -q "no open pull request for feat (use --pr N); not posted" <<<"$out" \
         && tail -1 "$t/log-fork/runs.jsonl" | grep -q '"pr": null'; then
         pass "review-round does not post on a fork's PR unless named"
     else
@@ -444,8 +444,12 @@ FAKE
         REVIEW_ROUND_HOME="$t/log-two-none" REVIEW_ROUND_CLAUDE="$t/claude" \
         REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1)
     if grep -q '"pr": 6' <<<"$into_pr" \
-        && grep -q "several open pull requests (#5, #4); name one with --pr" <<<"$o_none"; then
-        pass "review-round picks the PR into the reviewed base, or asks"
+        && grep -q "no open pull request for feat into origin/main (#5 into dev, #4 into next); review against its base with --base, or name it with --pr; not posted$" <<<"$o_none" \
+        && o_one=$(cd "$t/repo" && env TWO='[{"number":5,"isCrossRepository":false,"baseRefName":"dev"}]' \
+            REVIEW_ROUND_HOME="$t/log-two-one" REVIEW_ROUND_CLAUDE="$t/claude" \
+            REVIEW_ROUND_GH="$t/gh-two" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1; true) \
+        && grep -q "(#5 into dev)" <<<"$o_one" && tail -1 "$t/log-two-one/runs.jsonl" | grep -q '"pr": null'; then
+        pass "review-round posts only on the PR into the reviewed base, and names any other"
     else
         fail "review-round two PRs: $o_into / $o_none"; failed=1
     fi

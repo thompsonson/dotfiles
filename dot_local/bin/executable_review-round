@@ -573,8 +573,8 @@ def find_pr(repo: str, branch: str, base: str) -> tuple[int | None, str | None]:
     """The branch's open pull request, so each round posts without --pr; or why gh
     could not say. Asked of `repo`, where the comment goes, and only one opened from
     `repo` itself: a fork's may be a stranger's with the same branch name, so a fork's
-    pull request is named with --pr. Of several, the one into `base`, the branch
-    this round reviews against; with none of them into it, which is meant is unknown."""
+    pull request is named with --pr. Only one into `base`, the branch this round
+    reviews against, since the comment describes that diff and no other."""
     try:
         res = subprocess.run(
             [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "list", "--repo", repo,
@@ -591,22 +591,23 @@ def find_pr(repo: str, branch: str, base: str) -> tuple[int | None, str | None]:
                  if not p["isCrossRepository"]]
     except (ValueError, TypeError, KeyError) as e:
         return None, f"gh's answer was not a list of pull requests: {e}"[:300]
-    if len(found) > 1:
-        # `base` is a ref such as origin/main; a pull request names the branch
-        into = [n for n, b in found if base in (b, f"origin/{b}", f"refs/remotes/origin/{b}")]
-        if len(into) != 1:
-            numbers = ", ".join(f"#{n}" for n, _ in found)
-            return None, f"{branch} has several open pull requests ({numbers}); name one with --pr"
+    if not found:
+        return None, None
+    # `base` is a ref such as origin/main; a pull request names the branch
+    into = [n for n, b in found if base in (b, f"origin/{b}", f"refs/remotes/origin/{b}")]
+    if len(into) == 1:
         return into[0], None
-    return (found[0][0] if found else None), None
+    others = ", ".join(f"#{n} into {b}" for n, b in found)
+    return None, (f"no open pull request for {branch} into {base} ({others}); "
+                  "review against its base with --base, or name it with --pr")
 
 
 def post(args, run: dict, rows: list[dict]) -> None:
     """Comment on the pull request, given with --pr or found from the branch; the run
     records the outcome."""
     if not run.get("pr") and not getattr(args, "no_post", False) and run.get("on_github", True):
-        why = run.get("post_error") or f"no open pull request for {run['branch']}"
-        print(f"review-round: {why}; not posted (use --pr N)", file=sys.stderr)
+        why = run.get("post_error") or f"no open pull request for {run['branch']} (use --pr N)"
+        print(f"review-round: {why}; not posted", file=sys.stderr)
     if not run.get("pr") or getattr(args, "no_post", False):
         return
     try:
