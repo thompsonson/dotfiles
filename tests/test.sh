@@ -374,12 +374,11 @@ FAKE
         fail "review-round find PR (rc=$rc): $out"; failed=1
     fi
 
-    # A fork's pull request counts when its head is this checkout's commit
-    local head; head=$("${g[@]}" -C "$t/repo" rev-parse HEAD)
+    # A fork's pull request alone is not posted on: it is named with --pr
     cat > "$t/gh-fork" <<FAKE
 #!/bin/sh
 if [ "\$1 \$2" = "pr list" ]; then
-  echo '[{"number":5,"isCrossRepository":true,"headRefOid":"other"},{"number":8,"isCrossRepository":true,"headRefOid":"$head"}]'
+  echo '[{"number":8,"isCrossRepository":true}]'
   exit 0
 fi
 cat > "$t/comment.md"
@@ -388,10 +387,41 @@ FAKE
     chmod +x "$t/gh-fork"
     out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fork" REVIEW_ROUND_CLAUDE="$t/claude" \
         REVIEW_ROUND_GH="$t/gh-fork" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
-    if tail -1 "$t/log-fork/runs.jsonl" | grep -q '"pr": 8'; then
-        pass "review-round posts on a fork's PR only when its head is this commit"
+    if grep -q "no open pull request for feat; not posted (use --pr N)" <<<"$out" \
+        && tail -1 "$t/log-fork/runs.jsonl" | grep -q '"pr": null'; then
+        pass "review-round does not post on a fork's PR unless named"
     else
         fail "review-round fork PR (rc=$rc): $out"; failed=1
+    fi
+
+    # GitHub by host, or by the host an ssh alias resolves to; nothing else
+    mkdir -p "$t/bin"
+    printf '#!/bin/sh\n[ "$2" = gh-work ] && echo "hostname github.com" || echo "hostname $2"\n' > "$t/bin/ssh"
+    chmod +x "$t/bin/ssh"
+    if PATH="$t/bin:$PATH" python3 - "$script" <<'PY'
+import importlib.machinery, importlib.util, sys
+loader = importlib.machinery.SourceFileLoader("rr", sys.argv[1])
+spec = importlib.util.spec_from_loader("rr", loader)
+rr = importlib.util.module_from_spec(spec)
+loader.exec_module(rr)
+cases = {
+    "https://github.com/o/r.git": True,
+    "git@github.com:o/r.git": True,
+    "ssh://git@ssh.github.com:443/o/r.git": True,
+    "git@gh-work:o/r.git": True,
+    "ssh://git@gh-work/o/r.git": True,
+    "git@gitlab.com:o/r.git": False,
+    "https://gitlab.com/o/r.git": False,
+    "/srv/git/r.git": False,
+    "": False,
+}
+got = {u: rr.on_github(u) for u in cases}
+assert got == cases, got
+PY
+    then
+        pass "review-round knows a GitHub origin by host or ssh alias"
+    else
+        fail "review-round on_github"; failed=1
     fi
 
     # A gh that fails says so, and is logged, rather than reading as no pull request

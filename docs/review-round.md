@@ -27,10 +27,9 @@ Both print each finding and a one-line summary; agents relay that line to the pe
 
 Each round comments on the branch's open pull request, refusals and errors included.
 It asks `gh pr list --repo <origin's repo> --head <branch> --state open`; `--pr N` names one instead.
-- One opened from that repository comes first.
-- One from a fork counts only when its head is this checkout's commit, since a stranger's fork may use the same branch name.
+- Only one opened from that repository counts. A fork's may be a stranger's with the same branch name, so a fork's pull request is named with `--pr N`.
 - With no open pull request, it says so and posts nothing. A failed lookup says why, and is logged as `post_error`.
-- When `origin` is not on GitHub, it looks for none and says nothing.
+- When `origin` is not on GitHub, it looks for none and says nothing. An ssh host alias counts as GitHub when `ssh -G <alias>` names `github.com` as its host name.
 
 The comment holds:
 
