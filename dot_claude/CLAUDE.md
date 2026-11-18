@@ -33,7 +33,10 @@ How I want every session on my machines to write, ask and act.
 
 - Run each review round with `review-round run`, or log one done elsewhere with `review-round record`.
 - Name fix commits with their round: `fix(scope): review round N — …`.
-- Fix highs and mediums only; list lows in the pull request.
+- Fix every bug the round finds, whatever its severity, before asking me to merge.
+- Fix polish when it is in the change's scope; list the rest in the pull request.
+- A bug you can't fix in this change gets an issue, linked from the pull request.
+- Never leave a bug only in a pull request's text.
 - Relay the summary line of every round to me.
 - Past the round limit, ask me; never run `review-round allow` yourself.
 

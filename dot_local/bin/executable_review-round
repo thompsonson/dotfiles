@@ -11,6 +11,8 @@ Each round:
                      (a commit whose subject says "review round N")
       unknown        no file or line, or the line can't be blamed
   - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
+  - marks each finding a bug (some input or state gives a wrong result) or polish
+    (nothing behaves wrongly); a round with any bug, of any severity, is not clean;
   - prints a one-line summary for the person in charge, and with --pr puts it, with one
     line per finding, in a comment on the pull request (--no-post to skip).
 
@@ -66,6 +68,7 @@ LOCK = HOME / ".lock"
 LIMIT = int(os.environ.get("REVIEW_ROUND_LIMIT", "3"))
 MAX_BYTES = float(os.environ.get("REVIEW_ROUND_MAX_MB", "5")) * 1024 * 1024
 SEVERITIES = ("high", "medium", "low")
+KINDS = ("bug", "polish")
 ORIGINS = ("pre-existing", "original", "fix", "unknown")
 FIX_SUBJECT = re.compile(r"review round (\d+)", re.IGNORECASE)
 
@@ -78,6 +81,11 @@ FINDINGS_SCHEMA = {
                 "type": "object",
                 "properties": {
                     "severity": {"enum": list(SEVERITIES)},
+                    "kind": {
+                        "enum": list(KINDS),
+                        "description": "bug: some input or state gives a wrong result; "
+                        "polish: nothing behaves wrongly",
+                    },
                     "file": {"type": "string"},
                     "line": {"type": "integer"},
                     "summary": {"type": "string"},
@@ -93,7 +101,7 @@ FINDINGS_SCHEMA = {
                         "defect as, or what an incomplete fix left (e.g. r2.1)",
                     },
                 },
-                "required": ["severity", "summary", "scenario"],
+                "required": ["severity", "kind", "summary", "scenario"],
             },
         }
     },
@@ -106,8 +114,12 @@ Review the diff for correctness and security bugs.
 - For each finding, state a concrete failure: which input or state gives which wrong result.
 - Re-read the line in the file before reporting it; give the file path relative to the
   repository root and the line in the current file.
-- Severity: high = wrong result, broken feature, lost data or input, or a security hole;
-  medium = confusing or partial breakage; low = polish.
+- Kind: bug = some input or state gives a wrong result: a crash, a hang, a wrong answer,
+  lost data or input, a leak, or a security hole, however unlikely the input;
+  polish = nothing behaves wrongly: wording, naming, docs, a weak test, style.
+- Severity is how much harm, not whether it is a bug: high = wrong result, broken feature,
+  lost data or input, or a security hole; medium = confusing or partial breakage;
+  low = rare or small harm, or polish. An unlikely bug is a low bug, not polish.
 - Merge findings that share one cause. Name the fix.
 - Say where each defect came from: pre-existing (already on the base branch), original
   (the branch's first build), or fix (an earlier review round's fix commit).
@@ -389,7 +401,8 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
         diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
                 " read the changed files with the Read tool.)")
     earlier = "\n".join(
-        f"- {f['id']} [{f['severity']}] {f.get('file') or '-'}: {f.get('summary', '')}"
+        f"- {f['id']} [{f['severity']} {f.get('kind', 'bug')}] "
+        f"{f.get('file') or '-'}: {f.get('summary', '')}"
         for f in earlier_findings(info)) or "(none)"
     prompt = f"""{method}
 
@@ -475,12 +488,20 @@ def counts(findings: list[dict]) -> dict:
     return c
 
 
+def bugs(rows: list[dict]) -> int:
+    """Findings of kind bug, any severity: each is fixed, or tracked in an issue."""
+    return sum(1 for r in rows if r.get("kind", "bug") == "bug")
+
+
 def summary_line(run: dict) -> str:
     c = run["counts"]
     sev = ", ".join(f"{sum(c[s].values())} {s}" for s in SEVERITIES)
     fixes = run.get("fix_rounds", [])
     intro = sum(c[s]["fix"] for s in SEVERITIES)
-    tail = f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})" if intro else ""
+    n = run.get("bugs") or 0
+    tail = f"; {n} bug{'' if n == 1 else 's'}" if n else ""
+    if intro:
+        tail += f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})"
     if run.get("repeats"):
         tail += f"; {run['repeats']} repeat earlier findings"
     if run.get("disagree"):
@@ -497,15 +518,16 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     if run.get("error"):
         lines += ["", f"Error: {run['error'][:300]}"]
     if rows:
-        lines += ["", "| id | severity | origin | repeat of | where | finding |",
-                  "|---|---|---|---|---|---|"]
+        lines += ["", "| id | severity | kind | origin | repeat of | where | finding |",
+                  "|---|---|---|---|---|---|---|"]
         for r in rows:
             tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
             if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
                 tag += f" (reviewer: {r['claimed_origin']})"
             where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
             text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
-            lines.append(f"| {r.get('id', '')} | {r['severity']} | {tag} | {r.get('repeat_of') or ''}"
+            lines.append(f"| {r.get('id', '')} | {r['severity']} | {r.get('kind', 'bug')} | {tag}"
+                         f" | {r.get('repeat_of') or ''}"
                          f" | {where} | {text[:300]} |")
     bits = [f"run `{run['run_id']}`", f"head `{run['head'][:7]}`", f"by {run.get('agent')}"]
     if run.get("reviewer"):
@@ -606,6 +628,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                     "round": rnd,
                     "severity": sev,
                     "raw_severity": raw_sev if raw_sev != sev else None,
+                    # an unclassified finding is a bug until someone says otherwise
+                    "kind": "polish" if str(f.get("kind", "")).strip().lower() == "polish" else "bug",
                     "file": f.get("file"),
                     "line": line,
                     "origin": origin,
@@ -635,7 +659,9 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     run.update(
         ended=now(),
         seconds=round(time.monotonic() - start, 1),
-        result="findings" if any(c[s][o] for s in ("high", "medium") for o in ORIGINS) else "clean",
+        result="findings" if bugs(rows) or any(c[s][o] for s in ("high", "medium") for o in ORIGINS)
+        else "clean",
+        bugs=bugs(rows),
         counts=c,
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
@@ -651,11 +677,11 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         if r["claimed_origin"] and r["claimed_origin"] != r["origin"]:
             tag += f" [reviewer: {r['claimed_origin']}]"
         again = f" (repeat of {r['repeat_of']})" if r.get("repeat_of") else ""
-        print(f"  {r['id']:<6} {r['severity']:<6} {tag:<16} {where}  {r['summary']}{again}")
+        print(f"  {r['id']:<6} {r['severity']:<6} {r['kind']:<6} {tag:<16} {where}  {r['summary']}{again}")
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
-    return 1 if c["high"] and sum(c["high"].values()) else 0
+    return 1 if run["bugs"] or sum(c["high"].values()) else 0
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────

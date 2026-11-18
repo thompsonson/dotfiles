@@ -308,7 +308,7 @@ PY
     else
         fail "review-round origins (rc=$rc): $out"; failed=1
     fi
-    if grep -q "round 1/2" "$t/comment.md" && grep -q "| high | fix (round 1) |" "$t/comment.md" \
+    if grep -q "round 1/2" "$t/comment.md" && grep -q "| high | bug | fix (round 1) |" "$t/comment.md" \
         && grep -q '"posted": "https://github.com/o/r/pull/7#issuecomment-1"' "$t/log/runs.jsonl"; then
         pass "review-round comments on the PR and logs the comment"
     else
@@ -328,8 +328,8 @@ PY
     # Round 2 sees round 1's findings by id, and a repeat shows in the comment
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     (cd "$t/repo" && "${rr[@]}" run --pr 7 >/dev/null 2>&1)
-    if grep -q -- "- r1.3 \[high\] f.txt: fixbug" "$t/claude-prompt" \
-        && grep -q "| r2.3 | high | fix (round 1) | r1.3 |" "$t/comment.md"; then
+    if grep -q -- "- r1.3 \[high bug\] f.txt: fixbug" "$t/claude-prompt" \
+        && grep -q "| r2.3 | high | bug | fix (round 1) | r1.3 |" "$t/comment.md"; then
         pass "review-round shows earlier findings and marks repeats"
     else
         fail "review-round repeats: $(cat "$t/comment.md")"; failed=1
@@ -381,6 +381,29 @@ PY
         pass "review-round won't record a round number already used"
     else
         fail "review-round record --round (rc=$rc): $out"; failed=1
+    fi
+
+    # A low bug is a finding to fix; low polish alone is clean; no kind counts as a bug
+    local rk=("${rr[@]/#REVIEW_ROUND_HOME=*/REVIEW_ROUND_HOME=$t/log-kind}")
+    printf '[{"severity":"low","kind":"polish","summary":"p","scenario":"x"}]' > "$t/polish.json"
+    printf '[{"severity":"low","kind":"bug","summary":"b","scenario":"x"}]' > "$t/bug.json"
+    printf '[{"severity":"low","summary":"u","scenario":"x"}]' > "$t/nokind.json"
+    local o1 o2 o3 rc1 rc2
+    o1=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/polish.json" 2>&1); rc1=$?
+    o2=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/bug.json" 2>&1); rc2=$?
+    (cd "$t/repo" && "${rk[@]}" allow feat 1 --by person >/dev/null)
+    o3=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/nokind.json" 2>&1)
+    if [[ $rc1 -eq 0 && $rc2 -eq 1 ]] && grep -q "round 1/2: clean — 0 high, 0 medium, 1 low$" <<<"$o1" \
+        && grep -q "round 2/2: findings — 0 high, 0 medium, 1 low; 1 bug" <<<"$o2" \
+        && grep -q "round 3/3: findings — .*; 1 bug" <<<"$o3" \
+        && grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl" \
+        && python3 -c 'import sys; p = sys.argv[1]; s = open(p).read(); open(p, "w").write(s.replace("\"kind\": \"polish\", ", ""))' "$t/log-kind/findings.jsonl" \
+        && ! grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl" \
+        && (cd "$t/repo" && "${rk[@]}" allow feat 1 --by person >/dev/null \
+            && "${rk[@]}" run --no-post >"$t/kind-run" 2>&1; grep -q -- "- r1.1 \[low bug\]" "$t/claude-prompt"); then
+        pass "review-round counts a low bug as a finding, and low polish as clean"
+    else
+        fail "review-round kinds (rc $rc1 $rc2): $o1 / $o2 / $o3 / $(cat "$t/kind-run" 2>/dev/null) / $(grep -A5 '## Earlier' "$t/claude-prompt")"; failed=1
     fi
 
     # Two runs at once take different rounds
