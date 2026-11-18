@@ -328,7 +328,7 @@ PY
     # Round 2 sees round 1's findings by id, and a repeat shows in the comment
     (cd "$t/repo" && "${rr[@]}" allow feat 1 --by person >/dev/null)
     (cd "$t/repo" && "${rr[@]}" run --pr 7 >/dev/null 2>&1)
-    if grep -q -- "- r1.3 \[high\] f.txt: fixbug" "$t/claude-prompt" \
+    if grep -q -- "- r1.3 \[high bug\] f.txt: fixbug" "$t/claude-prompt" \
         && grep -q "| r2.3 | high | bug | fix (round 1) | r1.3 |" "$t/comment.md"; then
         pass "review-round shows earlier findings and marks repeats"
     else
@@ -388,18 +388,20 @@ PY
     printf '[{"severity":"low","kind":"polish","summary":"p","scenario":"x"}]' > "$t/polish.json"
     printf '[{"severity":"low","kind":"bug","summary":"b","scenario":"x"}]' > "$t/bug.json"
     printf '[{"severity":"low","summary":"u","scenario":"x"}]' > "$t/nokind.json"
-    local o1 o2 o3
-    o1=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/polish.json" 2>&1)
-    o2=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/bug.json" 2>&1)
+    local o1 o2 o3 rc1 rc2
+    o1=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/polish.json" 2>&1); rc1=$?
+    o2=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/bug.json" 2>&1); rc2=$?
     (cd "$t/repo" && "${rk[@]}" allow feat 1 --by person >/dev/null)
     o3=$(cd "$t/repo" && "${rk[@]}" record --findings "$t/nokind.json" 2>&1)
-    if grep -q "round 1/2: clean — 0 high, 0 medium, 1 low$" <<<"$o1" \
+    if [[ $rc1 -eq 0 && $rc2 -eq 1 ]] && grep -q "round 1/2: clean — 0 high, 0 medium, 1 low$" <<<"$o1" \
         && grep -q "round 2/2: findings — 0 high, 0 medium, 1 low; 1 bug" <<<"$o2" \
         && grep -q "round 3/3: findings — .*; 1 bug" <<<"$o3" \
-        && grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl"; then
+        && grep -q '"kind": "polish"' "$t/log-kind/findings.jsonl" \
+        && (cd "$t/repo" && "${rk[@]}" allow feat 1 --by person >/dev/null \
+            && "${rk[@]}" run --no-post >/dev/null 2>&1; grep -q -- "- r2.1 \[low bug\]" "$t/claude-prompt"); then
         pass "review-round counts a low bug as a finding, and low polish as clean"
     else
-        fail "review-round kinds: $o1 / $o2 / $o3"; failed=1
+        fail "review-round kinds (rc $rc1 $rc2): $o1 / $o2 / $o3"; failed=1
     fi
 
     # Two runs at once take different rounds

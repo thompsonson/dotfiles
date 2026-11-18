@@ -34,8 +34,7 @@ With `--pr N`, each round comments on the pull request, refusals and errors incl
 The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).
 `--no-post` skips the comment.
 
-Exit codes: 0 no high findings, 1 high findings, 2 error, 3 refused (over the limit).
-A low bug exits 0 but makes the round `findings`.
+Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused (over the limit).
 
 ## Bugs and polish
 
