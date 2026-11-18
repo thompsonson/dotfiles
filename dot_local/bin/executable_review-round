@@ -266,6 +266,8 @@ def branch_info(base: str | None) -> dict:
         "base": base,
         "merge_base": merge_base,
         "head": git("rev-parse", "HEAD"),
+        # Only a GitHub origin has pull requests to find
+        "on_github": "github.com" in git("remote", "get-url", "origin", check=False),
     }
 
 
@@ -541,14 +543,16 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
+def find_pr(repo: str, branch: str, head: str) -> tuple[int | None, str | None]:
     """The branch's open pull request, so each round posts without --pr; or why gh
-    could not say. Asked of `repo`, where the comment goes, and only one opened from
-    `repo` itself: a fork's pull request from a branch of the same name is not this one."""
+    could not say. Asked of `repo`, where the comment goes. One opened from `repo`
+    itself comes first; one from a fork counts only when its head is `head`, this
+    checkout's commit, since a stranger's fork may use the same branch name."""
     try:
         res = subprocess.run(
             [os.environ.get("REVIEW_ROUND_GH", "gh"), "pr", "list", "--repo", repo,
-             "--head", branch, "--state", "open", "--json", "number,isCrossRepository"],
+             "--head", branch, "--state", "open",
+             "--json", "number,isCrossRepository,headRefOid"],
             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -556,7 +560,9 @@ def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
     if res.returncode != 0:
         return None, f"could not ask gh for the pull request: {res.stderr.strip()}"[:300]
     try:
-        found = [p["number"] for p in json.loads(res.stdout or "[]") if not p["isCrossRepository"]]
+        prs = json.loads(res.stdout or "[]")
+        found = [p["number"] for p in prs if not p["isCrossRepository"]]
+        found += [p["number"] for p in prs if p["isCrossRepository"] and p["headRefOid"] == head]
     except (ValueError, TypeError, KeyError) as e:
         return None, f"gh's answer was not a list of pull requests: {e}"[:300]
     return (int(found[0]) if found else None), None
@@ -565,7 +571,7 @@ def find_pr(repo: str, branch: str) -> tuple[int | None, str | None]:
 def post(args, run: dict, rows: list[dict]) -> None:
     """Comment on the pull request, given with --pr or found from the branch; the run
     records the outcome."""
-    if not run.get("pr") and not getattr(args, "no_post", False):
+    if not run.get("pr") and not getattr(args, "no_post", False) and run.get("on_github", True):
         why = run.get("post_error") or f"no open pull request for {run['branch']}"
         print(f"review-round: {why}; not posted (use --pr N)", file=sys.stderr)
     if not run.get("pr") or getattr(args, "no_post", False):
@@ -592,10 +598,10 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     info = branch_info(args.base)
     # Found from the branch unless given, so every round posts by default. Asked before
     # the lock: a call of up to a minute must not hold every other round and `allow`.
-    if args.pr is not None or getattr(args, "no_post", False):
+    if args.pr is not None or getattr(args, "no_post", False) or not info["on_github"]:
         pr, pr_error = args.pr, None
     else:
-        pr, pr_error = find_pr(info["repo"], info["branch"])
+        pr, pr_error = find_pr(info["repo"], info["branch"], info["head"])
     lock = locked()
     lock.__enter__()  # held until this round's number is reserved, or the run is refused
     rotate()
@@ -614,6 +620,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         "repo": info["repo"],
         "branch": info["branch"],
         "pr": pr,
+        "on_github": info["on_github"],
         "base": info["base"],
         "merge_base": info["merge_base"],
         "head": info["head"],

@@ -345,13 +345,15 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
-    # With no --pr, the round finds the branch's open pull request and posts on it
+    # With no --pr, the round finds the branch's open pull request and posts on it.
+    # Only a GitHub origin is asked, so these name one, and put the real one back after.
+    "${g[@]}" -C "$t/repo" remote set-url origin https://github.com/o/r.git
     # A fork's pull request from a branch of the same name comes first, and is not ours
     cat > "$t/gh-find" <<FAKE
 #!/bin/sh
 if [ "\$1 \$2" = "pr list" ]; then
   printf '%s\\n' "\$@" > "$t/gh-find-args"
-  echo '[{"number":9,"isCrossRepository":true},{"number":7,"isCrossRepository":false}]'
+  echo '[{"number":9,"isCrossRepository":true,"headRefOid":"other"},{"number":7,"isCrossRepository":false,"headRefOid":"x"}]'
   exit 0
 fi
 cat > "$t/comment.md"
@@ -372,6 +374,26 @@ FAKE
         fail "review-round find PR (rc=$rc): $out"; failed=1
     fi
 
+    # A fork's pull request counts when its head is this checkout's commit
+    local head; head=$("${g[@]}" -C "$t/repo" rev-parse HEAD)
+    cat > "$t/gh-fork" <<FAKE
+#!/bin/sh
+if [ "\$1 \$2" = "pr list" ]; then
+  echo '[{"number":5,"isCrossRepository":true,"headRefOid":"other"},{"number":8,"isCrossRepository":true,"headRefOid":"$head"}]'
+  exit 0
+fi
+cat > "$t/comment.md"
+echo "https://github.com/o/r/pull/8#issuecomment-3"
+FAKE
+    chmod +x "$t/gh-fork"
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-fork" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fork" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if tail -1 "$t/log-fork/runs.jsonl" | grep -q '"pr": 8'; then
+        pass "review-round posts on a fork's PR only when its head is this commit"
+    else
+        fail "review-round fork PR (rc=$rc): $out"; failed=1
+    fi
+
     # A gh that fails says so, and is logged, rather than reading as no pull request
     printf '#!/bin/sh\necho "gh: not logged in" >&2\nexit 4\n' > "$t/gh-fail"
     chmod +x "$t/gh-fail"
@@ -382,6 +404,16 @@ FAKE
         pass "review-round logs a failed PR lookup, rather than reporting no PR"
     else
         fail "review-round PR lookup failure (rc=$rc): $out"; failed=1
+    fi
+    "${g[@]}" -C "$t/repo" remote set-url origin "$t/origin.git"
+
+    # An origin that is not on GitHub is not asked, and nothing is said about it
+    out=$(cd "$t/repo" && env REVIEW_ROUND_HOME="$t/log-local" REVIEW_ROUND_CLAUDE="$t/claude" \
+        REVIEW_ROUND_GH="$t/gh-fail" REVIEW_ROUND_AGENT=smoke python3 -B "$script" run 2>&1); rc=$?
+    if ! grep -q "not posted" <<<"$out" && ! grep -q post_error "$t/log-local/runs.jsonl"; then
+        pass "review-round looks for no PR when origin is not on GitHub"
+    else
+        fail "review-round non-GitHub origin (rc=$rc): $out"; failed=1
     fi
 
     # A symlink is a note in the reviewer's copy, never followed; the copy is removed
