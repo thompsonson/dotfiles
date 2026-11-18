@@ -33,9 +33,21 @@ How I want every session on my machines to write, ask and act.
 
 - Run each review round with `review-round run`, or log one done elsewhere with `review-round record`.
 - Name fix commits with their round: `fix(scope): review round N — …`.
-- Fix highs and mediums only; list lows in the pull request.
+- Fix every bug the round finds, whatever its severity, before asking me to merge.
+- Fix polish when it is in the change's scope; list the rest in the pull request.
+- A bug you can't fix in this change gets an issue, linked from the pull request.
+- Never leave a bug only in a pull request's text.
 - Relay the summary line of every round to me.
 - Past the round limit, ask me; never run `review-round allow` yourself.
+- Manta repositories (`mantatech/*`) are the exception: their review runs in CI, not locally.
+- There, the CI Claude review and `check-pr-ready` decide; `review-round` and its limit do not apply.
+
+### Manta projects are excluded
+
+- Manta repositories (`mantatech/*`) do not use `review-round` or its round limit.
+- Their review is Claude Code Review, which runs in CI on every push.
+- Monitor it with the repository's `scripts/ci/check-pr-ready.sh`, looped after each push.
+- A Manta pull request is ready only when that review reports no issues found.
 
 ## Questions
 
