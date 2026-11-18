@@ -31,6 +31,7 @@ It asks `gh pr list --repo <origin's repo> --head <branch> --state open`; `--pr 
 - One from a fork counts only when its head is this checkout's commit, since a stranger's fork may use the same branch name.
 - With no open pull request, it says so and posts nothing. A failed lookup says why, and is logged as `post_error`.
 - When `origin` is not on GitHub, it looks for none and says nothing.
+
 The comment holds:
 
 - the summary line;
