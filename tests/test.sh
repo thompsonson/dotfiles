@@ -604,18 +604,18 @@ FAKE
     return $failed
 }
 
-# claude-tmp-clean against a fake /tmp/claude-<uid> tree.
 # sysbak doctor: backup_dirs and exclude_patterns against rsnapshot.conf
 smoke_sysbak_doctor() {
     local script="$REPO_DIR/dot_local/bin/executable_sysbak"
     local t failed=0 out
     t=$(mktemp -d)
     mkdir -p "$t/cfg/sysbak" "$t/a" "$t/b"
+    # $t/b/ ends in a slash; setup then writes $t/b// to rsnapshot.conf.
     printf 'backup_dirs=(\n    %s\n    %s\n    %s\n)\nexclude_patterns=(\n    "target/"\n)\n' \
-        "$t/a" "$t/b" "$t/gone" > "$t/cfg/sysbak/config"
+        "$t/a" "$t/b/" "$t/gone" > "$t/cfg/sysbak/config"
     doctor() { XDG_CONFIG_HOME="$t/cfg" SYSBAK_RSNAPSHOT_CONF="$t/rs.conf" bash "$script" doctor 2>&1 || true; }
 
-    printf 'backup\t%s/\tlocalhost/\nbackup\t%s/\tlocalhost/\nexclude\ttarget/\n' "$t/a" "$t/b" > "$t/rs.conf"
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s//\tlocalhost/\nexclude\ttarget/\n' "$t/a" "$t/b" > "$t/rs.conf"
     out=$(doctor)
     if [[ "$out" == *"Matches config:"*"2 backup points, 1 excludes"* && "$out" == *"Not on disk:"*"$t/gone"* ]]; then
         pass "sysbak doctor: rsnapshot.conf matches the config"
@@ -632,6 +632,15 @@ smoke_sysbak_doctor() {
         fail "sysbak doctor: a difference from rsnapshot.conf went unreported"; failed=1
     fi
 
+    # An empty rsnapshot.conf: every array is empty, and --quiet's count is the issue total.
+    : > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Not backed up:"*"$t/a"* && "$out" != *"unbound variable"* ]]; then
+        pass "sysbak doctor: empty rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: empty rsnapshot.conf not handled"; failed=1
+    fi
+
     rm -f "$t/rs.conf"
     out=$(doctor)
     if [[ "$out" == *"missing or unreadable"* ]]; then
@@ -644,6 +653,7 @@ smoke_sysbak_doctor() {
     return $failed
 }
 
+# claude-tmp-clean against a fake /tmp/claude-<uid> tree.
 smoke_claude_tmp_clean() {
     local script="$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
     if [[ ! -d /proc/self/fd ]]; then

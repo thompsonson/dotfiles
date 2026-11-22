@@ -883,21 +883,34 @@ in_list() {
   return 1
 }
 
+# Strip every trailing slash, keeping "/" itself.
+strip_slashes() {
+  local p="$1"
+  while [[ "$p" == */ && "$p" != / ]]; do
+    p="${p%/}"
+  done
+  printf '%s' "$p"
+}
+
 # Compare backup_dirs and exclude_patterns with what rsnapshot reads.
-# Prints each difference unless quiet; returns how many there are.
+# Prints each difference unless quiet, and sets DRIFT to how many there are.
+# A count, not an exit status, so it can't wrap at 256.
+DRIFT=0
 check_rsnapshot_conf() {
   local quiet="$1" n=0
+  DRIFT=0
   [[ "$quiet" = false ]] && header "rsnapshot.conf"
   if [[ ! -r "$RSNAPSHOT_CONF" ]]; then
     [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "File:" "$RSNAPSHOT_CONF missing or unreadable"
-    return 1
+    DRIFT=1
+    return 0
   fi
 
   local -a have_dirs=() have_ex=() want_dirs=()
   local kind field rest
   while IFS=$'\t' read -r kind field rest; do
     case "$kind" in
-      backup)  have_dirs+=("${field%/}") ;;
+      backup)  have_dirs+=("$(strip_slashes "$field")") ;;
       exclude) have_ex+=("$field") ;;
     esac
   done < "$RSNAPSHOT_CONF"
@@ -905,33 +918,33 @@ check_rsnapshot_conf() {
   # Backup points: setup skips a directory that doesn't exist, so only an
   # existing one missing from rsnapshot.conf goes unbacked-up.
   local dir path
-  for dir in "${BACKUP_DIRS[@]}"; do
-    path="${dir/#\~/$HOME}"
-    path="${path%/}"
+  # "${a[@]+"${a[@]}"}" expands an empty array safely under set -u on bash < 4.4.
+  for dir in "${BACKUP_DIRS[@]+"${BACKUP_DIRS[@]}"}"; do
+    path="$(strip_slashes "${dir/#\~/$HOME}")"
     want_dirs+=("$path")
     if [[ ! -d "$path" ]]; then
       [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$path (nothing to back up yet)"
-    elif ! in_list "$path" "${have_dirs[@]}"; then
+    elif ! in_list "$path" "${have_dirs[@]+"${have_dirs[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not backed up:" "$path is in backup_dirs but not in $RSNAPSHOT_CONF"
       n=$((n + 1))
     fi
   done
-  for path in "${have_dirs[@]}"; do
-    if ! in_list "$path" "${want_dirs[@]}"; then
+  for path in "${have_dirs[@]+"${have_dirs[@]}"}"; do
+    if ! in_list "$path" "${want_dirs[@]+"${want_dirs[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra backup:" "$path is in $RSNAPSHOT_CONF but not in backup_dirs"
       n=$((n + 1))
     fi
   done
 
   local pat
-  for pat in "${EXCLUDE_PATTERNS[@]}"; do
-    if ! in_list "$pat" "${have_ex[@]}"; then
+  for pat in "${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}"; do
+    if ! in_list "$pat" "${have_ex[@]+"${have_ex[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not excluded:" "$pat is in exclude_patterns but not in $RSNAPSHOT_CONF"
       n=$((n + 1))
     fi
   done
-  for pat in "${have_ex[@]}"; do
-    if ! in_list "$pat" "${EXCLUDE_PATTERNS[@]}"; then
+  for pat in "${have_ex[@]+"${have_ex[@]}"}"; do
+    if ! in_list "$pat" "${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra exclude:" "$pat is in $RSNAPSHOT_CONF but not in exclude_patterns"
       n=$((n + 1))
     fi
@@ -944,7 +957,7 @@ check_rsnapshot_conf() {
       printf "  %-20s %s\n" "  Fix:" "run sysbak setup, which rewrites $RSNAPSHOT_CONF from the config"
     fi
   fi
-  return $n
+  DRIFT=$n
 }
 
 cmd_doctor() {
@@ -1037,9 +1050,8 @@ cmd_doctor() {
   fi
 
   # What rsnapshot reads, against the config
-  local drift=0
-  check_rsnapshot_conf "$quiet" || drift=$?
-  issues=$((issues + drift))
+  check_rsnapshot_conf "$quiet"
+  issues=$((issues + DRIFT))
 
   # Exclude patterns
   if [[ "$quiet" = false ]]; then
@@ -1076,8 +1088,10 @@ cmd_doctor() {
     done
   fi
 
+  # An exit status wraps at 256, so 256 issues would read as none.
+  local status=$(( issues > 255 ? 255 : issues ))
   if [[ "$quiet" = true ]]; then
-    return $issues
+    return $status
   fi
 
   echo ""
@@ -1086,7 +1100,7 @@ cmd_doctor() {
   else
     warn "$issues issue(s) found"
   fi
-  return $issues
+  return $status
 }
 
 # --- git-bundle ---------------------------------------------------------------
