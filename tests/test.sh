@@ -611,13 +611,15 @@ smoke_sysbak_doctor() {
     t=$(mktemp -d)
     mkdir -p "$t/cfg/sysbak" "$t/a" "$t/b"
     # $t/b/ ends in a slash; setup then writes $t/b// to rsnapshot.conf.
-    printf 'backup_dirs=(\n    %s\n    %s\n    %s\n)\nexclude_patterns=(\n    "target/"\n)\n' \
-        "$t/a" "$t/b/" "$t/gone" > "$t/cfg/sysbak/config"
+    # x\\y in the config becomes x\y in rsnapshot.conf, through setup's printf %b.
+    printf 'backup_dirs=(\n    %s\n    %s\n    %s\n)\nexclude_patterns=(\n    "target/"\n    %s\n)\n' \
+        "$t/a" "$t/b/" "$t/gone" "'x\\\\y'" > "$t/cfg/sysbak/config"
     doctor() { XDG_CONFIG_HOME="$t/cfg" SYSBAK_RSNAPSHOT_CONF="$t/rs.conf" bash "$script" doctor 2>&1 || true; }
 
-    printf 'backup\t%s/\tlocalhost/\nbackup\t%s//\tlocalhost/\nexclude\ttarget/\n' "$t/a" "$t/b" > "$t/rs.conf"
+    # No newline after the last line, as an edited file may have.
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s//\tlocalhost/\nexclude\tx\\y\nexclude\ttarget/' "$t/a" "$t/b" > "$t/rs.conf"
     out=$(doctor)
-    if [[ "$out" == *"Matches config:"*"2 backup points, 1 excludes"* && "$out" == *"Not on disk:"*"$t/gone"* ]]; then
+    if [[ "$out" == *"Matches config:"*"2 backup points, 2 excludes"* && "$out" == *"Not on disk:"*"$t/gone"* ]]; then
         pass "sysbak doctor: rsnapshot.conf matches the config"
     else
         fail "sysbak doctor: matching rsnapshot.conf not reported as a match"; failed=1
@@ -632,7 +634,7 @@ smoke_sysbak_doctor() {
         fail "sysbak doctor: a difference from rsnapshot.conf went unreported"; failed=1
     fi
 
-    # An empty rsnapshot.conf: every array is empty, and --quiet's count is the issue total.
+    # An empty rsnapshot.conf: every array it fills is empty.
     : > "$t/rs.conf"
     out=$(doctor)
     if [[ "$out" == *"Not backed up:"*"$t/a"* && "$out" != *"unbound variable"* ]]; then
@@ -649,6 +651,7 @@ smoke_sysbak_doctor() {
         fail "sysbak doctor: missing rsnapshot.conf not reported"; failed=1
     fi
 
+    unset -f doctor
     rm -rf "$t"
     return $failed
 }

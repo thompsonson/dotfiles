@@ -908,19 +908,22 @@ check_rsnapshot_conf() {
 
   local -a have_dirs=() have_ex=() want_dirs=()
   local kind field rest
-  while IFS=$'\t' read -r kind field rest; do
+  # "|| [[ -n $kind ]]" keeps a last line that has no newline.
+  while IFS=$'\t' read -r kind field rest || [[ -n "$kind" ]]; do
     case "$kind" in
       backup)  have_dirs+=("$(strip_slashes "$field")") ;;
       exclude) have_ex+=("$field") ;;
     esac
   done < "$RSNAPSHOT_CONF"
 
+  # Setup writes dirs with echo -e and excludes with printf %b, which turn
+  # backslash escapes into characters. Compare what setup would write.
   # Backup points: setup skips a directory that doesn't exist, so only an
   # existing one missing from rsnapshot.conf goes unbacked-up.
   local dir path
   # "${a[@]+"${a[@]}"}" expands an empty array safely under set -u on bash < 4.4.
   for dir in "${BACKUP_DIRS[@]+"${BACKUP_DIRS[@]}"}"; do
-    path="$(strip_slashes "${dir/#\~/$HOME}")"
+    path="$(strip_slashes "$(printf '%b' "${dir/#\~/$HOME}")")"
     want_dirs+=("$path")
     if [[ ! -d "$path" ]]; then
       [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$path (nothing to back up yet)"
@@ -937,14 +940,17 @@ check_rsnapshot_conf() {
   done
 
   local pat
+  local -a want_ex=()
   for pat in "${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}"; do
+    pat="$(printf '%b' "$pat")"
+    want_ex+=("$pat")
     if ! in_list "$pat" "${have_ex[@]+"${have_ex[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not excluded:" "$pat is in exclude_patterns but not in $RSNAPSHOT_CONF"
       n=$((n + 1))
     fi
   done
   for pat in "${have_ex[@]+"${have_ex[@]}"}"; do
-    if ! in_list "$pat" "${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}"; then
+    if ! in_list "$pat" "${want_ex[@]+"${want_ex[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra exclude:" "$pat is in $RSNAPSHOT_CONF but not in exclude_patterns"
       n=$((n + 1))
     fi
