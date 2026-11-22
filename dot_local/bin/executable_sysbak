@@ -122,6 +122,11 @@ else
   fi
 fi
 
+# rsnapshot reads its own config, which `sysbak setup` writes from this one.
+# doctor compares the two. SYSBAK_RSNAPSHOT_CONF only changes where doctor
+# reads; cron always runs rsnapshot with its default config.
+RSNAPSHOT_CONF="${SYSBAK_RSNAPSHOT_CONF:-/etc/rsnapshot.conf}"
+
 # Global flags
 DRY_RUN=false
 
@@ -868,6 +873,80 @@ EOF
 
 # --- doctor -------------------------------------------------------------------
 
+# Is $1 one of the remaining arguments?
+in_list() {
+  local x="$1" y
+  shift
+  for y in "$@"; do
+    [[ "$x" == "$y" ]] && return 0
+  done
+  return 1
+}
+
+# Compare backup_dirs and exclude_patterns with what rsnapshot reads.
+# Prints each difference unless quiet; returns how many there are.
+check_rsnapshot_conf() {
+  local quiet="$1" n=0
+  [[ "$quiet" = false ]] && header "rsnapshot.conf"
+  if [[ ! -r "$RSNAPSHOT_CONF" ]]; then
+    [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "File:" "$RSNAPSHOT_CONF missing or unreadable"
+    return 1
+  fi
+
+  local -a have_dirs=() have_ex=() want_dirs=()
+  local kind field rest
+  while IFS=$'\t' read -r kind field rest; do
+    case "$kind" in
+      backup)  have_dirs+=("${field%/}") ;;
+      exclude) have_ex+=("$field") ;;
+    esac
+  done < "$RSNAPSHOT_CONF"
+
+  # Backup points: setup skips a directory that doesn't exist, so only an
+  # existing one missing from rsnapshot.conf goes unbacked-up.
+  local dir path
+  for dir in "${BACKUP_DIRS[@]}"; do
+    path="${dir/#\~/$HOME}"
+    path="${path%/}"
+    want_dirs+=("$path")
+    if [[ ! -d "$path" ]]; then
+      [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$path (nothing to back up yet)"
+    elif ! in_list "$path" "${have_dirs[@]}"; then
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not backed up:" "$path is in backup_dirs but not in $RSNAPSHOT_CONF"
+      n=$((n + 1))
+    fi
+  done
+  for path in "${have_dirs[@]}"; do
+    if ! in_list "$path" "${want_dirs[@]}"; then
+      [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra backup:" "$path is in $RSNAPSHOT_CONF but not in backup_dirs"
+      n=$((n + 1))
+    fi
+  done
+
+  local pat
+  for pat in "${EXCLUDE_PATTERNS[@]}"; do
+    if ! in_list "$pat" "${have_ex[@]}"; then
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not excluded:" "$pat is in exclude_patterns but not in $RSNAPSHOT_CONF"
+      n=$((n + 1))
+    fi
+  done
+  for pat in "${have_ex[@]}"; do
+    if ! in_list "$pat" "${EXCLUDE_PATTERNS[@]}"; then
+      [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra exclude:" "$pat is in $RSNAPSHOT_CONF but not in exclude_patterns"
+      n=$((n + 1))
+    fi
+  done
+
+  if [[ "$quiet" = false ]]; then
+    if [[ $n -eq 0 ]]; then
+      printf "  ${GREEN}✓${NC} %-18s %s\n" "Matches config:" "${#have_dirs[@]} backup points, ${#have_ex[@]} excludes"
+    else
+      printf "  %-20s %s\n" "  Fix:" "run sysbak setup, which rewrites $RSNAPSHOT_CONF from the config"
+    fi
+  fi
+  return $n
+}
+
 cmd_doctor() {
   local quiet=false
   [[ "${1:-}" = "--quiet" ]] && quiet=true
@@ -956,6 +1035,11 @@ cmd_doctor() {
       printf "  ${YELLOW}⚠${NC} %-18s %s\n" "cron:" "/etc/cron.d/sysbak missing"
     fi
   fi
+
+  # What rsnapshot reads, against the config
+  local drift=0
+  check_rsnapshot_conf "$quiet" || drift=$?
+  issues=$((issues + drift))
 
   # Exclude patterns
   if [[ "$quiet" = false ]]; then

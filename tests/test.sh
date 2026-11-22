@@ -242,6 +242,7 @@ run_smoke() {
         pass "sysmon bogus (rejected invalid subcommand)"
     fi
 
+    smoke_sysbak_doctor || smoke_failed=1
     smoke_claude_tmp_clean || smoke_failed=1
     smoke_review_round || smoke_failed=1
 
@@ -604,6 +605,45 @@ FAKE
 }
 
 # claude-tmp-clean against a fake /tmp/claude-<uid> tree.
+# sysbak doctor: backup_dirs and exclude_patterns against rsnapshot.conf
+smoke_sysbak_doctor() {
+    local script="$REPO_DIR/dot_local/bin/executable_sysbak"
+    local t failed=0 out
+    t=$(mktemp -d)
+    mkdir -p "$t/cfg/sysbak" "$t/a" "$t/b"
+    printf 'backup_dirs=(\n    %s\n    %s\n    %s\n)\nexclude_patterns=(\n    "target/"\n)\n' \
+        "$t/a" "$t/b" "$t/gone" > "$t/cfg/sysbak/config"
+    doctor() { XDG_CONFIG_HOME="$t/cfg" SYSBAK_RSNAPSHOT_CONF="$t/rs.conf" bash "$script" doctor 2>&1 || true; }
+
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s/\tlocalhost/\nexclude\ttarget/\n' "$t/a" "$t/b" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Matches config:"*"2 backup points, 1 excludes"* && "$out" == *"Not on disk:"*"$t/gone"* ]]; then
+        pass "sysbak doctor: rsnapshot.conf matches the config"
+    else
+        fail "sysbak doctor: matching rsnapshot.conf not reported as a match"; failed=1
+    fi
+
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s/\tlocalhost/\nexclude\t*.tmp\n' "$t/a" "$t/other" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Not backed up:"*"$t/b"* && "$out" == *"Extra backup:"*"$t/other"* \
+        && "$out" == *"Not excluded:"*"target/"* && "$out" == *"Extra exclude:"*"*.tmp"* ]]; then
+        pass "sysbak doctor: each difference from rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: a difference from rsnapshot.conf went unreported"; failed=1
+    fi
+
+    rm -f "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"missing or unreadable"* ]]; then
+        pass "sysbak doctor: missing rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: missing rsnapshot.conf not reported"; failed=1
+    fi
+
+    rm -rf "$t"
+    return $failed
+}
+
 smoke_claude_tmp_clean() {
     local script="$REPO_DIR/dot_local/bin/executable_claude-tmp-clean"
     if [[ ! -d /proc/self/fd ]]; then
