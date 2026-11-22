@@ -920,13 +920,15 @@ check_rsnapshot_conf() {
   # backslash escapes into characters. Compare what setup would write.
   # Backup points: setup skips a directory that doesn't exist, so only an
   # existing one missing from rsnapshot.conf goes unbacked-up.
-  local dir path
+  # Setup tests the raw path with -d, then writes it escaped; do the same.
+  local dir raw path
   # "${a[@]+"${a[@]}"}" expands an empty array safely under set -u on bash < 4.4.
   for dir in "${BACKUP_DIRS[@]+"${BACKUP_DIRS[@]}"}"; do
-    path="$(strip_slashes "$(printf '%b' "${dir/#\~/$HOME}")")"
+    raw="${dir/#\~/$HOME}"
+    path="$(strip_slashes "$(printf '%b' "$raw")")"
     want_dirs+=("$path")
-    if [[ ! -d "$path" ]]; then
-      [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$path (nothing to back up yet)"
+    if [[ ! -d "$raw" ]]; then
+      [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$raw (nothing to back up yet)"
     elif ! in_list "$path" "${have_dirs[@]+"${have_dirs[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not backed up:" "$path is in backup_dirs but not in $RSNAPSHOT_CONF"
       n=$((n + 1))
