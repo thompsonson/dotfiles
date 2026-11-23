@@ -243,10 +243,50 @@ run_smoke() {
     fi
 
     smoke_sysbak_doctor || smoke_failed=1
+    smoke_otel_removal || smoke_failed=1
     smoke_claude_tmp_clean || smoke_failed=1
     smoke_review_round || smoke_failed=1
 
     return $smoke_failed
+}
+
+# The OTel removal script against a fake home with the pipeline installed.
+smoke_otel_removal() {
+    local script="$REPO_DIR/run_once_after_remove-otel-collector.sh.tmpl"
+    local t failed=0 out
+    t=$(mktemp -d)
+    local h="$t/home" o="$t/home/.local/share/otel" u="$t/home/.config/systemd/user"
+    mkdir -p "$o/data" "$u" "$h/.local/bin" "$t/bin"
+    touch "$o"/{compose.yml,config.yaml,ingest.py,backfill.py,schema.sql,.env} \
+        "$u"/otel-ingest.{service,timer} "$u/keep.service" "$h/.local/bin/otel-stats" "$o/data/claude.db"
+    # Stubs log their calls, so the test sees the timer and container stopped.
+    printf '#!/bin/sh\necho "systemctl $*" >> "%s/calls"\n' "$t" > "$t/bin/systemctl"
+    printf '#!/bin/sh\necho "docker $*" >> "%s/calls"\n' "$t" > "$t/bin/docker"
+    chmod +x "$t/bin/systemctl" "$t/bin/docker"
+    # The template's only action is its shebang; run the body with bash.
+    out=$(HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)
+    if grep -q 'systemctl --user disable --now otel-ingest.timer' "$t/calls" \
+        && grep -q "docker compose -f $o/compose.yml down" "$t/calls"; then
+        pass "otel removal stops the timer and the collector"
+    else
+        fail "otel removal did not stop the timer or the collector"; failed=1
+    fi
+    if [[ ! -e "$o/compose.yml" && ! -e "$o/.env" && ! -e "$u/otel-ingest.timer" && ! -e "$h/.local/bin/otel-stats" ]] \
+        && [[ -f "$o/data/claude.db" && -f "$u/keep.service" && "$out" == *"Kept"* ]]; then
+        pass "otel removal deletes the pipeline's files and keeps claude.db"
+    else
+        fail "otel removal deleted the wrong files"; failed=1
+    fi
+    # On a machine that never had it: no calls, no output.
+    rm -f "$t/calls"
+    out=$(HOME="$t/empty" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)
+    if [[ -z "$out" && ! -e "$t/calls" ]]; then
+        pass "otel removal does nothing where the pipeline never was"
+    else
+        fail "otel removal acted where the pipeline never was"; failed=1
+    fi
+    rm -rf "$t"
+    return $failed
 }
 
 # review-round against a throwaway repo and a fake claude.
