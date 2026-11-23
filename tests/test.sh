@@ -625,6 +625,21 @@ smoke_sysbak_doctor() {
         fail "sysbak doctor: matching rsnapshot.conf not reported as a match"; failed=1
     fi
 
+    # Escapes that act across setup's single printf %b: \t splits a line into
+    # more fields, and \c ends the output, so z/ is never written.
+    local cfg="$t/cfg/sysbak/config"
+    cp "$cfg" "$t/config.saved"
+    printf 'backup_dirs=(\n    %s\n)\nexclude_patterns=(\n    %s\n    %s\n    "z/"\n)\n' \
+        "$t/a" "'a\\tb'" "'p\\cq'" > "$cfg"
+    printf 'exclude\ta\tb\nexclude\tp\nbackup\t%s/\tlocalhost/\n' "$t/a" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Matches config:"*"1 backup points, 2 excludes"* ]]; then
+        pass "sysbak doctor: escapes act as setup's printf %b makes them act"
+    else
+        fail "sysbak doctor: escapes in exclude_patterns read unlike setup writes them"; failed=1
+    fi
+    mv "$t/config.saved" "$cfg"
+
     printf 'backup\t%s/\tlocalhost/\nbackup\t%s/\tlocalhost/\nexclude\t*.tmp\n' "$t/a" "$t/other" > "$t/rs.conf"
     out=$(doctor)
     if [[ "$out" == *"Not backed up:"*"$t/b"* && "$out" == *"Extra backup:"*"$t/other"* \
