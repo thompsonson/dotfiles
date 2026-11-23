@@ -108,6 +108,9 @@ human() {
 
 # One line per reference a process of ours holds: "<pid>\t<comm>\t<path or cmdline>".
 # A reference is its working directory, program, open file, mapped file or command line.
+# A newline in a reference is written \012, as /proc/<pid>/maps writes it; enc
+# does the same to a path before it is compared.
+enc() { printf '%s' "${1//$'\n'/\\012}"; }
 uses=$(mktemp)
 trap 'rm -f "$uses"' EXIT
 for p in /proc/[0-9]*; do
@@ -115,17 +118,19 @@ for p in /proc/[0-9]*; do
   comm=$(cat "$p/comm" 2>/dev/null) || continue
   # A tab or newline in the name would break the tab-separated record.
   comm=${comm//[$'\t\n']/?}
+  # Each reference ends in a NUL, since a path may hold a newline.
   {
-    readlink "$p/cwd" 2>/dev/null || true
-    readlink "$p/exe" 2>/dev/null || true
-    for fd in "$p"/fd/*; do readlink "$fd" 2>/dev/null || true; done
+    readlink -n "$p/cwd" 2>/dev/null && printf '\0'
+    readlink -n "$p/exe" 2>/dev/null && printf '\0'
+    for fd in "$p"/fd/*; do readlink -n "$fd" 2>/dev/null && printf '\0'; done
     # Mapped files: a loaded library, or a program run from a build folder.
     # The path is everything after the fifth field, and may hold spaces.
-    sed -nE 's|^([^ ]+ +){5}(/.*)$|\2|p' "$p/maps" 2>/dev/null | sort -u || true
-    tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
-  } | grep -F -- "$ROOT/" | while IFS= read -r ref; do
+    sed -nE 's|^([^ ]+ +){5}(/.*)$|\2|p' "$p/maps" 2>/dev/null | sort -u | tr '\n' '\0' || true
+    tr '\0' ' ' < "$p/cmdline" 2>/dev/null && printf '\0'
+  } | while IFS= read -r -d '' ref; do
+    case "$ref" in *"$ROOT/"*) ;; *) continue ;; esac
     # printf, not sed: a process name may hold | or a backslash.
-    printf '%s\t%s\t%s\n' "${p#/proc/}" "$comm" "$ref"
+    printf '%s\t%s\t%s\n' "${p#/proc/}" "$comm" "$(enc "$ref")"
   done >> "$uses" || true
 done
 
@@ -136,7 +141,7 @@ is_gpg_daemon() {
 
 # Homedirs, under $1, of gpg daemons still running there.
 gpg_homedirs() {
-  { grep -F -- "$1/" "$uses" || true; } | while IFS=$'\t' read -r _ comm ref; do
+  { grep -F -- "$(enc "$1")/" "$uses" || true; } | while IFS=$'\t' read -r _ comm ref; do
     is_gpg_daemon "$comm" || continue
     sed -n 's/.*--homedir \([^ ]*\).*/\1/p' <<<"$ref"
   done | sort -u
@@ -144,8 +149,10 @@ gpg_homedirs() {
 
 # Prints the first non-gpg process using $1, if any.
 user_of() {
+  local want
+  want=$(enc "$1")
   while IFS=$'\t' read -r _ comm ref; do
-    case "$ref" in "$1" | *"$1/"* | *"$1 "*) ;; *) continue ;; esac
+    case "$ref" in "$want" | *"$want/"* | *"$want "*) ;; *) continue ;; esac
     is_gpg_daemon "$comm" || { echo "$comm"; return; }
   done < "$uses"
 }

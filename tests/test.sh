@@ -724,13 +724,25 @@ smoke_claude_tmp_clean() {
     mkdir -p "$b/a"$'\n'"b/target" "$t/b/target"
     echo "$tag" > "$b/a"$'\n'"b/target/CACHEDIR.TAG"
     echo "$tag" > "$t/b/target/CACHEDIR.TAG"
-    find "$b/a"$'\n'"b" "$t/b" -exec touch -d '3 days ago' {} +
+    # And a build folder with a newline in its path, in use.
+    mkdir -p "$b/u"$'\n'"v/target/debug"
+    echo "$tag" > "$b/u"$'\n'"v/target/CACHEDIR.TAG"
+    find "$b/a"$'\n'"b" "$b/u"$'\n'"v" "$t/b" -exec touch -d '3 days ago' {} +
+    (cd "$b/u"$'\n'"v/target/debug" && exec sleep 60) &
+    local nl_pid=$!
+    sleep 0.3
     (cd "$t" && "${run[@]}" --delete >/dev/null 2>&1)
     if [[ -f "$t/b/target/CACHEDIR.TAG" && ! -e "$b/a"$'\n'"b/target" ]]; then
         pass "claude-tmp-clean reads a folder name with a newline as one path"
     else
         fail "claude-tmp-clean split a folder name with a newline"; failed=1
     fi
+    if [[ -d "$b/u"$'\n'"v/target" ]]; then
+        pass "claude-tmp-clean keeps a build folder in use whose path has a newline"
+    else
+        fail "claude-tmp-clean removed a build folder in use whose path has a newline"; failed=1
+    fi
+    kill "$nl_pid" 2>/dev/null || true; wait "$nl_pid" 2>/dev/null || true
     if [[ -d "$root/$p/$tabbed" ]]; then pass "claude-tmp-clean keeps a folder used by a process with a tab in its name"
     else fail "claude-tmp-clean removed a folder used by a process with a tab in its name"; failed=1; fi
     if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
