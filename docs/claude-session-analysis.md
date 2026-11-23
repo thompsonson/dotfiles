@@ -1,6 +1,6 @@
 # Claude Session Data — Storage, Retention & Style Analysis
 
-Analysis run on popmini, 2026-04-28.
+Analysis run on the collector host, 2026-04-28.
 
 ---
 
@@ -15,7 +15,7 @@ PR links, and session metadata.
 **It is not metadata-only.** A typical day's sessions contain the complete
 text of every response Claude generated.
 
-### Inventory (popmini, 2026-04-28)
+### Inventory (the collector host, 2026-04-28)
 
 ```
 1871 session files across 20 project dirs

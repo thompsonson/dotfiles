@@ -17,7 +17,7 @@
        a machine; after that it reuses the value already in .chezmoi.toml. */ -}}
 {{- $email := promptStringOnce . "email" "Git/GPG/SSH email address" "" -}}
 {{- $collectorHost := promptStringOnce . "collector_host" "Short hostname (as hostname -s prints it) of the machine that runs the OTel collector (blank if none)" "" -}}
-{{- if contains "." $collectorHost }}{{ fail (printf "collector_host must be a short hostname, without dots; got %q" $collectorHost) }}{{ end -}}
+{{- if and $collectorHost (not (regexMatch "^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$" $collectorHost)) }}{{ fail (printf "collector_host must be a short hostname: letters, digits and hyphens, no dots; got %q" $collectorHost) }}{{ end -}}
 {{- $tailnetDomain := promptStringOnce . "tailnet_domain" "Tailscale tailnet domain for the OTel collector host (blank to skip remote telemetry)" "" -}}
 {{- $employerName := promptStringOnce . "employer_name" "Employer name, full (blank to omit from docs)" "" -}}
 {{- $employerShort := promptStringOnce . "employer_short" "Employer name, short form" "" -}}
