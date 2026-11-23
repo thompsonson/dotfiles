@@ -8,9 +8,10 @@ Host *
   IdentityFile ~/.ssh/id_ed25519
   ServerAliveInterval 60
   ServerAliveCountMax 3
-
-{{ $collector := index . "collector_host" | default "" -}}
+{{- if not (hasKey . "collector_host") }}{{ fail "collector_host is not set: run chezmoi init, which asks for it once" }}{{ end }}
+{{- $collector := .collector_host }}
 {{- if $collector }}
+
 # The collector host
 Host {{ $collector }}
   HostName {{ $collector }}

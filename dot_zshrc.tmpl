@@ -299,7 +299,7 @@ _sysbak_completion() {
 }
 compdef _sysbak_completion sysbak 2>/dev/null
 
-{{ $collector := index . "collector_host" | default "" -}}
+{{ if not (hasKey . "collector_host") }}{{ fail "collector_host is not set: run chezmoi init, which asks for it once" }}{{ end }}{{ $collector := .collector_host -}}
 # OpenTelemetry export → the central collector on the collector host (collector_host).
 # Used by Claude Code and opencode (both read standard OTEL_* env vars).
 # The collector host: always on (it runs the collector, see ~/.local/share/otel/).

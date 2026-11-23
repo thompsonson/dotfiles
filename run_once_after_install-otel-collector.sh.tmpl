@@ -1,5 +1,5 @@
 #!{{ lookPath "bash" }}
-{{ $collector := index . "collector_host" | default "" -}}
+{{ if not (hasKey . "collector_host") }}{{ fail "collector_host is not set: run chezmoi init, which asks for it once" }}{{ end }}{{ $collector := .collector_host -}}
 # Install the Claude Code OTel collector on {{ $collector | default "the collector host (collector_host)" }}.
 # Other machines: opt-in via `mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled`
 # Runs once per machine; re-runs if this file changes.
