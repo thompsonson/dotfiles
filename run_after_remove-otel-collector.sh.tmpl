@@ -1,41 +1,46 @@
 #!{{ lookPath "bash" }}
 # Remove what the OTel collector pipeline installed, now that the pipeline is
 # gone from this repo. chezmoi doesn't delete a file that leaves the source.
-# Safe on any machine: each step runs only where its target exists.
-# Keeps ~/.local/share/otel/data/ (claude.db, the only copy of the telemetry).
-# A stop runs only for what is there: the timer if it is enabled, the
-# container if docker reports it. A failed stop deletes nothing and exits
-# non-zero, so chezmoi runs this again on the next apply.
+#
+# Runs on every chezmoi apply (run_, not run_once_), so what it can't finish
+# now it finishes on a later apply. Once nothing is left it does nothing,
+# and calls neither systemctl nor docker.
+#
+# - The ingest timer is disabled if it is enabled.
+# - The collector container is removed if docker reports it. Docker is asked
+#   only while the install script's .env exists: no .env, no container.
+# - If docker can't be reached, the container's files stay (it bind-mounts
+#   config.yaml), a warning is printed, and the next apply asks again.
+# - A failed disable or removal deletes nothing and fails the apply.
+# - ~/.local/share/otel/data/ (claude.db, the only copy) is never touched.
+#
+# Delete this script once every machine is clean.
 
 set -uo pipefail
 
 otel="$HOME/.local/share/otel"
 units="$HOME/.config/systemd/user"
-did=false
+container=otelcol-claude
 keep_compose=false
 failed=()
+did=false
 
-# 1. Stop the ingest timer, if it was enabled, before its unit files go.
+# 1. Disable the ingest timer, if enabled, before its unit files go.
 if [ -L "$units/timers.target.wants/otel-ingest.timer" ] && command -v systemctl >/dev/null 2>&1; then
   systemctl --user disable --now otel-ingest.timer || failed+=("the otel-ingest timer")
 fi
 
-# 2. Remove the collector container, if docker reports it. It restarts with
-# docker (restart: unless-stopped), so stopping it is not enough.
-container=otelcol-claude
-if command -v docker >/dev/null 2>&1; then
+# 2. Remove the collector container. It restarts with docker
+# (restart: unless-stopped), so stopping it is not enough.
+if [ -e "$otel/.env" ] && command -v docker >/dev/null 2>&1; then
   if docker info >/dev/null 2>&1; then
     if docker container inspect "$container" >/dev/null 2>&1; then
       docker rm -f "$container" >/dev/null || failed+=("the $container container")
     fi
-  elif [ -e "$otel/.env" ]; then
-    # The install script got far enough to write .env, so the container may
-    # exist; it restarts with docker and bind-mounts config.yaml. Without
-    # docker there is no telling, so its files stay, the apply goes on, and
-    # the warning says what to do once docker runs.
+  else
     keep_compose=true
     echo "OTel removal: docker is not reachable, so the $container container was not checked." >&2
-    echo "  Its files stay in $otel. Once docker runs: docker rm -f $container; rm $otel/{compose.yml,config.yaml,.env}" >&2
+    echo "  Its files stay in $otel; the next chezmoi apply checks again." >&2
   fi
 fi
 
@@ -47,8 +52,8 @@ fi
 # 3. Remove the deployed files; the data folder stays.
 for f in "$units/otel-ingest.service" "$units/otel-ingest.timer" \
          "$HOME/.local/bin/otel-stats" \
-         "$otel/compose.yml" "$otel/config.yaml" "$otel/ingest.py" \
-         "$otel/backfill.py" "$otel/schema.sql" "$otel/.env"; do
+         "$otel/ingest.py" "$otel/backfill.py" "$otel/schema.sql" \
+         "$otel/compose.yml" "$otel/config.yaml" "$otel/.env"; do
   case "$f" in
     "$otel/compose.yml"|"$otel/config.yaml"|"$otel/.env")
       [ "$keep_compose" = false ] || continue ;;
@@ -63,7 +68,7 @@ if [ "$did" = true ] && command -v systemctl >/dev/null 2>&1; then
 fi
 rmdir -- "$otel" 2>/dev/null || true
 
-if [ "$did" = true ]; then
+if [ "$did" = true ] && [ "$keep_compose" = false ]; then
   echo 'OTel collector pipeline removed.'
   if [ -d "$otel/data" ]; then
     echo "Kept $otel/data/ (claude.db). Archive or delete it by hand."

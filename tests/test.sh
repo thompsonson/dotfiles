@@ -252,7 +252,7 @@ run_smoke() {
 
 # The OTel removal script against fake homes and stub systemctl and docker.
 smoke_otel_removal() {
-    local script="$REPO_DIR/run_once_after_remove-otel-collector.sh.tmpl"
+    local script="$REPO_DIR/run_after_remove-otel-collector.sh.tmpl"
     local t failed=0 out rc
     t=$(mktemp -d)
     local h="$t/home" o="$t/home/.local/share/otel" u="$t/home/.config/systemd/user"
@@ -331,23 +331,39 @@ STUB
     fi
 
     # Docker unreachable where the install script wrote .env: the container may
-    # exist, so its files stay, a warning says what to do, and the apply goes on.
+    # exist, so its files stay, a warning is printed, the apply goes on, and
+    # the next run, with docker back, finishes.
     install_home
     rm "$u/timers.target.wants/otel-ingest.timer"
     out=$(DOCKER=down removal); rc=$?
     if [[ $rc -eq 0 && -f "$o/compose.yml" && -f "$o/config.yaml" && -f "$o/.env" && ! -e "$o/ingest.py" ]] \
-        && [[ "$out" == *"docker rm -f otelcol-claude"* ]]; then
+        && [[ "$out" == *"not reachable"* && "$out" != *"pipeline removed"* ]]; then
         pass "otel removal keeps the container's files, warns and succeeds when docker is unreachable"
     else
         fail "otel removal got the unreachable-docker case wrong"; failed=1
     fi
-    # Docker unreachable and no .env: no container was ever made, so go ahead.
-    rm "$o/.env"
-    out=$(DOCKER=down removal); rc=$?
-    if [[ $rc -eq 0 && ! -e "$o/compose.yml" ]]; then
-        pass "otel removal goes ahead with docker unreachable where no .env was written"
+    out=$(removal); rc=$?
+    if [[ $rc -eq 0 && ! -e "$o/compose.yml" ]] && grep -q 'docker rm -f otelcol-claude' "$t/calls"; then
+        pass "otel removal finishes on the next run once docker answers"
     else
-        fail "otel removal failed with docker unreachable where no .env was written"; failed=1
+        fail "otel removal did not finish once docker answered"; failed=1
+    fi
+    # Once clean, a run does nothing: no output, no systemctl, no docker.
+    rm -f "$t/calls"
+    out=$(removal)
+    if [[ -z "$out" && ! -e "$t/calls" ]]; then
+        pass "otel removal is silent and calls nothing once clean"
+    else
+        fail "otel removal acted after everything was gone"; failed=1
+    fi
+    # No .env: docker is not asked, even when it is unreachable.
+    install_home
+    rm "$u/timers.target.wants/otel-ingest.timer" "$o/.env"
+    out=$(DOCKER=down removal); rc=$?
+    if [[ $rc -eq 0 && ! -e "$o/compose.yml" ]] && ! grep -q '^docker' "$t/calls" 2>/dev/null; then
+        pass "otel removal leaves docker alone where no .env was written"
+    else
+        fail "otel removal asked docker where no .env was written"; failed=1
     fi
 
     # On a machine that never had it: no output, and no stops.
