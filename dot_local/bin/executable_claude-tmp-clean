@@ -113,6 +113,8 @@ trap 'rm -f "$uses"' EXIT
 for p in /proc/[0-9]*; do
   [ -O "$p" ] || continue
   comm=$(cat "$p/comm" 2>/dev/null) || continue
+  # A tab or newline in the name would break the tab-separated record.
+  comm=${comm//[$'\t\n']/?}
   {
     readlink "$p/cwd" 2>/dev/null || true
     readlink "$p/exe" 2>/dev/null || true

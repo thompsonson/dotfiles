@@ -618,8 +618,9 @@ smoke_claude_tmp_clean() {
     local recent=22222222-2222-2222-2222-222222222222
     local busy=33333333-3333-3333-3333-333333333333
     local keyring=44444444-4444-4444-4444-444444444444
+    local tabbed=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
     mkdir -p "$projects/$p" "$t/bin" "$t/sbin"
-    for s in $idle $recent $busy $keyring; do
+    for s in $idle $recent $busy $keyring $tabbed; do
         mkdir -p "$root/$p/$s/scratchpad"
         touch -d '10 days ago' "$projects/$p/$s.jsonl"
     done
@@ -655,6 +656,10 @@ smoke_claude_tmp_clean() {
     cp "$(command -v bash)" "$t/bin/gpg-agent"
     (cd "$root/$p/$busy" && exec sleep 60) &
     local busy_pid=$!
+    # A process whose name holds a tab still counts as use.
+    cp "$(command -v sleep)" "$t/sbin/x"$'\t'"y"
+    (cd "$root/$p/$tabbed" && exec "$t/sbin/x"$'\t'"y" 60) &
+    local tab_pid=$!
     (cd "$root/$p/$keyring" && exec "$t/sbin/gpg-agent" 60) &
     local agent_pid=$!
     "$t/bin/gpg-agent" -c 'sleep 60; :' --homedir "$root/$p/gone/h" &
@@ -712,6 +717,8 @@ smoke_claude_tmp_clean() {
     "${run[@]}" --delete --keep-builds >/dev/null 2>&1
     if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean --keep-builds leaves build folders"
     else fail "claude-tmp-clean --keep-builds removed a build folder"; failed=1; fi
+    if [[ -d "$root/$p/$tabbed" ]]; then pass "claude-tmp-clean keeps a folder used by a process with a tab in its name"
+    else fail "claude-tmp-clean removed a folder used by a process with a tab in its name"; failed=1; fi
     if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
     else fail "claude-tmp-clean removed a folder in use"; failed=1; fi
     if [[ ! -e "$root/$p/$keyring" ]]; then pass "claude-tmp-clean ignores gpg daemons as use"
@@ -745,7 +752,7 @@ smoke_claude_tmp_clean() {
     fi
 
     pkill -P "$run_pid" 2>/dev/null || true   # its sleep
-    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" 2>/dev/null || true
+    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" "$tab_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
     return $failed
