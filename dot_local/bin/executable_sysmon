@@ -416,27 +416,7 @@ check_temps() {
 check_data_stores() {
   has sqlite3 || return 0
 
-  local otel_db="$HOME/.local/share/otel/data/claude.db"
   local oc_db="$HOME/.local/share/opencode/opencode.db"
-
-  # otel claude.db: single controlled writer (ingest.py), should stay small
-  # now that the collector filter drops opencode's internal noise. A climb
-  # past a few GB again means the filter regressed (opencode span-name
-  # change, etc).
-  if [ -f "$otel_db" ]; then
-    local otel_bytes otel_mb
-    if [ "$IS_MACOS" = true ]; then
-      otel_bytes=$(stat -f%z "$otel_db" 2>/dev/null || echo 0)
-    else
-      otel_bytes=$(stat -c%s "$otel_db" 2>/dev/null || echo 0)
-    fi
-    otel_mb=$(( otel_bytes / 1048576 ))
-    if [ "$otel_mb" -ge 8000 ]; then
-      add_warning "critical" "otel claude.db at ${otel_mb}M (above 8G — check the collector filter at ~/.local/share/otel/config.yaml)"
-    elif [ "$otel_mb" -ge 4000 ]; then
-      add_warning "warn" "otel claude.db at ${otel_mb}M (above 4G — check the collector filter at ~/.local/share/otel/config.yaml)"
-    fi
-  fi
 
   # opencode.db: live, multi-writer app database (every dev session touches
   # it). SQLite doesn't reclaim freed pages without VACUUM, and opencode has
@@ -977,7 +957,6 @@ HEALTH CHECKS (sysmon warn)
   Zombie processes    warn >0, critical >5
   CPU temperature     warn >75°C, critical >90°C (Linux, requires lm-sensors)
   CPU hogs            warn if any process >50% CPU, or root daemon >10% CPU for >1h
-  otel claude.db      warn >4G, critical >8G (collector filter regression)
   opencode.db         warn >50% dead space, critical >75% (needs a VACUUM)
   chezmoi drift       warn if any files pending `chezmoi apply`
   Docker containers   critical if restarting, warn if unhealthy (requires docker)

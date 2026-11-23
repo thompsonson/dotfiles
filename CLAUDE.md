@@ -91,9 +91,8 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)
 - `dot_config/sysbak/config`: Per-machine backup configuration
 
-### Telemetry
-- `dot_local/bin/executable_otel-stats`: Query/report tool over the local Claude Code telemetry SQLite store
-- `run_once_after_install-otel-collector.sh.tmpl`: Installs the OTel collector → SQLite pipeline; see `docs/claude-telemetry.md.tmpl`
+### Session analysis
+- `scripts/claude-chains.py`: Extracts tool-call sequences from Claude Code session transcripts (`~/.claude/projects/**/*.jsonl`) and summarises common n-grams
 
 ### Tmux & Dev Sessions
 - `dot_tmux.conf`: Tmux configuration with vi-style keybindings, TPM, resurrect, and continuum
@@ -182,8 +181,6 @@ Detailed usage guides are in `docs/`:
 - [`docs/devenv.md`](docs/devenv.md) — Nix + devenv per-project environments
 - [`docs/dotfiles-agent.md`](docs/dotfiles-agent.md) — Dotfiles agent setup and usage
 - [`docs/claude-code-workflow.md`](docs/claude-code-workflow.md) — How Claude Code operates in this repo (permissions, plan mode, example sessions)
-- [`docs/claude-telemetry.md`](docs/claude-telemetry.md.tmpl) — OTel collector → SQLite pipeline for Claude Code telemetry
-- [`docs/claude-telemetry-strategy.md`](docs/claude-telemetry-strategy.md.tmpl) — Telemetry analysis strategy and tooling (`otel-stats`, `claude-chains.py`)
 - [`docs/claude-session-analysis.md`](docs/claude-session-analysis.md) — Point-in-time session analysis report (historical snapshot, not living docs)
 - [`docs/pi-agent-policy.md`](docs/pi-agent-policy.md) — Draft policy for `~/.pi` agent sandboxing (unimplemented)
 - `~/.config/dev/agents-env.md` — Agents environment (inter-agent messaging via `dev`)
