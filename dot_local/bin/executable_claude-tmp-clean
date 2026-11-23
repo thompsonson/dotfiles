@@ -11,10 +11,13 @@
 #   - no process uses it, by working directory, open file or command line.
 #   - no git checkout in it holds work found nowhere else: uncommitted
 #     changes, commits no branch holds, unpushed commits or a stash.
+# In a folder that is kept, Cargo build folders (target/ with Cargo's
+# CACHEDIR.TAG) are removed when no process uses them and nothing in them
+# was written for --build-days days. Cargo rebuilds them.
 # gpg-agent, scdaemon, keyboxd and dirmngr do not count as use: a test
 # keyring leaves them running. They are stopped before the folder goes.
 #
-# Usage: claude-tmp-clean [--delete] [--days N]
+# Usage: claude-tmp-clean [--delete] [--days N] [--build-days N] [--keep-builds]
 #   claude-tmp-clean              List what would be removed (no changes)
 #   claude-tmp-clean --delete     Remove it
 #
@@ -25,10 +28,12 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 ROOT="${CLAUDE_TMP_ROOT:-/tmp/claude-$(id -u)}"
 PROJECTS="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 DAYS=7
+BUILD_DAYS=1
+BUILDS=true
 DELETE=false
 
 usage() {
@@ -36,11 +41,14 @@ usage() {
 claude-tmp-clean $VERSION - remove idle Claude Code session temp folders
 
 USAGE
-  claude-tmp-clean [--delete] [--days N]
+  claude-tmp-clean [--delete] [--days N] [--build-days N] [--keep-builds]
 
 OPTIONS
-  --delete     Remove the idle folders. Without it, only list them.
-  --days N     Idle means no transcript write for N days (default $DAYS).
+  --delete         Remove the idle folders. Without it, only list them.
+  --days N         Idle means no transcript write for N days (default $DAYS).
+  --build-days N   In a kept folder, a Cargo build folder is idle after N days
+                   with no write (default $BUILD_DAYS).
+  --keep-builds    Leave build folders in kept folders alone.
   -h, --help   Show this help.
   --version    Show the version.
 
@@ -48,6 +56,9 @@ A folder is kept while any process uses it, while its session wrote to its
 transcript in the last N days, or while a git checkout in it holds work found
 nowhere else. Worktrees are unregistered from their repo before removal. gpg daemons left by test keyrings are
 stopped, not counted as use.
+
+In a kept folder, idle Cargo build folders are removed: target/ folders
+holding Cargo's CACHEDIR.TAG that no process uses. Cargo rebuilds them.
 
 Root:     $ROOT
 Sessions: $PROJECTS
@@ -60,6 +71,10 @@ while [ $# -gt 0 ]; do
     --days)
       [ $# -ge 2 ] || { echo "claude-tmp-clean: --days needs a number" >&2; exit 2; }
       DAYS="$2"; shift ;;
+    --build-days)
+      [ $# -ge 2 ] || { echo "claude-tmp-clean: --build-days needs a number" >&2; exit 2; }
+      BUILD_DAYS="$2"; shift ;;
+    --keep-builds) BUILDS=false ;;
     -h|--help|help) usage; exit 0 ;;
     --version|version) echo "claude-tmp-clean $VERSION"; exit 0 ;;
     *) echo "claude-tmp-clean: unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -69,6 +84,9 @@ done
 
 case "$DAYS" in
   ''|*[!0-9]*) echo "claude-tmp-clean: --days must be a whole number, got '$DAYS'" >&2; exit 2 ;;
+esac
+case "$BUILD_DAYS" in
+  ''|*[!0-9]*) echo "claude-tmp-clean: --build-days must be a whole number, got '$BUILD_DAYS'" >&2; exit 2 ;;
 esac
 
 if [ ! -d /proc/self/fd ]; then
@@ -148,8 +166,40 @@ unsaved_git_work() {
   done <<<"$(git_checkouts "$1")"
 }
 
+# Cargo build folders under $1: target/ folders holding Cargo's CACHEDIR.TAG.
+cargo_targets() {
+  find "$1" -name node_modules -prune -o -type d -name target -print -prune 2>/dev/null |
+    while read -r d; do
+      grep -qs 'created by cargo' "$d/CACHEDIR.TAG" && printf '%s\n' "$d"
+    done
+}
+
+# In a folder that is kept, removes (or lists) its idle Cargo build folders.
+clean_builds() {
+  [ "$BUILDS" = true ] || return 0
+  local d bytes verb
+  while read -r d; do
+    [ -n "$d" ] && [ -d "$d" ] && [ ! -L "$d" ] || continue
+    [ -z "$(user_of "$d" | head -1)" ] || continue
+    [ -z "$(find "$d" -maxdepth 3 -newermt "@$build_cut" -print -quit 2>/dev/null)" ] || continue
+    bytes=$(du -sb -- "$d" 2>/dev/null | cut -f1)
+    build_total=$((build_total + ${bytes:-0}))
+    build_count=$((build_count + 1))
+    if [ "$DELETE" = true ]; then
+      rm -rf --one-file-system -- "$d"
+      verb="removed"
+    else
+      verb="idle"
+    fi
+    printf '%-7s build  %9s  %s\n' "$verb" "$(human "${bytes:-0}")" "${d#"$ROOT"/}"
+  done <<<"$(cargo_targets "$1")"
+}
+
 now=$(date +%s)
 limit=$((DAYS * 86400))
+build_cut=$((now - BUILD_DAYS * 86400))
+build_total=0
+build_count=0
 total=0
 count=0
 kept_busy=0
@@ -176,18 +226,21 @@ for dir in "$ROOT"/-*/*/; do
 
   if [ $((now - ${last:-$now})) -lt "$limit" ]; then
     kept_recent=$((kept_recent + 1))
+    clean_builds "$dir"
     continue
   fi
   busy=$(user_of "$dir" | head -1)
   if [ -n "$busy" ]; then
     printf 'keep  %4sd  in use by %-12s %s\n' "$age" "$busy" "$project/$session"
     kept_busy=$((kept_busy + 1))
+    clean_builds "$dir"
     continue
   fi
   unsaved=$(unsaved_git_work "$dir")
   if [ -n "$unsaved" ]; then
     printf 'keep  %4sd  %s: %s\n' "$age" "$project/$session" "$unsaved"
     kept_git=$((kept_git + 1))
+    clean_builds "$dir"
     continue
   fi
 
@@ -240,4 +293,11 @@ else
   echo "$count idle folder(s), $(human "$total"). Run with --delete to remove them."
 fi
 echo "Kept $kept_recent active in the last $DAYS day(s), $kept_busy in use, $kept_git holding unsaved git work."
+if [ "$BUILDS" = true ]; then
+  if [ "$DELETE" = true ]; then
+    echo "Removed $build_count idle build folder(s) from kept folders, $(human "$build_total")."
+  else
+    echo "$build_count idle build folder(s) in kept folders, $(human "$build_total")."
+  fi
+fi
 [ "$orphans" -eq 0 ] || echo "$orphans gpg daemon(s) had lost their homedir."

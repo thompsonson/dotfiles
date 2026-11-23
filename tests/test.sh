@@ -661,9 +661,24 @@ smoke_claude_tmp_clean() {
     local orphan_pid=$!
     sleep 0.5
 
+    # Build folders in the recent (kept) folder: an idle Cargo one, a fresh one,
+    # one in use, and a folder named target that Cargo did not make.
+    local tag='Signature: 8a477f597d28d172789f06886806bc55
+# This file is a cache directory tag created by cargo.'
+    local b="$root/$p/$recent/scratchpad"
+    for d in old/target fresh/target busy/target; do
+        mkdir -p "$b/$d/debug/deps" && echo "$tag" > "$b/$d/CACHEDIR.TAG"
+        touch "$b/$d/debug/deps/lib.rlib"
+    done
+    mkdir -p "$b/src/target" && touch "$b/src/target/notes.md"
+    find "$b/old" "$b/busy" "$b/src" -exec touch -d '3 days ago' {} +
+    (cd "$b/busy/target/debug" && exec sleep 60) &
+    local build_pid=$!
+    sleep 0.3
+
     local run=(env CLAUDE_TMP_ROOT="$root" CLAUDE_PROJECTS_DIR="$projects" bash "$script")
     "${run[@]}" >/dev/null 2>&1
-    if [[ -d "$root/$p/$idle" ]] && kill -0 "$orphan_pid" 2>/dev/null; then
+    if [[ -d "$root/$p/$idle" && -d "$b/old/target" ]] && kill -0 "$orphan_pid" 2>/dev/null; then
         pass "claude-tmp-clean dry run changes nothing"
     else
         fail "claude-tmp-clean dry run changed something"; failed=1
@@ -675,6 +690,19 @@ smoke_claude_tmp_clean() {
     else fail "claude-tmp-clean left an idle folder"; failed=1; fi
     if [[ -d "$root/$p/$recent" ]]; then pass "claude-tmp-clean keeps a recent session"
     else fail "claude-tmp-clean removed a recent session"; failed=1; fi
+    if [[ ! -e "$b/old/target" && -f "$b/fresh/target/CACHEDIR.TAG" ]]; then
+        pass "claude-tmp-clean removes an idle build folder and keeps a fresh one"
+    else
+        fail "claude-tmp-clean got the idle or fresh build folder wrong"; failed=1
+    fi
+    if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean keeps a build folder in use"
+    else fail "claude-tmp-clean removed a build folder in use"; failed=1; fi
+    if [[ -f "$b/src/target/notes.md" ]]; then pass "claude-tmp-clean keeps a target folder Cargo did not make"
+    else fail "claude-tmp-clean removed a target folder Cargo did not make"; failed=1; fi
+    kill "$build_pid" 2>/dev/null || true; wait "$build_pid" 2>/dev/null || true
+    "${run[@]}" --delete --keep-builds >/dev/null 2>&1
+    if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean --keep-builds leaves build folders"
+    else fail "claude-tmp-clean --keep-builds removed a build folder"; failed=1; fi
     if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
     else fail "claude-tmp-clean removed a folder in use"; failed=1; fi
     if [[ ! -e "$root/$p/$keyring" ]]; then pass "claude-tmp-clean ignores gpg daemons as use"
@@ -701,8 +729,13 @@ smoke_claude_tmp_clean() {
     else
         pass "claude-tmp-clean rejects a bad --days"
     fi
+    if CLAUDE_TMP_ROOT="$root" bash "$script" --build-days x >/dev/null 2>&1; then
+        fail "claude-tmp-clean accepted --build-days x"; failed=1
+    else
+        pass "claude-tmp-clean rejects a bad --build-days"
+    fi
 
-    kill "$busy_pid" "$agent_pid" "$orphan_pid" 2>/dev/null || true
+    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
     return $failed
