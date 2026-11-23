@@ -1,13 +1,14 @@
 #!{{ lookPath "bash" }}
-# Install the Claude Code OTel collector on pop-mini.
+{{ $collector := index . "collector_host" | default "" -}}
+# Install the Claude Code OTel collector on {{ $collector | default "the collector host (collector_host)" }}.
 # Other machines: opt-in via `mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled`
 # Runs once per machine; re-runs if this file changes.
 
 set -euo pipefail
 
-{{- if eq .chezmoi.hostname "pop-mini" }}
+{{- if and $collector (eq .chezmoi.hostname $collector) }}
 
-echo '== Installing Claude Code OTel collector (pop-mini) =='
+echo '== Installing Claude Code OTel collector ({{ $collector }}) =='
 
 # 1. Data dir + .env for compose user mapping
 mkdir -p "$HOME/.local/share/otel/data"
@@ -38,7 +39,7 @@ systemctl --user status --no-pager otel-ingest.timer | head -10
 
 cat <<EOF
 
-✓ OTel collector running on pop-mini (ports 4317/4318)
+✓ OTel collector running on {{ $collector }} (ports 4317/4318)
 ✓ SQLite DB: ~/.local/share/otel/data/claude.db
 ✓ Ingest timer active (every 5 min)
 
@@ -49,10 +50,10 @@ EOF
 
 {{- else }}
 
-# Non-pop-mini machines: nothing to install. The zshrc env vars handle the
+# Other machines: nothing to install. The zshrc env vars handle the
 # opt-in toggle. Touch ~/.config/claude-telemetry/enabled to start sending.
-echo 'OTel collector install skipped — this is not pop-mini.'
-echo 'To send telemetry to pop-mini from this machine:'
+echo 'OTel collector install skipped — this is not the collector host.'
+echo 'To send telemetry to the collector host from this machine:'
 echo '  mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled'
 echo '  (new shells will pick up the env vars)'
 

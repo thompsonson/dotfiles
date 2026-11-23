@@ -30,9 +30,9 @@ This is a lightweight personal tool: one Docker container, one SQLite file, a fe
 ```
 Claude Code (any machine)
   │  CLAUDE_CODE_ENABLE_TELEMETRY=1
-  │  OTEL_EXPORTER_OTLP_ENDPOINT → pop-mini:4318
+  │  OTEL_EXPORTER_OTLP_ENDPOINT → <collector host>:4318
   ▼
-otelcol-contrib (Docker, pop-mini)
+otelcol-contrib (Docker, collector host)
   │  file exporter → JSONL rotation
   ▼
 ingest.py (systemd timer, every 5 min)
@@ -65,7 +65,7 @@ otel-stats                         ← SQL presets for retros
 - The connection between "observed in telemetry" and "registered in workflow-service" is documented in that repo
 
 ### Ongoing health (done when...)
-- `otel-ingest.timer` runs reliably on pop-mini with no manual intervention
+- `otel-ingest.timer` runs reliably on the collector host with no manual intervention
 - New machines can opt in by touching `~/.config/claude-telemetry/enabled`
 - `sysbak` covers `~/.local/share/otel/data/` so the SQLite store is backed up
 

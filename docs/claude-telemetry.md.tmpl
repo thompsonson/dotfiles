@@ -1,13 +1,15 @@
-# Claude Code Telemetry — Pop-mini OTel Pipeline
+{{ $collector := index . "collector_host" | default "" -}}
+# Claude Code Telemetry — OTel Pipeline
 
-Central OTel collector on pop-mini, SQLite store, ingest from any machine
+Central OTel collector on one machine, the collector host, SQLite store, ingest from any machine
 running Claude Code. Codeburn-based retros are superseded by SQL against the
 ingested store.
 
 ## TL;DR
 
-- **Where:** pop-mini hosts everything. Other machines push telemetry to it via
-  Tailscale MagicDNS (`pop-mini.{{ .tailnet_domain }}:4318`).
+- **Where:** the collector host hosts everything. Other machines push telemetry to it via
+  Tailscale MagicDNS (`{{ $collector | default "<collector_host>" }}.{{ .tailnet_domain }}:4318`).
+- **Which machine:** `collector_host` in chezmoi's data, asked for once by `chezmoi init`.
 - **Stack:** `otelcol-contrib` in Docker → JSONL file exporter → Python
   ingester on a systemd-user timer → SQLite at
   `~/.local/share/otel/data/claude.db`.
@@ -38,17 +40,17 @@ internal "mirror destination" with no stable schema. See
 | Path | Purpose |
 |---|---|
 | `~/.local/share/otel/config.yaml` | Collector config (OTLP HTTP/gRPC in, file exporter out) |
-| `~/.local/share/otel/compose.yml` | Docker compose (pop-mini only, `network_mode: host`) |
+| `~/.local/share/otel/compose.yml` | Docker compose (collector host only, `network_mode: host`) |
 | `~/.local/share/otel/schema.sql`  | SQLite schema — `events`, `legacy_events`, `ingest_state` |
 | `~/.local/share/otel/ingest.py`   | OTel JSONL → SQLite `events` (every 5 min via systemd timer) |
 | `~/.local/share/otel/backfill.py` | `~/.claude/projects/**/*.jsonl` → `legacy_events` (one-shot, idempotent) |
 | `~/.local/bin/otel-stats`         | Thin SQL wrapper with retro presets |
 | `~/.config/systemd/user/otel-ingest.{service,timer}` | Ingester runs every 5 min |
-| `run_once_after_install-otel-collector.sh.tmpl` (chezmoi) | First-time install, pop-mini-gated |
+| `run_once_after_install-otel-collector.sh.tmpl` (chezmoi) | First-time install, only on the collector host |
 
 ## Activation
 
-After `chezmoi apply` on pop-mini:
+After `chezmoi apply` on the collector host:
 
 ```bash
 docker compose -f ~/.local/share/otel/compose.yml up -d   # if not already running
@@ -60,7 +62,7 @@ otel-stats by-project --since=2026-04-01
 otel-stats sql "SELECT model, COUNT(*) FROM legacy_events GROUP BY model;"
 ```
 
-On a non-pop-mini machine:
+On any other machine:
 
 ```bash
 mkdir -p ~/.config/claude-telemetry && touch ~/.config/claude-telemetry/enabled
@@ -122,7 +124,7 @@ rm -rf ~/.local/share/otel/data
 - **Sync `~/.claude/projects/` to a single host with rsync** — viable but
   clunky, and inherits codeburn's blind spot (subagent jsonls don't have token
   data attached the way main sessions do, so reconstructed costs drift).
-- **MQTT bus** (chops broker on `:1884` is already running on pop-mini) — would
+- **MQTT bus** (chops broker on `:1884` is already running on the collector host) — would
   unify telemetry with the chops/atomicguard event stream but couples this
   pipeline to a system that's not yet stable. Deferred; revisit when
   workflow-service has shipped and there's a real holistic story.

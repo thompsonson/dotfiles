@@ -16,6 +16,7 @@
        promptStringOnce only prompts the first time chezmoi init/apply runs on
        a machine; after that it reuses the value already in .chezmoi.toml. */ -}}
 {{- $email := promptStringOnce . "email" "Git/GPG/SSH email address" "" -}}
+{{- $collectorHost := promptStringOnce . "collector_host" "Hostname of the machine that runs the OTel collector (blank if none)" "" -}}
 {{- $tailnetDomain := promptStringOnce . "tailnet_domain" "Tailscale tailnet domain for the OTel collector host (blank to skip remote telemetry)" "" -}}
 {{- $employerName := promptStringOnce . "employer_name" "Employer name, full (blank to omit from docs)" "" -}}
 {{- $employerShort := promptStringOnce . "employer_short" "Employer name, short form" "" -}}
@@ -26,6 +27,7 @@
     is_termux = {{ $isTermux }}
     install_nix = {{ if and (eq .chezmoi.os "linux") (not $isTermux) }}true{{ else }}false{{ end }}
     email = {{ $email | quote }}
+    collector_host = {{ $collectorHost | quote }}
     tailnet_domain = {{ $tailnetDomain | quote }}
     employer_name = {{ $employerName | quote }}
     employer_short = {{ $employerShort | quote }}

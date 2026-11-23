@@ -1,5 +1,5 @@
 # OpenTelemetry Collector config — Claude Code telemetry pipeline.
-# Runs on pop-mini only. Other machines push here via Tailscale MagicDNS.
+# Runs on the collector host only. Other machines push here via Tailscale MagicDNS.
 # Receivers: OTLP HTTP (4318) + gRPC (4317).
 # Exporters: file (JSONL with rotation) -> ingest.py reads into SQLite.
 

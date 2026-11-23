@@ -121,7 +121,7 @@ TODO — choose one and note why.
 
 ## 8. Machines in scope
 
-Are the guard rules the same on all machines, or should `pop-mini`, `pi`, and any remote machines have different policies?
+Are the guard rules the same on all machines, or should the collector host, `pi`, and any remote machines have different policies?
 
 TODO — if different, consider per-machine config files or chezmoi template conditions.
 

@@ -1,4 +1,4 @@
-# OTel collector for Claude Code telemetry. Pop-mini only.
+# OTel collector for Claude Code telemetry. The collector host only.
 #
 # Bring up:   docker compose -f ~/.local/share/otel/compose.yml up -d
 # Tear down:  docker compose -f ~/.local/share/otel/compose.yml down

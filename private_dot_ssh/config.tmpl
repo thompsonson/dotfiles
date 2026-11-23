@@ -9,11 +9,14 @@ Host *
   ServerAliveInterval 60
   ServerAliveCountMax 3
 
-# Pop Mini
-Host pop-mini
-  HostName pop-mini
+{{ $collector := index . "collector_host" | default "" -}}
+{{- if $collector }}
+# The collector host
+Host {{ $collector }}
+  HostName {{ $collector }}
   User mt
   IdentityFile ~/.ssh/id_ed25519
+{{- end }}
 
 # GitHub
 Host github.com
