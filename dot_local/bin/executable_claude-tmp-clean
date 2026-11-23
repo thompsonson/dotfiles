@@ -121,7 +121,10 @@ for p in /proc/[0-9]*; do
     # The path is everything after the fifth field, and may hold spaces.
     sed -nE 's|^([^ ]+ +){5}(/.*)$|\2|p' "$p/maps" 2>/dev/null | sort -u || true
     tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
-  } | grep -F -- "$ROOT/" | sed "s|^|${p#/proc/}\t$comm\t|" >> "$uses" || true
+  } | grep -F -- "$ROOT/" | while IFS= read -r ref; do
+    # printf, not sed: a process name may hold | or a backslash.
+    printf '%s\t%s\t%s\n' "${p#/proc/}" "$comm" "$ref"
+  done >> "$uses" || true
 done
 
 is_gpg_daemon() {

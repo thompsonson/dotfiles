@@ -744,6 +744,7 @@ smoke_claude_tmp_clean() {
         pass "claude-tmp-clean rejects a bad --build-days"
     fi
 
+    pkill -P "$run_pid" 2>/dev/null || true   # its sleep
     kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
