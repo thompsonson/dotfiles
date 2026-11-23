@@ -12,6 +12,7 @@ set -uo pipefail
 otel="$HOME/.local/share/otel"
 units="$HOME/.config/systemd/user"
 did=false
+keep_compose=false
 failed=()
 
 # 1. Stop the ingest timer, if it was enabled, before its unit files go.
@@ -19,7 +20,7 @@ if [ -L "$units/timers.target.wants/otel-ingest.timer" ] && command -v systemctl
   systemctl --user disable --now otel-ingest.timer || failed+=("the otel-ingest timer")
 fi
 
-# 2. Remove the collector container, if docker reports it or can't be asked. It restarts with
+# 2. Remove the collector container, if docker reports it. It restarts with
 # docker (restart: unless-stopped), so stopping it is not enough.
 container=otelcol-claude
 if command -v docker >/dev/null 2>&1; then
@@ -29,9 +30,12 @@ if command -v docker >/dev/null 2>&1; then
     fi
   elif [ -e "$otel/.env" ]; then
     # The install script got far enough to write .env, so the container may
-    # exist and restart with docker; its compose.yml and config.yaml must
-    # stay until it is gone. Without .env, it never existed.
-    failed+=("the $container container: docker is not reachable (if no collector ever ran here, delete $otel/.env)")
+    # exist; it restarts with docker and bind-mounts config.yaml. Without
+    # docker there is no telling, so its files stay, the apply goes on, and
+    # the warning says what to do once docker runs.
+    keep_compose=true
+    echo "OTel removal: docker is not reachable, so the $container container was not checked." >&2
+    echo "  Its files stay in $otel. Once docker runs: docker rm -f $container; rm $otel/{compose.yml,config.yaml,.env}" >&2
   fi
 fi
 
@@ -45,6 +49,10 @@ for f in "$units/otel-ingest.service" "$units/otel-ingest.timer" \
          "$HOME/.local/bin/otel-stats" \
          "$otel/compose.yml" "$otel/config.yaml" "$otel/ingest.py" \
          "$otel/backfill.py" "$otel/schema.sql" "$otel/.env"; do
+  case "$f" in
+    "$otel/compose.yml"|"$otel/config.yaml"|"$otel/.env")
+      [ "$keep_compose" = false ] || continue ;;
+  esac
   if [ -e "$f" ]; then
     rm -f -- "$f"
     did=true

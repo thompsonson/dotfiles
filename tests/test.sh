@@ -331,14 +331,15 @@ STUB
     fi
 
     # Docker unreachable where the install script wrote .env: the container may
-    # exist, so nothing is deleted and the apply fails until docker answers.
+    # exist, so its files stay, a warning says what to do, and the apply goes on.
     install_home
     rm "$u/timers.target.wants/otel-ingest.timer"
     out=$(DOCKER=down removal); rc=$?
-    if [[ $rc -ne 0 && -f "$o/compose.yml" && -f "$o/config.yaml" && "$out" == *"docker is not reachable"* ]]; then
-        pass "otel removal keeps its files and fails when docker is unreachable"
+    if [[ $rc -eq 0 && -f "$o/compose.yml" && -f "$o/config.yaml" && -f "$o/.env" && ! -e "$o/ingest.py" ]] \
+        && [[ "$out" == *"docker rm -f otelcol-claude"* ]]; then
+        pass "otel removal keeps the container's files, warns and succeeds when docker is unreachable"
     else
-        fail "otel removal went ahead although docker was unreachable"; failed=1
+        fail "otel removal got the unreachable-docker case wrong"; failed=1
     fi
     # Docker unreachable and no .env: no container was ever made, so go ahead.
     rm "$o/.env"
