@@ -629,11 +629,12 @@ smoke_sysbak_doctor() {
     # more fields, and \c ends the output, so z/ is never written.
     local cfg="$t/cfg/sysbak/config"
     cp "$cfg" "$t/config.saved"
-    printf 'backup_dirs=(\n    %s\n)\nexclude_patterns=(\n    %s\n    %s\n    "z/"\n)\n' \
-        "$t/a" "'a\\tb'" "'p\\cq'" > "$cfg"
-    printf 'exclude\ta\tb\nexclude\tp\nbackup\t%s/\tlocalhost/\n' "$t/a" > "$t/rs.conf"
+    # And \n in an exclude starts a line of its own, here a backup line.
+    printf 'backup_dirs=(\n    %s\n)\nexclude_patterns=(\n    %s\n    %s\n    %s\n    "z/"\n)\n' \
+        "$t/a" "'a\\tb'" "'q\\nbackup\\t$t/b/'" "'p\\cq'" > "$cfg"
+    printf 'exclude\ta\tb\nexclude\tq\nbackup\t%s/\nexclude\tp\nbackup\t%s/\tlocalhost/\n' "$t/b" "$t/a" > "$t/rs.conf"
     out=$(doctor)
-    if [[ "$out" == *"Matches config:"*"1 backup points, 2 excludes"* ]]; then
+    if [[ "$out" == *"Matches config:"*"2 backup points, 3 excludes"* ]]; then
         pass "sysbak doctor: escapes act as setup's printf %b makes them act"
     else
         fail "sysbak doctor: escapes in exclude_patterns read unlike setup writes them"; failed=1

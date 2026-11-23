@@ -974,8 +974,10 @@ check_rsnapshot_conf() {
       n=$((n + 1))
     fi
   done
+  # Extra only if setup would not write it, from any line, and the config
+  # does not list it.
   for path in "${have_dirs[@]+"${have_dirs[@]}"}"; do
-    if ! in_list "$path" "${listed_dirs[@]+"${listed_dirs[@]}"}"; then
+    if ! in_list "$path" "${want_dirs[@]+"${want_dirs[@]}"}" "${listed_dirs[@]+"${listed_dirs[@]}"}"; then
       [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra backup:" "$path is in $RSNAPSHOT_CONF but not in backup_dirs"
       n=$((n + 1))
     fi
