@@ -287,6 +287,14 @@ smoke_otel_removal() {
     else
         fail "otel removal deleted files after a failed stop"; failed=1
     fi
+    # Files deployed, but the collector never installed (no .env, no data/):
+    # a docker that can't reach its daemon must not fail the apply.
+    rm -rf "$o/data" "$o/.env"
+    if HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") >/dev/null 2>&1 && [[ ! -e "$o/compose.yml" ]]; then
+        pass "otel removal deletes deployed files where the collector never ran"
+    else
+        fail "otel removal failed where the collector never ran"; failed=1
+    fi
     # On a machine that never had it: no calls, no output.
     rm -f "$t/calls"
     out=$(HOME="$t/empty" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)

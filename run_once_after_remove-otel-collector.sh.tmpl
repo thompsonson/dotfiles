@@ -3,8 +3,10 @@
 # gone from this repo. chezmoi doesn't delete a file that leaves the source.
 # Safe on any machine: each step runs only where its target exists.
 # Keeps ~/.local/share/otel/data/ (claude.db, the only copy of the telemetry).
-# If a stop fails, nothing is deleted and the script exits non-zero, so
-# chezmoi runs it again on the next apply.
+# The files were deployed to every machine, but the collector ran only where
+# the install script did; it left .env and data/. Only there are the timer
+# and container stopped, and a failed stop deletes nothing and exits
+# non-zero, so chezmoi runs this again on the next apply.
 
 set -uo pipefail
 
@@ -13,14 +15,19 @@ units="$HOME/.config/systemd/user"
 did=false
 failed=()
 
+installed=false
+if [ -e "$otel/.env" ] || [ -d "$otel/data" ]; then
+  installed=true
+fi
+
 # 1. Stop the ingest timer before its unit files go.
-if command -v systemctl >/dev/null 2>&1 && [ -f "$units/otel-ingest.timer" ]; then
+if [ "$installed" = true ] && command -v systemctl >/dev/null 2>&1 && [ -f "$units/otel-ingest.timer" ]; then
   systemctl --user disable --now otel-ingest.timer || failed+=("the otel-ingest timer")
   systemctl --user stop otel-ingest.service || failed+=("the otel-ingest service")
 fi
 
 # 2. Stop the collector container.
-if [ -f "$otel/compose.yml" ] && command -v docker >/dev/null 2>&1; then
+if [ "$installed" = true ] && [ -f "$otel/compose.yml" ] && command -v docker >/dev/null 2>&1; then
   docker compose -f "$otel/compose.yml" down || failed+=("the collector container")
 fi
 
