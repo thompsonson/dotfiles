@@ -19,7 +19,7 @@ if [ -L "$units/timers.target.wants/otel-ingest.timer" ] && command -v systemctl
   systemctl --user disable --now otel-ingest.timer || failed+=("the otel-ingest timer")
 fi
 
-# 2. Remove the collector container, if docker reports it. It restarts with
+# 2. Remove the collector container, if docker reports it or can't be asked. It restarts with
 # docker (restart: unless-stopped), so stopping it is not enough.
 container=otelcol-claude
 if command -v docker >/dev/null 2>&1; then
@@ -27,8 +27,11 @@ if command -v docker >/dev/null 2>&1; then
     if docker container inspect "$container" >/dev/null 2>&1; then
       docker rm -f "$container" >/dev/null || failed+=("the $container container")
     fi
-  elif [ -f "$otel/compose.yml" ]; then
-    echo "OTel removal: docker is not reachable, so the $container container was not checked. If it runs later: docker rm -f $container" >&2
+  elif [ -e "$otel/.env" ]; then
+    # The install script got far enough to write .env, so the container may
+    # exist and restart with docker; its compose.yml and config.yaml must
+    # stay until it is gone. Without .env, it never existed.
+    failed+=("the $container container: docker is not reachable (if no collector ever ran here, delete $otel/.env)")
   fi
 fi
 

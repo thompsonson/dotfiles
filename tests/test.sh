@@ -330,14 +330,23 @@ STUB
         fail "otel removal tried a stop where the collector never started"; failed=1
     fi
 
-    # Docker unreachable: a warning, not a failed apply.
+    # Docker unreachable where the install script wrote .env: the container may
+    # exist, so nothing is deleted and the apply fails until docker answers.
     install_home
     rm "$u/timers.target.wants/otel-ingest.timer"
     out=$(DOCKER=down removal); rc=$?
-    if [[ $rc -eq 0 && ! -e "$o/compose.yml" && "$out" == *"docker rm -f otelcol-claude"* ]]; then
-        pass "otel removal warns, and succeeds, when docker is unreachable"
+    if [[ $rc -ne 0 && -f "$o/compose.yml" && -f "$o/config.yaml" && "$out" == *"docker is not reachable"* ]]; then
+        pass "otel removal keeps its files and fails when docker is unreachable"
     else
-        fail "otel removal failed or said nothing when docker was unreachable"; failed=1
+        fail "otel removal went ahead although docker was unreachable"; failed=1
+    fi
+    # Docker unreachable and no .env: no container was ever made, so go ahead.
+    rm "$o/.env"
+    out=$(DOCKER=down removal); rc=$?
+    if [[ $rc -eq 0 && ! -e "$o/compose.yml" ]]; then
+        pass "otel removal goes ahead with docker unreachable where no .env was written"
+    else
+        fail "otel removal failed with docker unreachable where no .env was written"; failed=1
     fi
 
     # On a machine that never had it: no output, and no stops.
