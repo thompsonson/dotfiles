@@ -705,7 +705,9 @@ FAKE
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p1" 2>&1) &
     (cd "$t/repo" && SLOW=1 "${rr[@]}" run --no-post >"$t/p2" 2>&1) &
     wait
-    if cat "$t/p1" "$t/p2" | grep -q "round 5/7" && cat "$t/p1" "$t/p2" | grep -q "round 6/7"; then
+    # grep reads the files: piping cat into grep -q fails under pipefail when
+    # grep exits on its match while cat is still writing (SIGPIPE).
+    if grep -q "round 5/7" "$t/p1" "$t/p2" && grep -q "round 6/7" "$t/p1" "$t/p2"; then
         pass "review-round gives parallel runs different rounds"
     else
         fail "review-round parallel: $(cat "$t/p1" "$t/p2")"; failed=1
