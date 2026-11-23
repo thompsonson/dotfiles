@@ -83,7 +83,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_sysup`: Cross-platform system update utility (status, upgrade, doctor)
 - `dot_local/bin/executable_sysmon`: Cross-platform system health monitor (status, disk, mem, proc, net, warn)
 - `dot_local/bin/executable_opencode-vacuum`: Reclaims dead space from `~/.local/share/opencode/opencode.db` (SQLite doesn't auto-compact); refuses to run while opencode is active unless `--kill` is passed
-- `dot_local/bin/executable_claude-tmp-clean`: Removes idle Claude Code session folders under `/tmp/claude-<uid>`; dry run unless `--delete`; daily user timer `claude-tmp-clean.timer` (installed, not enabled)
+- `dot_local/bin/executable_claude-tmp-clean`: Removes idle Claude Code session folders under `/tmp/claude-<uid>`, and idle Cargo `target/` folders inside the ones it keeps; dry run unless `--delete`; daily user timer `claude-tmp-clean.timer` (installed, not enabled)
 - `dot_local/bin/executable_review-round`: Runs one code-review round with `claude -p` or records one done elsewhere; tags each finding pre-existing, original or introduced by a fix (git blame); logs every run to `~/.local/share/review-round/`; stops after 3 rounds per branch until a person runs `review-round allow`
 - `dot_local/bin/executable_wol`: Wake-on-LAN sender + reachability poller (name → MAC/IP registry, magic packet, poll-ping)
 

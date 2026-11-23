@@ -8,13 +8,17 @@
 #
 # A session folder is removed only when both hold:
 #   - its transcript was last written more than --days days ago;
-#   - no process uses it, by working directory, open file or command line.
+#   - no process uses it, by working directory, program, open or mapped
+#     file, or command line.
 #   - no git checkout in it holds work found nowhere else: uncommitted
 #     changes, commits no branch holds, unpushed commits or a stash.
+# In a folder that is kept, Cargo build folders (target/ with Cargo's
+# CACHEDIR.TAG) are removed when no process uses them and nothing in them
+# was written for --build-days days. Cargo rebuilds them.
 # gpg-agent, scdaemon, keyboxd and dirmngr do not count as use: a test
 # keyring leaves them running. They are stopped before the folder goes.
 #
-# Usage: claude-tmp-clean [--delete] [--days N]
+# Usage: claude-tmp-clean [--delete] [--days N] [--build-days N] [--keep-builds]
 #   claude-tmp-clean              List what would be removed (no changes)
 #   claude-tmp-clean --delete     Remove it
 #
@@ -25,10 +29,12 @@
 
 set -euo pipefail
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 ROOT="${CLAUDE_TMP_ROOT:-/tmp/claude-$(id -u)}"
 PROJECTS="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
 DAYS=7
+BUILD_DAYS=1
+BUILDS=true
 DELETE=false
 
 usage() {
@@ -36,18 +42,24 @@ usage() {
 claude-tmp-clean $VERSION - remove idle Claude Code session temp folders
 
 USAGE
-  claude-tmp-clean [--delete] [--days N]
+  claude-tmp-clean [--delete] [--days N] [--build-days N] [--keep-builds]
 
 OPTIONS
-  --delete     Remove the idle folders. Without it, only list them.
-  --days N     Idle means no transcript write for N days (default $DAYS).
-  -h, --help   Show this help.
-  --version    Show the version.
+  --delete         Remove the idle folders. Without it, only list them.
+  --days N         Idle means no transcript write for N days (default $DAYS).
+  --build-days N   In a kept folder, a Cargo build folder is idle after N days
+                   with no write (default $BUILD_DAYS).
+  --keep-builds    Leave build folders in kept folders alone.
+  -h, --help       Show this help.
+  --version        Show the version.
 
 A folder is kept while any process uses it, while its session wrote to its
 transcript in the last N days, or while a git checkout in it holds work found
 nowhere else. Worktrees are unregistered from their repo before removal. gpg daemons left by test keyrings are
 stopped, not counted as use.
+
+In a kept folder, idle Cargo build folders are removed: target/ folders
+holding Cargo's CACHEDIR.TAG that no process uses. Cargo rebuilds them.
 
 Root:     $ROOT
 Sessions: $PROJECTS
@@ -60,6 +72,10 @@ while [ $# -gt 0 ]; do
     --days)
       [ $# -ge 2 ] || { echo "claude-tmp-clean: --days needs a number" >&2; exit 2; }
       DAYS="$2"; shift ;;
+    --build-days)
+      [ $# -ge 2 ] || { echo "claude-tmp-clean: --build-days needs a number" >&2; exit 2; }
+      BUILD_DAYS="$2"; shift ;;
+    --keep-builds) BUILDS=false ;;
     -h|--help|help) usage; exit 0 ;;
     --version|version) echo "claude-tmp-clean $VERSION"; exit 0 ;;
     *) echo "claude-tmp-clean: unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -69,6 +85,9 @@ done
 
 case "$DAYS" in
   ''|*[!0-9]*) echo "claude-tmp-clean: --days must be a whole number, got '$DAYS'" >&2; exit 2 ;;
+esac
+case "$BUILD_DAYS" in
+  ''|*[!0-9]*) echo "claude-tmp-clean: --build-days must be a whole number, got '$BUILD_DAYS'" >&2; exit 2 ;;
 esac
 
 if [ ! -d /proc/self/fd ]; then
@@ -88,16 +107,31 @@ human() {
 }
 
 # One line per reference a process of ours holds: "<pid>\t<comm>\t<path or cmdline>".
+# A reference is its working directory, program, open file, mapped file or command line.
+# A newline in a reference is written \012, as /proc/<pid>/maps writes it; enc
+# does the same to a path before it is compared.
+enc() { printf '%s' "${1//$'\n'/\\012}"; }
 uses=$(mktemp)
 trap 'rm -f "$uses"' EXIT
 for p in /proc/[0-9]*; do
   [ -O "$p" ] || continue
   comm=$(cat "$p/comm" 2>/dev/null) || continue
+  # A tab or newline in the name would break the tab-separated record.
+  comm=${comm//[$'\t\n']/?}
+  # Each reference ends in a NUL, since a path may hold a newline.
   {
-    readlink "$p/cwd" 2>/dev/null || true
-    for fd in "$p"/fd/*; do readlink "$fd" 2>/dev/null || true; done
-    tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
-  } | grep -F -- "$ROOT/" | sed "s|^|${p#/proc/}\t$comm\t|" >> "$uses" || true
+    readlink -n "$p/cwd" 2>/dev/null && printf '\0'
+    readlink -n "$p/exe" 2>/dev/null && printf '\0'
+    for fd in "$p"/fd/*; do readlink -n "$fd" 2>/dev/null && printf '\0'; done
+    # Mapped files: a loaded library, or a program run from a build folder.
+    # The path is everything after the fifth field, and may hold spaces.
+    sed -nE 's|^([^ ]+ +){5}(/.*)$|\2|p' "$p/maps" 2>/dev/null | sort -u | tr '\n' '\0' || true
+    tr '\0' ' ' < "$p/cmdline" 2>/dev/null && printf '\0'
+  } | while IFS= read -r -d '' ref; do
+    case "$ref" in *"$ROOT/"*) ;; *) continue ;; esac
+    # printf, not sed: a process name may hold | or a backslash.
+    printf '%s\t%s\t%s\n' "${p#/proc/}" "$comm" "$(enc "$ref")"
+  done >> "$uses" || true
 done
 
 is_gpg_daemon() {
@@ -107,7 +141,7 @@ is_gpg_daemon() {
 
 # Homedirs, under $1, of gpg daemons still running there.
 gpg_homedirs() {
-  { grep -F -- "$1/" "$uses" || true; } | while IFS=$'\t' read -r _ comm ref; do
+  { grep -F -- "$(enc "$1")/" "$uses" || true; } | while IFS=$'\t' read -r _ comm ref; do
     is_gpg_daemon "$comm" || continue
     sed -n 's/.*--homedir \([^ ]*\).*/\1/p' <<<"$ref"
   done | sort -u
@@ -115,22 +149,25 @@ gpg_homedirs() {
 
 # Prints the first non-gpg process using $1, if any.
 user_of() {
+  local want
+  want=$(enc "$1")
   while IFS=$'\t' read -r _ comm ref; do
-    case "$ref" in "$1" | *"$1/"* | *"$1 "*) ;; *) continue ;; esac
+    case "$ref" in "$want" | *"$want/"* | *"$want "*) ;; *) continue ;; esac
     is_gpg_daemon "$comm" || { echo "$comm"; return; }
   done < "$uses"
 }
 
-# Git checkouts under $1. Build output is skipped: it holds no checkouts.
+# Git checkouts under $1, NUL-separated, since a name may hold a newline.
+# Build output is skipped: it holds no checkouts.
 git_checkouts() {
-  find "$1" \( -name target -o -name node_modules \) -prune -o -name .git -print -prune 2>/dev/null |
-    sed 's|/\.git$||'
+  find "$1" \( -name target -o -name node_modules \) -prune -o -name .git -print0 -prune 2>/dev/null |
+    while IFS= read -r -d '' g; do printf '%s\0' "${g%/.git}"; done
 }
 
 # Prints why a checkout under $1 holds work that exists nowhere else, if one does.
 unsaved_git_work() {
   local co st
-  while read -r co; do
+  while IFS= read -r -d '' co; do
     [ -n "$co" ] || continue
     st=$(git -C "$co" status --porcelain 2>/dev/null) || { echo "unreadable checkout ${co#"$1"/}"; return; }
     [ -z "$st" ] || { echo "uncommitted changes in ${co#"$1"/}"; return; }
@@ -145,11 +182,46 @@ unsaved_git_work() {
       ! git -C "$co" rev-parse -q --verify refs/stash >/dev/null ||
         { echo "a stash in ${co#"$1"/}"; return; }
     fi
-  done <<<"$(git_checkouts "$1")"
+  done < <(git_checkouts "$1")
+}
+
+# Cargo build folders under $1: target/ folders holding Cargo's CACHEDIR.TAG.
+# NUL-separated, since a name may hold a newline.
+cargo_targets() {
+  find "$1" -name node_modules -prune -o -type d -name target -print0 -prune 2>/dev/null |
+    while IFS= read -r -d '' d; do
+      grep -qs 'created by cargo' "$d/CACHEDIR.TAG" && printf '%s\0' "$d"
+    done
+}
+
+# In a folder that is kept, removes (or lists) its idle Cargo build folders.
+clean_builds() {
+  [ "$BUILDS" = true ] || return 0
+  local d bytes verb
+  while IFS= read -r -d '' d; do
+    case "$d" in "$1"/*) ;; *) continue ;; esac
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    [ -z "$(user_of "$d" | head -1)" ] || continue
+    [ -z "$(find "$d" -maxdepth 3 -newermt "@$build_cut" -print -quit 2>/dev/null)" ] || continue
+    # du prints the path after the size; a newline in it would add a line.
+    bytes=$(du -sb -- "$d" 2>/dev/null | head -n1 | cut -f1)
+    build_total=$((build_total + ${bytes:-0}))
+    build_count=$((build_count + 1))
+    if [ "$DELETE" = true ]; then
+      rm -rf --one-file-system -- "$d"
+      verb="removed"
+    else
+      verb="idle"
+    fi
+    printf '%-7s build  %9s  %s\n' "$verb" "$(human "${bytes:-0}")" "${d#"$ROOT"/}"
+  done < <(cargo_targets "$1")
 }
 
 now=$(date +%s)
 limit=$((DAYS * 86400))
+build_cut=$((now - BUILD_DAYS * 86400))
+build_total=0
+build_count=0
 total=0
 count=0
 kept_busy=0
@@ -176,18 +248,21 @@ for dir in "$ROOT"/-*/*/; do
 
   if [ $((now - ${last:-$now})) -lt "$limit" ]; then
     kept_recent=$((kept_recent + 1))
+    clean_builds "$dir"
     continue
   fi
   busy=$(user_of "$dir" | head -1)
   if [ -n "$busy" ]; then
     printf 'keep  %4sd  in use by %-12s %s\n' "$age" "$busy" "$project/$session"
     kept_busy=$((kept_busy + 1))
+    clean_builds "$dir"
     continue
   fi
   unsaved=$(unsaved_git_work "$dir")
   if [ -n "$unsaved" ]; then
     printf 'keep  %4sd  %s: %s\n' "$age" "$project/$session" "$unsaved"
     kept_git=$((kept_git + 1))
+    clean_builds "$dir"
     continue
   fi
 
@@ -201,11 +276,12 @@ for dir in "$ROOT"/-*/*/; do
       [ -n "$h" ] && gpgconf --homedir "$h" --kill all 2>/dev/null || true
     done <<<"$homes"
     # Unregister worktrees, so the parent repo keeps no entry for a missing folder.
-    while read -r co; do
+    while IFS= read -r -d '' co; do
+      case "$co" in "$dir"/*) ;; *) continue ;; esac
       [ -f "$co/.git" ] || continue
       git -C "$co" worktree remove --force "$co" 2>/dev/null ||
         echo "warning: could not unregister worktree $co; run 'git worktree prune' in its repo" >&2
-    done <<<"$(git_checkouts "$dir")"
+    done < <(git_checkouts "$dir")
     rm -rf --one-file-system -- "$dir"
     rmdir -- "$ROOT/$project" 2>/dev/null || true
     verb="removed"
@@ -240,4 +316,11 @@ else
   echo "$count idle folder(s), $(human "$total"). Run with --delete to remove them."
 fi
 echo "Kept $kept_recent active in the last $DAYS day(s), $kept_busy in use, $kept_git holding unsaved git work."
+if [ "$BUILDS" = true ]; then
+  if [ "$DELETE" = true ]; then
+    echo "Removed $build_count idle build folder(s) from kept folders, $(human "$build_total")."
+  else
+    echo "$build_count idle build folder(s) in kept folders, $(human "$build_total")."
+  fi
+fi
 [ "$orphans" -eq 0 ] || echo "$orphans gpg daemon(s) had lost their homedir."

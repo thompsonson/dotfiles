@@ -687,8 +687,9 @@ smoke_claude_tmp_clean() {
     local recent=22222222-2222-2222-2222-222222222222
     local busy=33333333-3333-3333-3333-333333333333
     local keyring=44444444-4444-4444-4444-444444444444
+    local tabbed=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa
     mkdir -p "$projects/$p" "$t/bin" "$t/sbin"
-    for s in $idle $recent $busy $keyring; do
+    for s in $idle $recent $busy $keyring $tabbed; do
         mkdir -p "$root/$p/$s/scratchpad"
         touch -d '10 days ago' "$projects/$p/$s.jsonl"
     done
@@ -724,15 +725,42 @@ smoke_claude_tmp_clean() {
     cp "$(command -v bash)" "$t/bin/gpg-agent"
     (cd "$root/$p/$busy" && exec sleep 60) &
     local busy_pid=$!
+    # A process whose name holds a tab still counts as use.
+    # bash, not sleep: sleep can be a multi-call binary that needs its own name.
+    cp "$(command -v bash)" "$t/sbin/x"$'\t'"y"
+    (cd "$root/$p/$tabbed" && exec "$t/sbin/x"$'\t'"y" -c 'sleep 60; :') &
+    local tab_pid=$!
     (cd "$root/$p/$keyring" && exec "$t/sbin/gpg-agent" 60) &
     local agent_pid=$!
     "$t/bin/gpg-agent" -c 'sleep 60; :' --homedir "$root/$p/gone/h" &
     local orphan_pid=$!
     sleep 0.5
 
+    # Build folders in the recent (kept) folder: an idle Cargo one, a fresh one,
+    # one in use, and a folder named target that Cargo did not make.
+    local tag='Signature: 8a477f597d28d172789f06886806bc55
+# This file is a cache directory tag created by cargo.'
+    local b="$root/$p/$recent/scratchpad"
+    for d in old/target fresh/target busy/target; do
+        mkdir -p "$b/$d/debug/deps" && echo "$tag" > "$b/$d/CACHEDIR.TAG"
+        touch "$b/$d/debug/deps/lib.rlib"
+    done
+    mkdir -p "$b/src/target" && touch "$b/src/target/notes.md"
+    find "$b/old" "$b/busy" "$b/src" -exec touch -d '3 days ago' {} +
+    (cd "$b/busy/target/debug" && exec sleep 60) &
+    local build_pid=$!
+    # A program run from a build folder; neither its working directory nor its command line names it.
+    mkdir -p "$b/run/target/debug" && echo "$tag" > "$b/run/target/CACHEDIR.TAG"
+    # bash, not sleep: sleep can be a multi-call binary that needs its own name.
+    cp "$(command -v bash)" "$b/run/target/debug/app"
+    find "$b/run" -exec touch -d '3 days ago' {} +
+    (cd "$t" && exec -a app "$b/run/target/debug/app" -c 'sleep 60; :') &
+    local run_pid=$!
+    sleep 0.3
+
     local run=(env CLAUDE_TMP_ROOT="$root" CLAUDE_PROJECTS_DIR="$projects" bash "$script")
     "${run[@]}" >/dev/null 2>&1
-    if [[ -d "$root/$p/$idle" ]] && kill -0 "$orphan_pid" 2>/dev/null; then
+    if [[ -d "$root/$p/$idle" && -d "$b/old/target" ]] && kill -0 "$orphan_pid" 2>/dev/null; then
         pass "claude-tmp-clean dry run changes nothing"
     else
         fail "claude-tmp-clean dry run changed something"; failed=1
@@ -744,6 +772,48 @@ smoke_claude_tmp_clean() {
     else fail "claude-tmp-clean left an idle folder"; failed=1; fi
     if [[ -d "$root/$p/$recent" ]]; then pass "claude-tmp-clean keeps a recent session"
     else fail "claude-tmp-clean removed a recent session"; failed=1; fi
+    if [[ ! -e "$b/old/target" && -f "$b/fresh/target/CACHEDIR.TAG" ]]; then
+        pass "claude-tmp-clean removes an idle build folder and keeps a fresh one"
+    else
+        fail "claude-tmp-clean got the idle or fresh build folder wrong"; failed=1
+    fi
+    if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean keeps a build folder in use"
+    else fail "claude-tmp-clean removed a build folder in use"; failed=1; fi
+    if [[ -x "$b/run/target/debug/app" ]]; then pass "claude-tmp-clean keeps a build folder whose program runs"
+    else fail "claude-tmp-clean removed a build folder whose program runs"; failed=1; fi
+    if [[ -f "$b/src/target/notes.md" ]]; then pass "claude-tmp-clean keeps a target folder Cargo did not make"
+    else fail "claude-tmp-clean removed a target folder Cargo did not make"; failed=1; fi
+    kill "$build_pid" 2>/dev/null || true; wait "$build_pid" 2>/dev/null || true
+    "${run[@]}" --delete --keep-builds >/dev/null 2>&1
+
+    if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean --keep-builds leaves build folders"
+    else fail "claude-tmp-clean --keep-builds removed a build folder"; failed=1; fi
+    # A newline in a folder name: find's output for "$b/a<NL>b/target" must not
+    # be read as a second path, "b/target", relative to the working directory.
+    mkdir -p "$b/a"$'\n'"b/target" "$t/b/target"
+    echo "$tag" > "$b/a"$'\n'"b/target/CACHEDIR.TAG"
+    echo "$tag" > "$t/b/target/CACHEDIR.TAG"
+    # And a build folder with a newline in its path, in use.
+    mkdir -p "$b/u"$'\n'"v/target/debug"
+    echo "$tag" > "$b/u"$'\n'"v/target/CACHEDIR.TAG"
+    find "$b/a"$'\n'"b" "$b/u"$'\n'"v" "$t/b" -exec touch -d '3 days ago' {} +
+    (cd "$b/u"$'\n'"v/target/debug" && exec sleep 60) &
+    local nl_pid=$!
+    sleep 0.3
+    (cd "$t" && "${run[@]}" --delete >/dev/null 2>&1)
+    if [[ -f "$t/b/target/CACHEDIR.TAG" && ! -e "$b/a"$'\n'"b/target" ]]; then
+        pass "claude-tmp-clean reads a folder name with a newline as one path"
+    else
+        fail "claude-tmp-clean split a folder name with a newline"; failed=1
+    fi
+    if [[ -d "$b/u"$'\n'"v/target" ]]; then
+        pass "claude-tmp-clean keeps a build folder in use whose path has a newline"
+    else
+        fail "claude-tmp-clean removed a build folder in use whose path has a newline"; failed=1
+    fi
+    kill "$nl_pid" 2>/dev/null || true; wait "$nl_pid" 2>/dev/null || true
+    if [[ -d "$root/$p/$tabbed" ]]; then pass "claude-tmp-clean keeps a folder used by a process with a tab in its name"
+    else fail "claude-tmp-clean removed a folder used by a process with a tab in its name"; failed=1; fi
     if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
     else fail "claude-tmp-clean removed a folder in use"; failed=1; fi
     if [[ ! -e "$root/$p/$keyring" ]]; then pass "claude-tmp-clean ignores gpg daemons as use"
@@ -770,8 +840,15 @@ smoke_claude_tmp_clean() {
     else
         pass "claude-tmp-clean rejects a bad --days"
     fi
+    if CLAUDE_TMP_ROOT="$root" bash "$script" --build-days x >/dev/null 2>&1; then
+        fail "claude-tmp-clean accepted --build-days x"; failed=1
+    else
+        pass "claude-tmp-clean rejects a bad --build-days"
+    fi
 
-    kill "$busy_pid" "$agent_pid" "$orphan_pid" 2>/dev/null || true
+    pkill -P "$run_pid" 2>/dev/null || true   # its sleep
+    pkill -P "$tab_pid" 2>/dev/null || true   # its sleep
+    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" "$tab_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
     return $failed
