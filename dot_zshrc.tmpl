@@ -304,7 +304,7 @@ compdef _sysbak_completion sysbak 2>/dev/null
 # Used by Claude Code and opencode (both read standard OTEL_* env vars).
 # The collector host: always on (it runs the collector, see ~/.local/share/otel/).
 # Other machines: opt-in via `touch ~/.config/claude-telemetry/enabled`.
-if [[ -n "{{ $collector }}" && "${HOST%%.*}" == "{{ $collector }}" ]]; then
+if [[ -n "{{ $collector }}" && "${(L)HOST%%.*}" == "{{ lower $collector }}" ]]; then
   export CLAUDE_CODE_ENABLE_TELEMETRY=1
   export OTEL_METRICS_EXPORTER=otlp
   export OTEL_LOGS_EXPORTER=otlp

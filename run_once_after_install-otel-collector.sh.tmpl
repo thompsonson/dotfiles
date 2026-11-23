@@ -6,7 +6,7 @@
 
 set -euo pipefail
 
-{{- if and $collector (eq .chezmoi.hostname $collector) }}
+{{- if and $collector (eq (lower .chezmoi.hostname) (lower $collector)) }}
 
 echo '== Installing Claude Code OTel collector ({{ $collector }}) =='
 
