@@ -15,7 +15,7 @@ Removes idle Claude Code session temp folders.
 A folder is removed only when both hold:
 
 - its transcript, `~/.claude/projects/<project>/<session>.jsonl`, is older than `--days` (default 7);
-- no process uses it, by working directory, open file or command line.
+- no process uses it, by working directory, program, open or mapped file, or command line.
 - no git checkout in it holds work found nowhere else.
 
 Without a transcript, the newest file in the folder's top two levels stands in for it.
@@ -43,7 +43,7 @@ Ignored files, such as build output, are not checked.
 A session folder that is kept can still hold large build output. Cargo rebuilds it, so it goes:
 
 - a `target/` folder holding Cargo's `CACHEDIR.TAG`, which Cargo writes in every build folder;
-- that no process uses, by working directory, open file or command line;
+- that no process uses, by working directory, program, open or mapped file, or command line;
 - with nothing in its top three levels written for `--build-days` days (default 1).
 
 A folder named `target` without Cargo's tag is never touched.

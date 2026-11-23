@@ -8,7 +8,8 @@
 #
 # A session folder is removed only when both hold:
 #   - its transcript was last written more than --days days ago;
-#   - no process uses it, by working directory, open file or command line.
+#   - no process uses it, by working directory, program, open or mapped
+#     file, or command line.
 #   - no git checkout in it holds work found nowhere else: uncommitted
 #     changes, commits no branch holds, unpushed commits or a stash.
 # In a folder that is kept, Cargo build folders (target/ with Cargo's
@@ -49,8 +50,8 @@ OPTIONS
   --build-days N   In a kept folder, a Cargo build folder is idle after N days
                    with no write (default $BUILD_DAYS).
   --keep-builds    Leave build folders in kept folders alone.
-  -h, --help   Show this help.
-  --version    Show the version.
+  -h, --help       Show this help.
+  --version        Show the version.
 
 A folder is kept while any process uses it, while its session wrote to its
 transcript in the last N days, or while a git checkout in it holds work found
@@ -106,6 +107,7 @@ human() {
 }
 
 # One line per reference a process of ours holds: "<pid>\t<comm>\t<path or cmdline>".
+# A reference is its working directory, program, open file, mapped file or command line.
 uses=$(mktemp)
 trap 'rm -f "$uses"' EXIT
 for p in /proc/[0-9]*; do
@@ -113,7 +115,10 @@ for p in /proc/[0-9]*; do
   comm=$(cat "$p/comm" 2>/dev/null) || continue
   {
     readlink "$p/cwd" 2>/dev/null || true
+    readlink "$p/exe" 2>/dev/null || true
     for fd in "$p"/fd/*; do readlink "$fd" 2>/dev/null || true; done
+    # Mapped files: a loaded library, or a program run from a build folder.
+    awk 'NF >= 6 { print $6 }' "$p/maps" 2>/dev/null | sort -u || true
     tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
   } | grep -F -- "$ROOT/" | sed "s|^|${p#/proc/}\t$comm\t|" >> "$uses" || true
 done

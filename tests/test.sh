@@ -674,6 +674,12 @@ smoke_claude_tmp_clean() {
     find "$b/old" "$b/busy" "$b/src" -exec touch -d '3 days ago' {} +
     (cd "$b/busy/target/debug" && exec sleep 60) &
     local build_pid=$!
+    # A program run from a build folder; neither its working directory nor its command line names it.
+    mkdir -p "$b/run/target/debug" && echo "$tag" > "$b/run/target/CACHEDIR.TAG"
+    cp "$(command -v sleep)" "$b/run/target/debug/app"
+    find "$b/run" -exec touch -d '3 days ago' {} +
+    (cd "$t" && exec -a app "$b/run/target/debug/app" 60) &
+    local run_pid=$!
     sleep 0.3
 
     local run=(env CLAUDE_TMP_ROOT="$root" CLAUDE_PROJECTS_DIR="$projects" bash "$script")
@@ -697,6 +703,8 @@ smoke_claude_tmp_clean() {
     fi
     if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean keeps a build folder in use"
     else fail "claude-tmp-clean removed a build folder in use"; failed=1; fi
+    if [[ -x "$b/run/target/debug/app" ]]; then pass "claude-tmp-clean keeps a build folder whose program runs"
+    else fail "claude-tmp-clean removed a build folder whose program runs"; failed=1; fi
     if [[ -f "$b/src/target/notes.md" ]]; then pass "claude-tmp-clean keeps a target folder Cargo did not make"
     else fail "claude-tmp-clean removed a target folder Cargo did not make"; failed=1; fi
     kill "$build_pid" 2>/dev/null || true; wait "$build_pid" 2>/dev/null || true
@@ -735,7 +743,7 @@ smoke_claude_tmp_clean() {
         pass "claude-tmp-clean rejects a bad --build-days"
     fi
 
-    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" 2>/dev/null || true
+    kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
     return $failed
