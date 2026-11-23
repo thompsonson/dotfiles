@@ -250,26 +250,49 @@ run_smoke() {
     return $smoke_failed
 }
 
-# The OTel removal script against a fake home with the pipeline installed.
+# The OTel removal script against fake homes and stub systemctl and docker.
 smoke_otel_removal() {
     local script="$REPO_DIR/run_once_after_remove-otel-collector.sh.tmpl"
-    local t failed=0 out
+    local t failed=0 out rc
     t=$(mktemp -d)
     local h="$t/home" o="$t/home/.local/share/otel" u="$t/home/.config/systemd/user"
-    mkdir -p "$o/data" "$u" "$h/.local/bin" "$t/bin"
-    touch "$o"/{compose.yml,config.yaml,ingest.py,backfill.py,schema.sql,.env} \
-        "$u"/otel-ingest.{service,timer} "$u/keep.service" "$h/.local/bin/otel-stats" "$o/data/claude.db"
-    # Stubs log their calls, so the test sees the timer and container stopped.
-    printf '#!/bin/sh\necho "systemctl $*" >> "%s/calls"\n' "$t" > "$t/bin/systemctl"
-    printf '#!/bin/sh\necho "docker $*" >> "%s/calls"\n' "$t" > "$t/bin/docker"
+    mkdir -p "$t/bin"
+    # Stubs log each call. DOCKER says how docker behaves: up (container
+    # exists), none (no container), down (daemon unreachable), fail (rm fails).
+    # SYSTEMCTL=fail makes systemctl fail.
+    cat > "$t/bin/systemctl" <<STUB
+#!/bin/sh
+echo "systemctl \$*" >> "$t/calls"
+[ "\${SYSTEMCTL:-ok}" = ok ]
+STUB
+    cat > "$t/bin/docker" <<STUB
+#!/bin/sh
+echo "docker \$*" >> "$t/calls"
+case "\${DOCKER:-up}:\$1" in
+  down:*) exit 1 ;;
+  none:container) exit 1 ;;
+  fail:rm) exit 1 ;;
+esac
+exit 0
+STUB
     chmod +x "$t/bin/systemctl" "$t/bin/docker"
+    install_home() {
+        rm -rf "$h" "$t/calls"
+        mkdir -p "$o/data" "$u/timers.target.wants" "$h/.local/bin"
+        touch "$o"/{compose.yml,config.yaml,ingest.py,backfill.py,schema.sql,.env} \
+            "$u"/otel-ingest.{service,timer} "$u/keep.service" "$h/.local/bin/otel-stats" "$o/data/claude.db"
+        ln -s ../otel-ingest.timer "$u/timers.target.wants/otel-ingest.timer"
+    }
     # The template's only action is its shebang; run the body with bash.
-    out=$(HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)
-    if grep -q 'systemctl --user disable --now otel-ingest.timer' "$t/calls" \
-        && grep -q "docker compose -f $o/compose.yml down" "$t/calls"; then
-        pass "otel removal stops the timer and the collector"
+    removal() { HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1; }
+
+    install_home
+    out=$(removal); rc=$?
+    if [[ $rc -eq 0 ]] && grep -q 'systemctl --user disable --now otel-ingest.timer' "$t/calls" \
+        && grep -q 'docker rm -f otelcol-claude' "$t/calls"; then
+        pass "otel removal disables the timer and removes the container"
     else
-        fail "otel removal did not stop the timer or the collector"; failed=1
+        fail "otel removal did not disable the timer or remove the container"; failed=1
     fi
     if [[ ! -e "$o/compose.yml" && ! -e "$o/.env" && ! -e "$u/otel-ingest.timer" && ! -e "$h/.local/bin/otel-stats" ]] \
         && [[ -f "$o/data/claude.db" && -f "$u/keep.service" && "$out" == *"Kept"* ]]; then
@@ -277,32 +300,55 @@ smoke_otel_removal() {
     else
         fail "otel removal deleted the wrong files"; failed=1
     fi
+
     # A stop that fails: nothing is deleted, and the script fails so chezmoi retries.
-    mkdir -p "$o" && touch "$o/compose.yml"
-    printf '#!/bin/sh\nexit 1\n' > "$t/bin/docker"
-    if HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") >/dev/null 2>&1; then
-        fail "otel removal succeeded although the collector did not stop"; failed=1
+    install_home
+    if DOCKER=fail removal >/dev/null; then
+        fail "otel removal succeeded although the container was not removed"; failed=1
     elif [[ -f "$o/compose.yml" ]]; then
-        pass "otel removal keeps its files and fails when a stop fails"
+        pass "otel removal keeps its files and fails when the container can't be removed"
     else
-        fail "otel removal deleted files after a failed stop"; failed=1
+        fail "otel removal deleted files after a failed container removal"; failed=1
     fi
-    # Files deployed, but the collector never installed (no .env, no data/):
-    # a docker that can't reach its daemon must not fail the apply.
-    rm -rf "$o/data" "$o/.env"
-    if HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") >/dev/null 2>&1 && [[ ! -e "$o/compose.yml" ]]; then
-        pass "otel removal deletes deployed files where the collector never ran"
+    install_home
+    if SYSTEMCTL=fail removal >/dev/null; then
+        fail "otel removal succeeded although the timer was not disabled"; failed=1
+    elif [[ -f "$u/otel-ingest.timer" ]]; then
+        pass "otel removal keeps its files and fails when the timer can't be disabled"
     else
-        fail "otel removal failed where the collector never ran"; failed=1
+        fail "otel removal deleted files after a failed disable"; failed=1
     fi
-    # On a machine that never had it: no calls, no output.
-    rm -f "$t/calls"
-    out=$(HOME="$t/empty" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)
-    if [[ -z "$out" && ! -e "$t/calls" ]]; then
+
+    # Never started: .env and data/ exist, but no enabled timer and no container.
+    # systemctl and docker both fail if called for a stop, which must not happen.
+    install_home
+    rm "$u/timers.target.wants/otel-ingest.timer"
+    out=$(DOCKER=none SYSTEMCTL=fail removal); rc=$?
+    if [[ $rc -eq 0 && ! -e "$o/compose.yml" ]] && ! grep -qE 'disable|docker rm' "$t/calls"; then
+        pass "otel removal stops nothing where the collector never started"
+    else
+        fail "otel removal tried a stop where the collector never started"; failed=1
+    fi
+
+    # Docker unreachable: a warning, not a failed apply.
+    install_home
+    rm "$u/timers.target.wants/otel-ingest.timer"
+    out=$(DOCKER=down removal); rc=$?
+    if [[ $rc -eq 0 && ! -e "$o/compose.yml" && "$out" == *"docker rm -f otelcol-claude"* ]]; then
+        pass "otel removal warns, and succeeds, when docker is unreachable"
+    else
+        fail "otel removal failed or said nothing when docker was unreachable"; failed=1
+    fi
+
+    # On a machine that never had it: no output, and no stops.
+    rm -rf "$h" "$t/calls"
+    out=$(DOCKER=none removal)
+    if [[ -z "$out" ]] && ! grep -qE 'disable|docker rm' "$t/calls" 2>/dev/null; then
         pass "otel removal does nothing where the pipeline never was"
     else
         fail "otel removal acted where the pipeline never was"; failed=1
     fi
+    unset -f install_home removal
     rm -rf "$t"
     return $failed
 }
