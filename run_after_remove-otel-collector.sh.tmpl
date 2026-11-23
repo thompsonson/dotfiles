@@ -1,10 +1,16 @@
+{{- /* Renders, so runs and shows in chezmoi status, only while something the OTel pipeline installed is left; empty, chezmoi skips it. */ -}}
+{{- $left := false -}}
+{{- range list ".config/systemd/user/timers.target.wants/otel-ingest.timer" ".config/systemd/user/otel-ingest.service" ".config/systemd/user/otel-ingest.timer" ".local/bin/otel-stats" ".local/share/otel/ingest.py" ".local/share/otel/backfill.py" ".local/share/otel/schema.sql" ".local/share/otel/compose.yml" ".local/share/otel/config.yaml" ".local/share/otel/.env" -}}
+{{-   if lstat (joinPath $.chezmoi.homeDir .) }}{{ $left = true }}{{ end -}}
+{{- end -}}
+{{- if $left -}}
 #!{{ lookPath "bash" }}
 # Remove what the OTel collector pipeline installed, now that the pipeline is
 # gone from this repo. chezmoi doesn't delete a file that leaves the source.
 #
-# Runs on every chezmoi apply (run_, not run_once_), so what it can't finish
-# now it finishes on a later apply. Once nothing is left it does nothing,
-# and calls neither systemctl nor docker.
+# A run_ script, so what it can't finish now it finishes on a later apply.
+# The template renders only while something is left; once nothing is, it is
+# empty, and chezmoi neither runs it nor lists it in chezmoi status.
 #
 # - The ingest timer is disabled if it is enabled.
 # - The collector container is removed if docker reports it. Docker is asked
@@ -75,3 +81,4 @@ if [ "$did" = true ] && [ "$keep_compose" = false ]; then
   fi
 fi
 exit 0
+{{ end -}}

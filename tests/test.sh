@@ -283,8 +283,8 @@ STUB
             "$u"/otel-ingest.{service,timer} "$u/keep.service" "$h/.local/bin/otel-stats" "$o/data/claude.db"
         ln -s ../otel-ingest.timer "$u/timers.target.wants/otel-ingest.timer"
     }
-    # The template's only action is its shebang; run the body with bash.
-    removal() { HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1; }
+    # Run the body with bash: drop the template's guard lines and its shebang.
+    removal() { HOME="$h" PATH="$t/bin:$PATH" bash <(sed -e '/^{{/d' -e '/^#!/d' "$script") 2>&1; }
 
     install_home
     out=$(removal); rc=$?
@@ -373,6 +373,26 @@ STUB
         pass "otel removal does nothing where the pipeline never was"
     else
         fail "otel removal acted where the pipeline never was"; failed=1
+    fi
+    # The template renders empty, so chezmoi skips it, once nothing is left,
+    # and renders while anything is.
+    if command -v chezmoi >/dev/null 2>&1; then
+        : > "$t/chezmoi.toml"
+        local render=(chezmoi --source "$REPO_DIR" --config "$t/chezmoi.toml" execute-template)
+        rm -rf "$h"; mkdir -p "$o/data"; touch "$o/data/claude.db"
+        if [[ -z "$(HOME="$h" "${render[@]}" < "$script" | tr -d '[:space:]')" ]]; then
+            pass "otel removal renders empty once nothing is left"
+        else
+            fail "otel removal renders although nothing is left"; failed=1
+        fi
+        mkdir -p "$u/timers.target.wants"; ln -s ../otel-ingest.timer "$u/timers.target.wants/otel-ingest.timer"
+        if [[ "$(HOME="$h" "${render[@]}" < "$script")" == *"docker"* ]]; then
+            pass "otel removal renders while the timer link is left"
+        else
+            fail "otel removal renders empty although the timer link is left"; failed=1
+        fi
+    else
+        skip "otel removal template (chezmoi not installed)"
     fi
     unset -f install_home removal
     rm -rf "$t"
