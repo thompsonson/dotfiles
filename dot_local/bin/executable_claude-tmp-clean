@@ -150,16 +150,17 @@ user_of() {
   done < "$uses"
 }
 
-# Git checkouts under $1. Build output is skipped: it holds no checkouts.
+# Git checkouts under $1, NUL-separated, since a name may hold a newline.
+# Build output is skipped: it holds no checkouts.
 git_checkouts() {
-  find "$1" \( -name target -o -name node_modules \) -prune -o -name .git -print -prune 2>/dev/null |
-    sed 's|/\.git$||'
+  find "$1" \( -name target -o -name node_modules \) -prune -o -name .git -print0 -prune 2>/dev/null |
+    while IFS= read -r -d '' g; do printf '%s\0' "${g%/.git}"; done
 }
 
 # Prints why a checkout under $1 holds work that exists nowhere else, if one does.
 unsaved_git_work() {
   local co st
-  while read -r co; do
+  while IFS= read -r -d '' co; do
     [ -n "$co" ] || continue
     st=$(git -C "$co" status --porcelain 2>/dev/null) || { echo "unreadable checkout ${co#"$1"/}"; return; }
     [ -z "$st" ] || { echo "uncommitted changes in ${co#"$1"/}"; return; }
@@ -174,14 +175,15 @@ unsaved_git_work() {
       ! git -C "$co" rev-parse -q --verify refs/stash >/dev/null ||
         { echo "a stash in ${co#"$1"/}"; return; }
     fi
-  done <<<"$(git_checkouts "$1")"
+  done < <(git_checkouts "$1")
 }
 
 # Cargo build folders under $1: target/ folders holding Cargo's CACHEDIR.TAG.
+# NUL-separated, since a name may hold a newline.
 cargo_targets() {
-  find "$1" -name node_modules -prune -o -type d -name target -print -prune 2>/dev/null |
-    while read -r d; do
-      grep -qs 'created by cargo' "$d/CACHEDIR.TAG" && printf '%s\n' "$d"
+  find "$1" -name node_modules -prune -o -type d -name target -print0 -prune 2>/dev/null |
+    while IFS= read -r -d '' d; do
+      grep -qs 'created by cargo' "$d/CACHEDIR.TAG" && printf '%s\0' "$d"
     done
 }
 
@@ -189,11 +191,13 @@ cargo_targets() {
 clean_builds() {
   [ "$BUILDS" = true ] || return 0
   local d bytes verb
-  while read -r d; do
-    [ -n "$d" ] && [ -d "$d" ] && [ ! -L "$d" ] || continue
+  while IFS= read -r -d '' d; do
+    case "$d" in "$1"/*) ;; *) continue ;; esac
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
     [ -z "$(user_of "$d" | head -1)" ] || continue
     [ -z "$(find "$d" -maxdepth 3 -newermt "@$build_cut" -print -quit 2>/dev/null)" ] || continue
-    bytes=$(du -sb -- "$d" 2>/dev/null | cut -f1)
+    # du prints the path after the size; a newline in it would add a line.
+    bytes=$(du -sb -- "$d" 2>/dev/null | head -n1 | cut -f1)
     build_total=$((build_total + ${bytes:-0}))
     build_count=$((build_count + 1))
     if [ "$DELETE" = true ]; then
@@ -203,7 +207,7 @@ clean_builds() {
       verb="idle"
     fi
     printf '%-7s build  %9s  %s\n' "$verb" "$(human "${bytes:-0}")" "${d#"$ROOT"/}"
-  done <<<"$(cargo_targets "$1")"
+  done < <(cargo_targets "$1")
 }
 
 now=$(date +%s)
@@ -265,11 +269,12 @@ for dir in "$ROOT"/-*/*/; do
       [ -n "$h" ] && gpgconf --homedir "$h" --kill all 2>/dev/null || true
     done <<<"$homes"
     # Unregister worktrees, so the parent repo keeps no entry for a missing folder.
-    while read -r co; do
+    while IFS= read -r -d '' co; do
+      case "$co" in "$dir"/*) ;; *) continue ;; esac
       [ -f "$co/.git" ] || continue
       git -C "$co" worktree remove --force "$co" 2>/dev/null ||
         echo "warning: could not unregister worktree $co; run 'git worktree prune' in its repo" >&2
-    done <<<"$(git_checkouts "$dir")"
+    done < <(git_checkouts "$dir")
     rm -rf --one-file-system -- "$dir"
     rmdir -- "$ROOT/$project" 2>/dev/null || true
     verb="removed"

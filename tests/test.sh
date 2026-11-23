@@ -657,8 +657,9 @@ smoke_claude_tmp_clean() {
     (cd "$root/$p/$busy" && exec sleep 60) &
     local busy_pid=$!
     # A process whose name holds a tab still counts as use.
-    cp "$(command -v sleep)" "$t/sbin/x"$'\t'"y"
-    (cd "$root/$p/$tabbed" && exec "$t/sbin/x"$'\t'"y" 60) &
+    # bash, not sleep: sleep can be a multi-call binary that needs its own name.
+    cp "$(command -v bash)" "$t/sbin/x"$'\t'"y"
+    (cd "$root/$p/$tabbed" && exec "$t/sbin/x"$'\t'"y" -c 'sleep 60; :') &
     local tab_pid=$!
     (cd "$root/$p/$keyring" && exec "$t/sbin/gpg-agent" 60) &
     local agent_pid=$!
@@ -715,8 +716,21 @@ smoke_claude_tmp_clean() {
     else fail "claude-tmp-clean removed a target folder Cargo did not make"; failed=1; fi
     kill "$build_pid" 2>/dev/null || true; wait "$build_pid" 2>/dev/null || true
     "${run[@]}" --delete --keep-builds >/dev/null 2>&1
+
     if [[ -d "$b/busy/target" ]]; then pass "claude-tmp-clean --keep-builds leaves build folders"
     else fail "claude-tmp-clean --keep-builds removed a build folder"; failed=1; fi
+    # A newline in a folder name: find's output for "$b/a<NL>b/target" must not
+    # be read as a second path, "b/target", relative to the working directory.
+    mkdir -p "$b/a"$'\n'"b/target" "$t/b/target"
+    echo "$tag" > "$b/a"$'\n'"b/target/CACHEDIR.TAG"
+    echo "$tag" > "$t/b/target/CACHEDIR.TAG"
+    find "$b/a"$'\n'"b" "$t/b" -exec touch -d '3 days ago' {} +
+    (cd "$t" && "${run[@]}" --delete >/dev/null 2>&1)
+    if [[ -f "$t/b/target/CACHEDIR.TAG" && ! -e "$b/a"$'\n'"b/target" ]]; then
+        pass "claude-tmp-clean reads a folder name with a newline as one path"
+    else
+        fail "claude-tmp-clean split a folder name with a newline"; failed=1
+    fi
     if [[ -d "$root/$p/$tabbed" ]]; then pass "claude-tmp-clean keeps a folder used by a process with a tab in its name"
     else fail "claude-tmp-clean removed a folder used by a process with a tab in its name"; failed=1; fi
     if [[ -d "$root/$p/$busy" ]]; then pass "claude-tmp-clean keeps a folder in use"
@@ -752,6 +766,7 @@ smoke_claude_tmp_clean() {
     fi
 
     pkill -P "$run_pid" 2>/dev/null || true   # its sleep
+    pkill -P "$tab_pid" 2>/dev/null || true   # its sleep
     kill "$busy_pid" "$agent_pid" "$orphan_pid" "$build_pid" "$run_pid" "$tab_pid" 2>/dev/null || true
     wait 2>/dev/null || true
     rm -rf "$t"
