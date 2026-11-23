@@ -676,9 +676,10 @@ smoke_claude_tmp_clean() {
     local build_pid=$!
     # A program run from a build folder; neither its working directory nor its command line names it.
     mkdir -p "$b/run/target/debug" && echo "$tag" > "$b/run/target/CACHEDIR.TAG"
-    cp "$(command -v sleep)" "$b/run/target/debug/app"
+    # bash, not sleep: sleep can be a multi-call binary that needs its own name.
+    cp "$(command -v bash)" "$b/run/target/debug/app"
     find "$b/run" -exec touch -d '3 days ago' {} +
-    (cd "$t" && exec -a app "$b/run/target/debug/app" 60) &
+    (cd "$t" && exec -a app "$b/run/target/debug/app" -c 'sleep 60; :') &
     local run_pid=$!
     sleep 0.3
 

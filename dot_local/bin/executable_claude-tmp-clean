@@ -118,7 +118,8 @@ for p in /proc/[0-9]*; do
     readlink "$p/exe" 2>/dev/null || true
     for fd in "$p"/fd/*; do readlink "$fd" 2>/dev/null || true; done
     # Mapped files: a loaded library, or a program run from a build folder.
-    awk 'NF >= 6 { print $6 }' "$p/maps" 2>/dev/null | sort -u || true
+    # The path is everything after the fifth field, and may hold spaces.
+    sed -nE 's|^([^ ]+ +){5}(/.*)$|\2|p' "$p/maps" 2>/dev/null | sort -u || true
     tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo
   } | grep -F -- "$ROOT/" | sed "s|^|${p#/proc/}\t$comm\t|" >> "$uses" || true
 done
