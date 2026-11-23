@@ -242,6 +242,7 @@ run_smoke() {
         pass "sysmon bogus (rejected invalid subcommand)"
     fi
 
+    smoke_sysbak_doctor || smoke_failed=1
     smoke_claude_tmp_clean || smoke_failed=1
     smoke_review_round || smoke_failed=1
 
@@ -599,6 +600,74 @@ FAKE
     else
         fail "review-round status"; failed=1
     fi
+    rm -rf "$t"
+    return $failed
+}
+
+# sysbak doctor: backup_dirs and exclude_patterns against rsnapshot.conf
+smoke_sysbak_doctor() {
+    local script="$REPO_DIR/dot_local/bin/executable_sysbak"
+    local t failed=0 out
+    t=$(mktemp -d)
+    mkdir -p "$t/cfg/sysbak" "$t/a" "$t/b"
+    # $t/b/ ends in a slash; setup then writes $t/b// to rsnapshot.conf.
+    # x\\y in the config becomes x\y in rsnapshot.conf, through setup's printf %b.
+    printf 'backup_dirs=(\n    %s\n    %s\n    %s\n)\nexclude_patterns=(\n    "target/"\n    %s\n)\n' \
+        "$t/a" "$t/b/" "$t/gone" "'x\\\\y'" > "$t/cfg/sysbak/config"
+    doctor() { XDG_CONFIG_HOME="$t/cfg" SYSBAK_RSNAPSHOT_CONF="$t/rs.conf" bash "$script" doctor 2>&1 || true; }
+
+    # No newline after the last line, as an edited file may have.
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s//\tlocalhost/\nexclude\tx\\y\nexclude\ttarget/' "$t/a" "$t/b" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Matches config:"*"2 backup points, 2 excludes"* && "$out" == *"Not on disk:"*"$t/gone"* ]]; then
+        pass "sysbak doctor: rsnapshot.conf matches the config"
+    else
+        fail "sysbak doctor: matching rsnapshot.conf not reported as a match"; failed=1
+    fi
+
+    # Escapes that act across setup's single printf %b: \t splits a line into
+    # more fields, and \c ends the output, so z/ is never written.
+    local cfg="$t/cfg/sysbak/config"
+    cp "$cfg" "$t/config.saved"
+    # And \n in an exclude starts a line of its own, here a backup line.
+    printf 'backup_dirs=(\n    %s\n)\nexclude_patterns=(\n    %s\n    %s\n    %s\n    "z/"\n)\n' \
+        "$t/a" "'a\\tb'" "'q\\nbackup\\t$t/b/'" "'p\\cq'" > "$cfg"
+    printf 'exclude\ta\tb\nexclude\tq\nbackup\t%s/\nexclude\tp\nbackup\t%s/\tlocalhost/\n' "$t/b" "$t/a" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Matches config:"*"2 backup points, 3 excludes"* ]]; then
+        pass "sysbak doctor: escapes act as setup's printf %b makes them act"
+    else
+        fail "sysbak doctor: escapes in exclude_patterns read unlike setup writes them"; failed=1
+    fi
+    mv "$t/config.saved" "$cfg"
+
+    printf 'backup\t%s/\tlocalhost/\nbackup\t%s/\tlocalhost/\nexclude\t*.tmp\n' "$t/a" "$t/other" > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Not backed up:"*"$t/b"* && "$out" == *"Extra backup:"*"$t/other"* \
+        && "$out" == *"Not excluded:"*"target/"* && "$out" == *"Extra exclude:"*"*.tmp"* ]]; then
+        pass "sysbak doctor: each difference from rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: a difference from rsnapshot.conf went unreported"; failed=1
+    fi
+
+    # An empty rsnapshot.conf: every array it fills is empty.
+    : > "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"Not backed up:"*"$t/a"* && "$out" != *"unbound variable"* ]]; then
+        pass "sysbak doctor: empty rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: empty rsnapshot.conf not handled"; failed=1
+    fi
+
+    rm -f "$t/rs.conf"
+    out=$(doctor)
+    if [[ "$out" == *"missing or unreadable"* ]]; then
+        pass "sysbak doctor: missing rsnapshot.conf reported"
+    else
+        fail "sysbak doctor: missing rsnapshot.conf not reported"; failed=1
+    fi
+
+    unset -f doctor
     rm -rf "$t"
     return $failed
 }

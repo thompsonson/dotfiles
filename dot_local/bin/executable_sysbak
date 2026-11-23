@@ -122,6 +122,11 @@ else
   fi
 fi
 
+# rsnapshot reads its own config, which `sysbak setup` writes from this one.
+# doctor compares the two. SYSBAK_RSNAPSHOT_CONF only changes where doctor
+# reads; cron always runs rsnapshot with its default config.
+RSNAPSHOT_CONF="${SYSBAK_RSNAPSHOT_CONF:-/etc/rsnapshot.conf}"
+
 # Global flags
 DRY_RUN=false
 
@@ -745,11 +750,6 @@ cmd_setup() {
     sudo cp "$rsnapshot_conf" "$conf_backup"
   fi
   info "Writing $rsnapshot_conf..."
-  local exclude_args=""
-  for pat in "${EXCLUDE_PATTERNS[@]}"; do
-    exclude_args="${exclude_args}exclude\t${pat}\n"
-  done
-
   sudo tee "$rsnapshot_conf" > /dev/null <<EOF
 config_version	1.2
 snapshot_root	${new_mount}/snapshots/
@@ -765,17 +765,11 @@ loglevel	3
 logfile	/var/log/rsnapshot.log
 lockfile	/var/run/rsnapshot.pid
 one_fs	1
-$(printf '%b' "$exclude_args")
+$(rsnapshot_excludes)
 EOF
 
   # Add backup points
-  for dir in "${BACKUP_DIRS[@]}"; do
-    # Expand ~ in directory paths
-    local expanded_dir="${dir/#\~/$HOME}"
-    if [[ -d "$expanded_dir" ]]; then
-      echo -e "backup\t${expanded_dir}/\tlocalhost/" | sudo tee -a "$rsnapshot_conf" > /dev/null
-    fi
-  done
+  rsnapshot_backups | sudo tee -a "$rsnapshot_conf" > /dev/null
 
   success "  rsnapshot.conf written"
 
@@ -868,6 +862,151 @@ EOF
 
 # --- doctor -------------------------------------------------------------------
 
+# Is $1 one of the remaining arguments?
+in_list() {
+  local x="$1" y
+  shift
+  for y in "$@"; do
+    [[ "$x" == "$y" ]] && return 0
+  done
+  return 1
+}
+
+# The exclude lines setup writes into rsnapshot.conf. One printf %b runs
+# over them all, so an escape such as \c or \n acts on the whole block.
+rsnapshot_excludes() {
+  local args="" pat
+  for pat in "${EXCLUDE_PATTERNS[@]+"${EXCLUDE_PATTERNS[@]}"}"; do
+    args="${args}exclude\t${pat}\n"
+  done
+  printf '%b' "$args"
+}
+
+# The backup lines setup appends: one echo -e for each directory that
+# exists. With "all", for every directory, whether it exists or not.
+rsnapshot_backups() {
+  local dir expanded_dir
+  for dir in "${BACKUP_DIRS[@]+"${BACKUP_DIRS[@]}"}"; do
+    # Expand ~ in directory paths
+    expanded_dir="${dir/#\~/$HOME}"
+    if [[ "${1:-}" = all || -d "$expanded_dir" ]]; then
+      echo -e "backup\t${expanded_dir}/\tlocalhost/"
+    fi
+  done
+}
+
+# What setup writes, in the order it writes it: the excludes inside a
+# heredoc's $(...), which drops trailing newlines and adds one, then the
+# backup lines.
+rsnapshot_points() {
+  printf '%s\n' "$(rsnapshot_excludes)"
+  rsnapshot_backups
+}
+
+# Reads rsnapshot.conf lines on stdin, as rsnapshot splits them on tabs.
+# Prints "backup<TAB>dir", trailing slashes stripped, or "exclude<TAB>pattern".
+parse_points() {
+  local kind field rest
+  # "|| [[ -n $kind ]]" keeps a last line that has no newline.
+  while IFS=$'\t' read -r kind field rest || [[ -n "$kind" ]]; do
+    case "$kind" in
+      backup)  printf 'backup\t%s\n' "$(strip_slashes "$field")" ;;
+      exclude) printf 'exclude\t%s\n' "$field" ;;
+    esac
+  done
+}
+
+# Strip every trailing slash, keeping "/" itself.
+strip_slashes() {
+  local p="$1"
+  while [[ "$p" == */ && "$p" != / ]]; do
+    p="${p%/}"
+  done
+  printf '%s' "$p"
+}
+
+# Compare backup_dirs and exclude_patterns with what rsnapshot reads.
+# Prints each difference unless quiet, and sets DRIFT to how many there are.
+# A count, not an exit status, so it can't wrap at 256.
+DRIFT=0
+check_rsnapshot_conf() {
+  local quiet="$1" n=0
+  DRIFT=0
+  [[ "$quiet" = false ]] && header "rsnapshot.conf"
+  if [[ ! -r "$RSNAPSHOT_CONF" ]]; then
+    [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "File:" "$RSNAPSHOT_CONF missing or unreadable"
+    DRIFT=1
+    return 0
+  fi
+
+  # Compare like with like: parse rsnapshot.conf, and parse what setup would
+  # write from the config, with the same parser. Escapes in the config then
+  # act on both sides as setup's echo -e and printf %b make them act.
+  local -a have_dirs=() have_ex=() want_dirs=() want_ex=() listed_dirs=()
+  local kind field
+  while IFS=$'\t' read -r kind field; do
+    case "$kind" in
+      backup)  have_dirs+=("$field") ;;
+      exclude) have_ex+=("$field") ;;
+    esac
+  done < <(parse_points < "$RSNAPSHOT_CONF")
+  while IFS=$'\t' read -r kind field; do
+    case "$kind" in
+      backup)  want_dirs+=("$field") ;;
+      exclude) want_ex+=("$field") ;;
+    esac
+  done < <(rsnapshot_points | parse_points)
+  # Every listed directory, on disk or not: a missing one is not "extra".
+  while IFS=$'\t' read -r kind field; do
+    [[ "$kind" = backup ]] && listed_dirs+=("$field")
+  done < <(rsnapshot_backups all | parse_points)
+
+  # Setup skips a directory that doesn't exist, so it is listed, not counted.
+  local dir raw path
+  # "${a[@]+"${a[@]}"}" expands an empty array safely under set -u on bash < 4.4.
+  for dir in "${BACKUP_DIRS[@]+"${BACKUP_DIRS[@]}"}"; do
+    raw="${dir/#\~/$HOME}"
+    [[ -d "$raw" ]] || { [[ "$quiet" = false ]] && printf "  ${DIM}-${NC} %-18s %s\n" "Not on disk:" "$raw (nothing to back up yet)"; }
+  done
+  for path in "${want_dirs[@]+"${want_dirs[@]}"}"; do
+    if ! in_list "$path" "${have_dirs[@]+"${have_dirs[@]}"}"; then
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not backed up:" "$path is in backup_dirs but not in $RSNAPSHOT_CONF"
+      n=$((n + 1))
+    fi
+  done
+  # Extra only if setup would not write it, from any line, and the config
+  # does not list it.
+  for path in "${have_dirs[@]+"${have_dirs[@]}"}"; do
+    if ! in_list "$path" "${want_dirs[@]+"${want_dirs[@]}"}" "${listed_dirs[@]+"${listed_dirs[@]}"}"; then
+      [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra backup:" "$path is in $RSNAPSHOT_CONF but not in backup_dirs"
+      n=$((n + 1))
+    fi
+  done
+
+  local pat
+  for pat in "${want_ex[@]+"${want_ex[@]}"}"; do
+    if ! in_list "$pat" "${have_ex[@]+"${have_ex[@]}"}"; then
+      [[ "$quiet" = false ]] && printf "  ${RED}✗${NC} %-18s %s\n" "Not excluded:" "$pat is in exclude_patterns but not in $RSNAPSHOT_CONF"
+      n=$((n + 1))
+    fi
+  done
+  for pat in "${have_ex[@]+"${have_ex[@]}"}"; do
+    if ! in_list "$pat" "${want_ex[@]+"${want_ex[@]}"}"; then
+      [[ "$quiet" = false ]] && printf "  ${YELLOW}⚠${NC} %-18s %s\n" "Extra exclude:" "$pat is in $RSNAPSHOT_CONF but not in exclude_patterns"
+      n=$((n + 1))
+    fi
+  done
+
+  if [[ "$quiet" = false ]]; then
+    if [[ $n -eq 0 ]]; then
+      printf "  ${GREEN}✓${NC} %-18s %s\n" "Matches config:" "${#have_dirs[@]} backup points, ${#have_ex[@]} excludes"
+    else
+      printf "  %-20s %s\n" "  Fix:" "run sysbak setup, which rewrites $RSNAPSHOT_CONF from the config"
+    fi
+  fi
+  DRIFT=$n
+}
+
 cmd_doctor() {
   local quiet=false
   [[ "${1:-}" = "--quiet" ]] && quiet=true
@@ -957,6 +1096,10 @@ cmd_doctor() {
     fi
   fi
 
+  # What rsnapshot reads, against the config
+  check_rsnapshot_conf "$quiet"
+  issues=$((issues + DRIFT))
+
   # Exclude patterns
   if [[ "$quiet" = false ]]; then
     header "Exclude patterns"
@@ -992,8 +1135,10 @@ cmd_doctor() {
     done
   fi
 
+  # An exit status wraps at 256, so 256 issues would read as none.
+  local status=$(( issues > 255 ? 255 : issues ))
   if [[ "$quiet" = true ]]; then
-    return $issues
+    return $status
   fi
 
   echo ""
@@ -1002,7 +1147,7 @@ cmd_doctor() {
   else
     warn "$issues issue(s) found"
   fi
-  return $issues
+  return $status
 }
 
 # --- git-bundle ---------------------------------------------------------------

@@ -33,7 +33,7 @@ sysbak help                     # Show built-in help
 | `sysbak restore <file> [ver]` | Restore a file from a snapshot version (with confirmation) |
 | `sysbak warn` | Print staleness warning. Exit code: 0=ok, 1=warn, 2=critical |
 | `sysbak setup [--yes\|-y]` | One-time: install rsnapshot, write config/fstab/cron. `--yes` skips confirmation prompts (non-interactive) |
-| `sysbak doctor` | Diagnose: config, device, dependencies, schedule, snapshots |
+| `sysbak doctor` | Diagnose: config, device, dependencies, schedule, `rsnapshot.conf` against the config, snapshots |
 | `sysbak git-bundle` | Bundle all git repos from ~/Projects to USB drive |
 | `sysbak config [--edit]` | Show config file or open in `$EDITOR` |
 | `sysbak version` | Print the sysbak version |
@@ -156,6 +156,19 @@ stale_crit_hours=48
 ```
 
 `sysbak doctor` reports exclude-pattern count and warns if `/nix/store` exists but isn't excluded.
+
+### The config and `rsnapshot.conf`
+
+Cron runs rsnapshot, which reads `/etc/rsnapshot.conf`, not this config. `sysbak setup` writes that file from the config, so a later edit to `backup_dirs` or `exclude_patterns` does nothing until setup runs again.
+
+`sysbak doctor` compares the two and counts each difference as an issue:
+
+- **Not backed up:** a directory in `backup_dirs` that exists but isn't in `rsnapshot.conf`.
+- **Extra backup:** a backup point in `rsnapshot.conf` that isn't in `backup_dirs`.
+- **Not excluded** and **Extra exclude:** the same two checks for `exclude_patterns`.
+- A directory in `backup_dirs` that doesn't exist is listed, not counted; setup skips it too.
+
+To fix a difference, run `sysbak setup` again. `SYSBAK_RSNAPSHOT_CONF` changes only where doctor reads, for tests.
 
 ## Typical Workflow
 
