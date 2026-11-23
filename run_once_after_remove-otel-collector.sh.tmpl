@@ -3,24 +3,30 @@
 # gone from this repo. chezmoi doesn't delete a file that leaves the source.
 # Safe on any machine: each step runs only where its target exists.
 # Keeps ~/.local/share/otel/data/ (claude.db, the only copy of the telemetry).
+# If a stop fails, nothing is deleted and the script exits non-zero, so
+# chezmoi runs it again on the next apply.
 
 set -uo pipefail
 
 otel="$HOME/.local/share/otel"
 units="$HOME/.config/systemd/user"
 did=false
+failed=()
 
 # 1. Stop the ingest timer before its unit files go.
 if command -v systemctl >/dev/null 2>&1 && [ -f "$units/otel-ingest.timer" ]; then
-  systemctl --user disable --now otel-ingest.timer 2>/dev/null || true
-  systemctl --user stop otel-ingest.service 2>/dev/null || true
-  did=true
+  systemctl --user disable --now otel-ingest.timer || failed+=("the otel-ingest timer")
+  systemctl --user stop otel-ingest.service || failed+=("the otel-ingest service")
 fi
 
 # 2. Stop the collector container.
 if [ -f "$otel/compose.yml" ] && command -v docker >/dev/null 2>&1; then
-  docker compose -f "$otel/compose.yml" down 2>/dev/null || true
-  did=true
+  docker compose -f "$otel/compose.yml" down || failed+=("the collector container")
+fi
+
+if [ "${#failed[@]}" -gt 0 ]; then
+  echo "OTel removal: could not stop: ${failed[*]}. Nothing deleted; the next chezmoi apply tries again." >&2
+  exit 1
 fi
 
 # 3. Remove the deployed files; the data folder stays.

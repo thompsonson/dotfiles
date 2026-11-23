@@ -277,6 +277,16 @@ smoke_otel_removal() {
     else
         fail "otel removal deleted the wrong files"; failed=1
     fi
+    # A stop that fails: nothing is deleted, and the script fails so chezmoi retries.
+    mkdir -p "$o" && touch "$o/compose.yml"
+    printf '#!/bin/sh\nexit 1\n' > "$t/bin/docker"
+    if HOME="$h" PATH="$t/bin:$PATH" bash <(sed 1d "$script") >/dev/null 2>&1; then
+        fail "otel removal succeeded although the collector did not stop"; failed=1
+    elif [[ -f "$o/compose.yml" ]]; then
+        pass "otel removal keeps its files and fails when a stop fails"
+    else
+        fail "otel removal deleted files after a failed stop"; failed=1
+    fi
     # On a machine that never had it: no calls, no output.
     rm -f "$t/calls"
     out=$(HOME="$t/empty" PATH="$t/bin:$PATH" bash <(sed 1d "$script") 2>&1)
