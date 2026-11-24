@@ -86,6 +86,7 @@ font is a single `~/.termux/font.ttf` (no fontconfig/`fc-cache`).
 - `dot_local/bin/executable_claude-tmp-clean`: Removes idle Claude Code session folders under `/tmp/claude-<uid>`, and idle Cargo `target/` folders inside the ones it keeps; dry run unless `--delete`; daily user timer `claude-tmp-clean.timer` (installed, not enabled)
 - `dot_local/bin/executable_review-round`: Runs one code-review round with `claude -p` or records one done elsewhere; tags each finding pre-existing, original or introduced by a fix (git blame); logs every run to `~/.local/share/review-round/`; stops after 3 rounds per branch until a person runs `review-round allow`
 - `dot_local/bin/executable_wol`: Wake-on-LAN sender + reachability poller (name → MAC/IP registry, magic packet, poll-ping)
+- `dot_local/bin/executable_gpg-prime`: Unlocks a GPG signing key into `gpg-agent`'s cache for the day, so later signing needs no prompt; reads the passphrase with `read -rs` (never argv, the process table or shell history); resolves the key from `--key`, `$GPG_PRIME_KEY`, `~/.config/gpg-prime/key` (per-machine, not in this repository) or `user.signingkey` read from the current directory, so a repository's own signing identity is honoured; `--status` reports cache state without prompting
 
 ### Backup
 - `dot_local/bin/executable_sysbak`: Cross-platform USB rsnapshot backup manager (status, list, diff, restore, warn)

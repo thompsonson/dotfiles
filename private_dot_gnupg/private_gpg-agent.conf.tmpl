@@ -1,3 +1,8 @@
+# Cache a primed passphrase for a working day. An agent or CI session has no
+# DISPLAY and no controlling tty, so no pinentry can ask it for anything:
+# `gpg-prime` unlocks the key once by hand and later signing needs no prompt.
+#   default-cache-ttl  idle timeout, refreshed on each use
+#   max-cache-ttl      hard ceiling regardless of use
 default-cache-ttl 86400
 max-cache-ttl 172800
 {{- if and (eq .chezmoi.os "linux") (not .is_termux) (stat "/usr/bin/pinentry") }}
@@ -8,3 +13,10 @@ max-cache-ttl 172800
 # /usr/bin/pinentry is the distro's alternatives link (pinentry-gnome3 on desktops).
 pinentry-program /usr/bin/pinentry
 {{- end }}
+
+# Enable the loan mechanism (dev#162/194) — the borrower's sign-only [S] subkey
+# is preset with an empty passphrase + TTL during loan establishment. Nothing
+# else presets anything. Was hand-added to ~/.gnupg/gpg-agent.conf on the
+# `computer` pilot host, which silently dropped the cache TTLs above until
+# 2026-11-24; it lives here now so the two cannot diverge again.
+allow-preset-passphrase

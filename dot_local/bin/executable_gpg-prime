@@ -1,0 +1,204 @@
+#!/bin/bash
+# ============================================================================
+# gpg-prime - unlock a GPG signing key for the working day
+# ============================================================================
+# Types the passphrase into gpg-agent's cache once, so later signing needs no
+# prompt. Agent and CI sessions have no DISPLAY and no controlling tty, so a
+# graphical or curses pinentry cannot reach them; priming the cache by hand is
+# what lets those sessions sign at all.
+#
+# The passphrase is read with `read -rs`: it never reaches the command line,
+# the process table or the shell history.
+#
+# Usage: gpg-prime [options]
+#   gpg-prime                Prime the cache, or report it is already warm
+#   gpg-prime --status       Report cache state only, never prompt
+#   gpg-prime --key <id>     Prime a specific key instead of the configured one
+#   gpg-prime --help         Show usage text
+#
+# Exit status: 0 primed or already warm, 1 wrong passphrase or no key, 2 usage.
+#
+# Key resolution, first hit wins:
+#   --key <id>
+#   $GPG_PRIME_KEY
+#   the first non-comment line of ~/.config/gpg-prime/key
+#   git config user.signingkey, read from the current directory, so a repository
+#     that sets its own signing identity (directly or through an includeIf) is
+#     honoured when you run this from inside it
+#
+# ~/.config/gpg-prime/key is deliberately per-machine and not part of this
+# repository: a signing identity differs per host and this repository is public.
+
+set -euo pipefail
+
+# --- Colors (guarded for pipe safety) ----------------------------------------
+if [ -t 1 ]; then
+    C_OK=$'\033[32m'; C_WARN=$'\033[33m'; C_ERR=$'\033[31m'
+    C_DIM=$'\033[2m'; C_OFF=$'\033[0m'
+else
+    C_OK=''; C_WARN=''; C_ERR=''; C_DIM=''; C_OFF=''
+fi
+
+KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/gpg-prime/key"
+ATTEMPTS=3
+
+die() { printf '%sgpg-prime: %s%s\n' "$C_ERR" "$*" "$C_OFF" >&2; exit 1; }
+
+usage() {
+    # Print this script's own leading comment block, so the text cannot drift
+    # away from the flags it documents.
+    awk 'NR==1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$0"
+}
+
+# --- Resolve the key ---------------------------------------------------------
+resolve_key() {
+    if [ -n "${KEY_ARG:-}" ]; then
+        printf '%s' "$KEY_ARG"; return 0
+    fi
+    if [ -n "${GPG_PRIME_KEY:-}" ]; then
+        printf '%s' "$GPG_PRIME_KEY"; return 0
+    fi
+    local k
+    if [ -r "$KEY_FILE" ]; then
+        k=$(awk '/^[[:space:]]*#/ { next }
+                 { gsub(/[[:space:]]/, ""); if ($0 != "") { print; exit } }' \
+                 "$KEY_FILE" 2>/dev/null || true)
+        [ -n "$k" ] && { printf '%s' "$k"; return 0; }
+    fi
+    # No --global: run from inside a repository, this honours that repository's
+    # own signing identity, including one supplied by an includeIf.
+    k=$(git config --get user.signingkey 2>/dev/null || true)
+    [ -n "$k" ] && { printf '%s' "$k"; return 0; }
+    return 1
+}
+
+# --- Is the passphrase already cached? ---------------------------------------
+# --pinentry-mode error makes gpg fail rather than ask, so this answers the
+# question without a prompt and without needing the passphrase.
+cache_is_warm() {
+    printf '%s' gpg-prime \
+        | gpg --batch --yes --pinentry-mode error --local-user "$KEY" \
+              --detach-sign -o /dev/null >/dev/null 2>&1
+}
+
+# --- The configured idle timeout, in seconds ---------------------------------
+# gpgconf --list-options prints colon-separated fields; the last is the value
+# in force and the eighth is the compiled-in default when none is set.
+cache_ttl() {
+    gpgconf --list-options gpg-agent 2>/dev/null \
+        | awk -F: '/^default-cache-ttl:/ { print ($NF != "") ? $NF : $8; exit }'
+}
+
+human_ttl() {
+    local s=${1:-}
+    case $s in
+        ''|*[!0-9]*) printf 'an unknown period'; return 0 ;;
+    esac
+    if   [ "$s" -ge 86400 ]; then printf '%d day(s)'    $(( s / 86400 ))
+    elif [ "$s" -ge 3600  ]; then printf '%d hour(s)'   $(( s / 3600 ))
+    elif [ "$s" -ge 60    ]; then printf '%d minute(s)' $(( s / 60 ))
+    else                          printf '%d second(s)' "$s"
+    fi
+}
+
+# --- Describe the key, so you can see what you are unlocking -----------------
+key_uid() {
+    gpg --list-keys --with-colons "$KEY" 2>/dev/null \
+        | awk -F: '/^uid:/ { print $10; exit }'
+}
+
+# --- Arguments ---------------------------------------------------------------
+KEY_ARG=''
+STATUS_ONLY=0
+while [ $# -gt 0 ]; do
+    case $1 in
+        --status)     STATUS_ONLY=1 ;;
+        --key)        [ $# -ge 2 ] || { printf 'gpg-prime: --key needs a key id\n' >&2; exit 2; }
+                      KEY_ARG=$2; shift ;;
+        --key=*)      KEY_ARG=${1#--key=} ;;
+        -h|--help)    usage; exit 0 ;;
+        *)            printf 'gpg-prime: unknown option %s (try --help)\n' "$1" >&2; exit 2 ;;
+    esac
+    shift
+done
+
+KEY=$(resolve_key) || die "no signing key configured — pass --key <id>, put a key id in $KEY_FILE, set \$GPG_PRIME_KEY, or run this inside a repository that sets user.signingkey"
+
+gpg --list-keys "$KEY" >/dev/null 2>&1 \
+    || die "no such key in this keyring: $KEY"
+
+UID_TEXT=$(key_uid)
+TTL=$(cache_ttl)
+
+printf 'key   %s\n' "$KEY"
+[ -n "$UID_TEXT" ] && printf 'uid   %s\n' "$UID_TEXT"
+
+# --- Already warm? -----------------------------------------------------------
+if cache_is_warm; then
+    printf '%scache warm%s — signing works, nothing to do\n' "$C_OK" "$C_OFF"
+    printf '%sidle timeout %s from the last signature%s\n' \
+        "$C_DIM" "$(human_ttl "$TTL")" "$C_OFF"
+    exit 0
+fi
+
+if [ "$STATUS_ONLY" -eq 1 ]; then
+    printf '%scache cold%s — run gpg-prime to unlock it\n' "$C_WARN" "$C_OFF"
+    exit 0
+fi
+
+# --- Prime it ----------------------------------------------------------------
+# printf is a shell builtin, so the passphrase never becomes an argument to an
+# external process and never appears in /proc/*/cmdline.
+prime_with() {
+    printf '%s\n' "$1" \
+        | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+              --local-user "$KEY" --detach-sign -o /dev/null \
+              /dev/null >/dev/null 2>&1
+}
+
+primed=0
+tries=0
+for attempt in $(seq 1 "$ATTEMPTS"); do
+    tries=$attempt
+    PASS=''
+    if [ -t 0 ]; then
+        read -rsp "pass  " PASS
+        printf '\n'
+    else
+        # Not a terminal: take one line from stdin, so this is scriptable.
+        IFS= read -r PASS || die "no passphrase on stdin"
+    fi
+
+    if [ -z "$PASS" ]; then
+        printf '%sempty passphrase, not sent to the agent%s\n' "$C_WARN" "$C_OFF" >&2
+    elif prime_with "$PASS"; then
+        primed=1
+    else
+        printf '%sbad passphrase%s' "$C_ERR" "$C_OFF" >&2
+        # Only a terminal gets retried, so only a terminal is offered retries.
+        if [ -t 0 ] && [ "$attempt" -lt "$ATTEMPTS" ]; then
+            printf ' — %d attempt(s) left\n' $(( ATTEMPTS - attempt )) >&2
+        else
+            printf '\n' >&2
+        fi
+    fi
+
+    PASS=''
+    unset PASS
+    [ "$primed" -eq 1 ] && break
+    [ -t 0 ] || break   # a pipe gets one try, not three
+done
+
+[ "$primed" -eq 1 ] || die "gave up after $tries attempt(s) — cache left cold"
+
+# --- Verify, rather than assume ----------------------------------------------
+# A successful loopback signature proves the passphrase was right. It does not
+# prove the agent kept it, which is the thing this script exists to do, so ask
+# again with prompting disabled.
+if cache_is_warm; then
+    printf '%scache primed%s — signing works for %s of idle time\n' \
+        "$C_OK" "$C_OFF" "$(human_ttl "$TTL")"
+    exit 0
+fi
+
+die "the passphrase was accepted but the agent did not keep it — check default-cache-ttl in gpg-agent.conf"
