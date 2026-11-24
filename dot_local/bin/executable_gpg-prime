@@ -16,7 +16,9 @@
 #   gpg-prime --key <id>     Prime a specific key instead of the configured one
 #   gpg-prime --help         Show usage text
 #
-# Exit status: 0 primed or already warm, 1 wrong passphrase or no key, 2 usage.
+# Exit status: 0 signing will work, 1 it will not, 2 usage error. So a cold
+# cache under --status is 1, the same as a refused passphrase: a caller that
+# only wants to know whether to bother signing can test the status alone.
 #
 # Key resolution, first hit wins:
 #   --key <id>
@@ -113,9 +115,12 @@ STATUS_ONLY=0
 while [ $# -gt 0 ]; do
     case $1 in
         --status)     STATUS_ONLY=1 ;;
-        --key)        [ $# -ge 2 ] || { printf 'gpg-prime: --key needs a key id\n' >&2; exit 2; }
+        --key)        [ $# -ge 2 ] && [ -n "$2" ] \
+                          || { printf 'gpg-prime: --key needs a key id\n' >&2; exit 2; }
                       KEY_ARG=$2; shift ;;
-        --key=*)      KEY_ARG=${1#--key=} ;;
+        --key=*)      KEY_ARG=${1#--key=}
+                      [ -n "$KEY_ARG" ] \
+                          || { printf 'gpg-prime: --key needs a key id\n' >&2; exit 2; } ;;
         -h|--help)    usage; exit 0 ;;
         *)            printf 'gpg-prime: unknown option %s (try --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -143,7 +148,7 @@ fi
 
 if [ "$STATUS_ONLY" -eq 1 ]; then
     printf '%scache cold%s — run gpg-prime to unlock it\n' "$C_WARN" "$C_OFF"
-    exit 0
+    exit 1
 fi
 
 # --- Prime it ----------------------------------------------------------------
@@ -162,11 +167,17 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     tries=$attempt
     PASS=''
     if [ -t 0 ]; then
-        read -rsp "pass  " PASS
+        # IFS= matters: without it read strips leading and trailing whitespace,
+        # which is a legal part of a passphrase.
+        IFS= read -rsp "pass  " PASS
         printf '\n'
     else
         # Not a terminal: take one line from stdin, so this is scriptable.
-        IFS= read -r PASS || die "no passphrase on stdin"
+        # read reports failure at EOF even when it did set PASS, so a passphrase
+        # piped without a trailing newline is still a passphrase.
+        if ! IFS= read -r PASS && [ -z "$PASS" ]; then
+            die "no passphrase on stdin"
+        fi
     fi
 
     if [ -z "$PASS" ]; then
