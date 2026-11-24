@@ -44,6 +44,11 @@ fi
 KEY_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/gpg-prime/key"
 ATTEMPTS=3
 
+# Whatever gpg last said on stderr. Kept so a failure can be reported as what
+# it was, rather than as the one cause this script happens to expect.
+WARM_ERR=''
+PRIME_ERR=''
+
 die() { printf '%sgpg-prime: %s%s\n' "$C_ERR" "$*" "$C_OFF" >&2; exit 1; }
 
 usage() {
@@ -78,9 +83,22 @@ resolve_key() {
 # --pinentry-mode error makes gpg fail rather than ask, so this answers the
 # question without a prompt and without needing the passphrase.
 cache_is_warm() {
-    printf '%s' gpg-prime \
+    # 2>&1 >/dev/null, in that order: stderr goes to the substitution and only
+    # then is stdout discarded, so the capture holds gpg's message alone.
+    WARM_ERR=$(printf '%s' gpg-prime \
         | gpg --batch --yes --pinentry-mode error --local-user "$KEY" \
-              --detach-sign -o /dev/null >/dev/null 2>&1
+              --detach-sign -o /dev/null 2>&1 >/dev/null) && return 0
+    return 1
+}
+
+# Signing also fails when the key is expired, revoked, has no secret part, or
+# the agent is unreachable. Those are not a cold cache and no passphrase will
+# fix them, so they must not be reported as one.
+cold_is_just_cold() {
+    case $WARM_ERR in
+        *'No pinentry'*|*'No passphrase given'*|*'Operation cancelled'*) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # --- The configured idle timeout, in seconds ---------------------------------
@@ -146,6 +164,13 @@ if cache_is_warm; then
     exit 0
 fi
 
+if ! cold_is_just_cold; then
+    printf '%sgpg cannot sign with this key%s — no passphrase will change that:\n' \
+        "$C_ERR" "$C_OFF" >&2
+    printf '%s\n' "$WARM_ERR" | sed 's/^/    /' >&2
+    exit 1
+fi
+
 if [ "$STATUS_ONLY" -eq 1 ]; then
     printf '%scache cold%s — run gpg-prime to unlock it\n' "$C_WARN" "$C_OFF"
     exit 1
@@ -155,10 +180,11 @@ fi
 # printf is a shell builtin, so the passphrase never becomes an argument to an
 # external process and never appears in /proc/*/cmdline.
 prime_with() {
-    printf '%s\n' "$1" \
+    PRIME_ERR=$(printf '%s\n' "$1" \
         | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
               --local-user "$KEY" --detach-sign -o /dev/null \
-              /dev/null >/dev/null 2>&1
+              /dev/null 2>&1 >/dev/null) && return 0
+    return 1
 }
 
 primed=0
@@ -168,9 +194,15 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     PASS=''
     if [ -t 0 ]; then
         # IFS= matters: without it read strips leading and trailing whitespace,
-        # which is a legal part of a passphrase.
-        IFS= read -rsp "pass  " PASS
+        # which is a legal part of a passphrase. The `|| read_ok=0` matters too:
+        # Ctrl-D at the prompt makes read fail, and a bare failing command would
+        # end the script under `set -e` without saying anything.
+        read_ok=1
+        IFS= read -rsp "pass  " PASS || read_ok=0
         printf '\n'
+        if [ "$read_ok" -eq 0 ] && [ -z "$PASS" ]; then
+            die "cancelled at the prompt — cache left cold"
+        fi
     else
         # Not a terminal: take one line from stdin, so this is scriptable.
         # read reports failure at EOF even when it did set PASS, so a passphrase
@@ -185,13 +217,26 @@ for attempt in $(seq 1 "$ATTEMPTS"); do
     elif prime_with "$PASS"; then
         primed=1
     else
-        printf '%sbad passphrase%s' "$C_ERR" "$C_OFF" >&2
-        # Only a terminal gets retried, so only a terminal is offered retries.
-        if [ -t 0 ] && [ "$attempt" -lt "$ATTEMPTS" ]; then
-            printf ' — %d attempt(s) left\n' $(( ATTEMPTS - attempt )) >&2
-        else
-            printf '\n' >&2
-        fi
+        case $PRIME_ERR in
+            *'Bad passphrase'*|*'bad passphrase'*)
+                printf '%sbad passphrase%s' "$C_ERR" "$C_OFF" >&2
+                # A terminal is the only thing retried, so only it is offered
+                # retries.
+                if [ -t 0 ] && [ "$attempt" -lt "$ATTEMPTS" ]; then
+                    printf ' — %d attempt(s) left\n' $(( ATTEMPTS - attempt )) >&2
+                else
+                    printf '\n' >&2
+                fi
+                ;;
+            *)
+                # Not a passphrase problem, so retrying cannot help.
+                printf '%sgpg failed for a reason a passphrase will not fix%s:\n' \
+                    "$C_ERR" "$C_OFF" >&2
+                printf '%s\n' "$PRIME_ERR" | sed 's/^/    /' >&2
+                PASS=''; unset PASS
+                exit 1
+                ;;
+        esac
     fi
 
     PASS=''
