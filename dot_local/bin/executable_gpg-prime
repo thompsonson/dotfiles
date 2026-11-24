@@ -85,8 +85,13 @@ resolve_key() {
 cache_is_warm() {
     # 2>&1 >/dev/null, in that order: stderr goes to the substitution and only
     # then is stdout discarded, so the capture holds gpg's message alone.
+    # LC_ALL=C is load-bearing, not tidiness: cold_is_just_cold and the retry
+    # loop sort these failures by matching gpg's message text, and gpg
+    # translates its messages. Under a German or French locale the untranslated
+    # patterns would match nothing and every cold cache would be reported as an
+    # unfixable key error.
     WARM_ERR=$(printf '%s' gpg-prime \
-        | gpg --batch --yes --pinentry-mode error --local-user "$KEY" \
+        | LC_ALL=C gpg --batch --yes --pinentry-mode error --local-user "$KEY" \
               --detach-sign -o /dev/null 2>&1 >/dev/null) && return 0
     return 1
 }
@@ -180,8 +185,10 @@ fi
 # printf is a shell builtin, so the passphrase never becomes an argument to an
 # external process and never appears in /proc/*/cmdline.
 prime_with() {
+    # LC_ALL=C for the same reason as in cache_is_warm: the caller classifies
+    # this message, so it must not be translated.
     PRIME_ERR=$(printf '%s\n' "$1" \
-        | gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+        | LC_ALL=C gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
               --local-user "$KEY" --detach-sign -o /dev/null \
               /dev/null 2>&1 >/dev/null) && return 0
     return 1
