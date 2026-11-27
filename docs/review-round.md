@@ -13,8 +13,8 @@ Runs one review round on a branch, of its code or of a model, and keeps a record
 
 | Command | What it does |
 |---|---|
-| `review-round run [--kind code\|model] [--pr N]` | Reviews this branch's diff against its base with `claude -p`; `--kind model` reviews a model |
-| `review-round record --findings FILE [--kind code\|model] [--round N]` | Records findings from a review done elsewhere, such as a subagent |
+| `review-round run [--review code\|model] [--pr N]` | Reviews this branch's diff against its base with `claude -p`; `--review model` reviews a model |
+| `review-round record --findings FILE [--review code\|model] [--round N]` | Records findings from a review done elsewhere, such as a subagent |
 | `review-round status [--all]` | Rounds per branch, newest first, with the last round's findings |
 | `review-round stats [--repo owner/name]` | Running totals by severity and origin |
 | `review-round allow BRANCH N [--by NAME]` | Lets a branch run N more rounds |
@@ -49,17 +49,6 @@ Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 
 - **bug**: some input or state gives a wrong result — a crash, a hang, a wrong answer, lost data, a leak, a security hole.
 - **polish**: nothing behaves wrongly — wording, naming, docs, a weak test, style.
 
-## Model rounds
-
-- `--kind model` reviews a model: a formal specification, its check script and records, its modelling choices and diagrams.
-- A model often changes how things work, so the reference is the model's own intent and sources, never today's code.
-- Each finding also has a class:
-  - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
-  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge as an issue.
-- A finding with no class counts as design.
-- The summary line counts design findings: `N design for the person in charge`.
-- The comment gains a class column, and the run's log line records `"review": "model"`.
-- Code rounds and model rounds on one branch share its round limit.
 - Severity says how much harm; kind says whether there is any. An unlikely bug is a low bug, not polish.
 - A round is `clean` only when it has no bugs and no high or medium findings.
 - The summary line counts the bugs: `clean — 0 high, 0 medium, 1 low` is polish only.
@@ -68,6 +57,22 @@ Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 
 Why: severity alone let "low" mean both "rare bug" and "polish".
 A rule of "fix highs and mediums" then merged real bugs, such as a search that hangs on a FIFO.
 
+## Model rounds
+
+- `--review model` reviews a model: a formal specification, its check script and records, its modelling choices and diagrams.
+- A model often changes how things work, so the reference is the model's own intent and sources, never today's code.
+- Each finding also has a class:
+  - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
+  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge as an issue.
+- A finding with no class counts as design.
+- Only text findings decide the result: a round whose findings are all design is `clean`, and exits 0.
+- Design findings are handed to the person in charge, not fixed on the branch, so they must not keep the branch from passing.
+- The reviewer sees earlier model findings with their class, and doesn't report a design finding again unless the change made it worse.
+- The summary line counts design findings: `N design for the person in charge`.
+- The comment gains a class column, and the run's log line records `"review": "model"`.
+- Code rounds and model rounds on one branch share its round limit.
+- Each round's prompt lists only earlier findings of the same review.
+- `record` refuses findings that carry a class unless it is given `--review model`.
 ## Repeats
 
 - Each finding gets an id, `r<round>.<n>`, shown in the output and the PR comment.

@@ -13,7 +13,7 @@ Each round:
   - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
   - marks each finding a bug (some input or state gives a wrong result) or polish
     (nothing behaves wrongly); a round with any bug, of any severity, is not clean;
-  - reviews code by default; with --kind model, reviews a model (a specification and
+  - reviews code by default; with --review model, reviews a model (a specification and
     its records) against its own intent and sources, never against today's code, and
     marks each finding text (fix it in the pull request) or design (take it to the
     person in charge as an issue);
@@ -25,8 +25,8 @@ After a set number of rounds on one branch (default 3) it stops until a person
 allows more with `review-round allow`, so no agent loops unseen.
 
 Usage:
-  review-round run    [--kind code|model] [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
-  review-round record --findings FILE [--kind code|model] [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
+  review-round run    [--review code|model] [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
+  review-round record --findings FILE [--review code|model] [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
   review-round status [--all]
   review-round stats  [--repo NAME]
   review-round allow  BRANCH N [--repo NAME] [--by NAME]
@@ -75,7 +75,7 @@ LIMIT = int(os.environ.get("REVIEW_ROUND_LIMIT", "3"))
 MAX_BYTES = float(os.environ.get("REVIEW_ROUND_MAX_MB", "5")) * 1024 * 1024
 SEVERITIES = ("high", "medium", "low")
 KINDS = ("bug", "polish")
-REVIEWS = ("code", "model")  # what a round reviews: --kind
+REVIEWS = ("code", "model")  # what a round reviews: --review
 CLASSES = ("text", "design")  # a model finding: fixed in the PR, or taken to a person
 ORIGINS = ("pre-existing", "original", "fix", "unknown")
 FIX_SUBJECT = re.compile(r"review round (\d+)", re.IGNORECASE)
@@ -192,6 +192,8 @@ The fields:
   build), or fix (an earlier review round's fix commit).
 - Merge findings that share one cause. Name the fix for text; name the open question
   for design.
+- A design finding already listed under earlier findings has been handed on. Don't
+  report it again, unless this change made it worse.
 - Do not edit files.
 """
 
@@ -452,13 +454,17 @@ def find_method(info: dict, arg: str | None, review: str = "code") -> tuple[str,
 MAX_DIFF = 200_000  # characters of diff put in the prompt; past it, the reviewer reads files
 
 
-def earlier_findings(info: dict) -> list[dict]:
-    """Findings from this branch's earlier rounds, each with its id (r<round>.<n>)."""
+def earlier_findings(info: dict, review: str = "code") -> list[dict]:
+    """Findings from this branch's earlier rounds of the same review, each with its id
+    (r<round>.<n>). A row logged before reviews had kinds is a code round's."""
     found, seen = [], {}
     for f in read_rows("findings"):
         if f.get("repo") != info["repo"] or f.get("branch") != info["branch"]:
             continue
+        # Numbered over every row of the run, so an id stays the one first given
         n = seen[f.get("run_id")] = seen.get(f.get("run_id"), 0) + 1
+        if (f.get("review") or "code") != review:
+            continue
         # Rows logged before ids existed get theirs from round and order in the run
         found.append({**f, "id": f.get("id") or f"r{f.get('round')}.{n}"})
     return found
@@ -493,7 +499,8 @@ def snapshot(root: str):
 
 
 def review(info: dict, rnd: int, method: str, model: str | None,
-           schema: dict = FINDINGS_SCHEMA) -> tuple[list[dict], dict]:
+           kind: str = "code") -> tuple[list[dict], dict]:
+    schema = MODEL_SCHEMA if kind == "model" else FINDINGS_SCHEMA
     span = f"{info['merge_base']}..HEAD"
     log = git("log", "--format=%h %s%n%b", span)
     diff = git("diff", span)
@@ -501,9 +508,10 @@ def review(info: dict, rnd: int, method: str, model: str | None,
         diff = (git("diff", "--stat", span) + f"\n\n(The full diff is {len(diff):,} characters;"
                 " read the changed files with the Read tool.)")
     earlier = "\n".join(
-        f"- {f['id']} [{f['severity']} {f.get('kind', 'bug')}] "
+        f"- {f['id']} [{f['severity']} {f.get('kind', 'bug')}"
+        + (f" {f['class']}" if f.get("class") else "") + "] "
         f"{f.get('file') or '-'}: {f.get('summary', '')}"
-        for f in earlier_findings(info)) or "(none)"
+        for f in earlier_findings(info, kind)) or "(none)"
     prompt = f"""{method}
 
 ## This round
@@ -591,6 +599,12 @@ def counts(findings: list[dict]) -> dict:
 def bugs(rows: list[dict]) -> int:
     """Findings of kind bug, any severity: each is fixed, or tracked in an issue."""
     return sum(1 for r in rows if r.get("kind", "bug") == "bug")
+
+
+def on_branch(rows: list[dict]) -> list[dict]:
+    """The findings fixed on the branch. A model round's design findings go to the
+    person in charge instead, so they don't decide the round's result."""
+    return [r for r in rows if r.get("class") != "design"]
 
 
 def summary_line(run: dict) -> str:
@@ -736,7 +750,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         "head": info["head"],
         "round": rnd,
         "allowed": limit,
-        "review": getattr(args, "kind", None) or "code",
+        "review": getattr(args, "review", None) or "code",
     }
     if pr_error:
         run["post_error"] = pr_error
@@ -761,8 +775,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     try:
         if findings_in is None:
             method, method_src = find_method(info, getattr(args, "method", None), run["review"])
-            findings_in, extra = review(info, rnd, method, getattr(args, "model", None),
-                                        MODEL_SCHEMA if run["review"] == "model" else FINDINGS_SCHEMA)
+            findings_in, extra = review(info, rnd, method, getattr(args, "model", None), run["review"])
             meta = {**meta, **extra, "method": method_src}
         rows = []
         for f in findings_in:
@@ -775,6 +788,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                 {
                     "run_id": run["run_id"],
                     "id": f"r{rnd}.{len(rows) + 1}",
+                    "review": run["review"],
                     "repeat_of": f.get("repeat_of") or None,
                     "repo": info["repo"],
                     "branch": info["branch"],
@@ -812,13 +826,15 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             print(f"review-round: {e}", file=sys.stderr)
         return 2
     c = counts(rows)
+    fixed = on_branch(rows)
+    cf = counts(fixed)
     run.update(meta)
     run.update(
         ended=now(),
         seconds=round(time.monotonic() - start, 1),
-        result="findings" if bugs(rows) or any(c[s][o] for s in ("high", "medium") for o in ORIGINS)
+        result="findings" if bugs(fixed) or any(cf[s][o] for s in ("high", "medium") for o in ORIGINS)
         else "clean",
-        bugs=bugs(rows),
+        bugs=bugs(fixed),
         counts=c,
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
@@ -841,7 +857,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
-    return 1 if run["bugs"] or sum(c["high"].values()) else 0
+    return 1 if run["bugs"] or sum(cf["high"].values()) else 0
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
@@ -859,6 +875,9 @@ def cmd_record(args) -> int:
             raise ValueError("not a list")
     except (OSError, ValueError, KeyError) as e:
         die(f"{args.findings}: expected {{\"findings\": [...]}} or a list ({e})")
+    if args.review != "model" and any(isinstance(f, dict) and f.get("class") for f in found):
+        die(f"{args.findings}: its findings carry a class, which only a model round has; "
+            "use --review model")
     return do_round(args, found, {"reviewer": args.reviewer or "recorded"})
 
 
@@ -962,13 +981,13 @@ def main() -> int:
         sp.add_argument("--pr", type=int, help="pull request number (default: the branch's open one)")
         sp.add_argument("--agent", help="who is running the round")
         sp.add_argument("--no-post", action="store_true", help="don't comment on the pull request")
-        sp.add_argument("--kind", choices=REVIEWS, default="code",
+        sp.add_argument("--review", choices=REVIEWS, default="code",
                         help="what the round reviews: code (default) or a model")
 
     r = sub.add_parser("run", help="review the current branch with claude -p")
     common(r)
     r.add_argument("--method", help="review method file (default: the pr-review skill, or "
-                   "review-model with --kind model)")
+                   "review-model with --review model)")
     r.add_argument("--model")
     r.set_defaults(func=cmd_run)
 
