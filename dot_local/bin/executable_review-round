@@ -611,6 +611,13 @@ def bugs(rows: list[dict]) -> int:
     return sum(1 for r in rows if r.get("kind", "bug") == "bug")
 
 
+def where_of(r: dict) -> str:
+    """file:line, the file alone when there is no line, or - when there is no file."""
+    if not r.get("file"):
+        return "-"
+    return f"{r['file']}:{r['line']}" if r.get("line") else str(r["file"])
+
+
 def to_decide(rows: list[dict]) -> list[dict]:
     """A model round's findings that need the person in charge: design or unclassed."""
     return [r for r in rows if r.get("class") in ("design", "unclassed")]
@@ -653,7 +660,7 @@ def comment_body(run: dict, rows: list[dict]) -> str:
             tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
             if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
                 tag += f" (reviewer: {r['claimed_origin']})"
-            where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
+            where = f"`{where_of(r)}`" if r.get("file") else "-"
             text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
             cls = f" {r.get('class') or ''} |" if model else ""
             lines.append(f"| {r.get('id', '')} | {r['severity']} | {r.get('kind', 'bug')} |{cls} {tag}"
@@ -858,7 +865,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         append(RUNS, [run])
         append(FINDINGS, rows)
     for r in rows:
-        where = f"{r['file']}:{r['line']}" if r["file"] else "-"
+        where = where_of(r)
         tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
         if r["claimed_origin"] and r["claimed_origin"] != r["origin"]:
             tag += f" [reviewer: {r['claimed_origin']}]"
@@ -879,7 +886,7 @@ def decision_block(rows: list[dict]) -> str:
     """What the person in charge needs to decide, for the agent to hand over as it is."""
     lines = ["", "## For the person in charge: a decision is needed", ""]
     for r in rows:
-        where = (f"{r['file']}:{r['line']}" if r.get("line") else r["file"]) if r.get("file") else "-"
+        where = where_of(r)
         what = "design" if r["class"] == "design" else "unclassed: design or text?"
         lines.append(f"- {r['id']} [{r['severity']} {r['kind']}, {what}] {where}")
         for label, key in (("Finding", "summary"), ("Scenario", "scenario"), ("Open question", "fix")):

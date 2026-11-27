@@ -376,6 +376,7 @@ PY
     out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
     if [[ $rc -eq 4 ]] && grep -q "findings — 1 high, 0 medium, 1 low.*2 design for the person in charge" <<<"$out" \
         && grep -q "r4.2 \[low polish, design\] f.txt$" <<<"$out" \
+        && ! grep -q "None" <<<"$out" && ! grep -q "None" "$t/comment.md" \
         && grep -q "## For the person in charge: a decision is needed" <<<"$out" \
         && grep -q "Scenario: s1" <<<"$out" && grep -q "Open question: q1" <<<"$out" \
         && tail -1 <<<"$out" | grep -q "Fix nothing on this branch until they decide"; then
