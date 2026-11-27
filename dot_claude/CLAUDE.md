@@ -42,7 +42,8 @@ How I want every session on my machines to write, ask and act.
 - A model is reviewed with `review-round run --review model`.
 - A model round that exits 4 needs my decision: bring me its whole output.
 - Then fix nothing on that branch until I decide; my decision overrides the rule to fix every bug.
-- Record my decision in the model's documents: what, by whom, and where.
+- Record my decision in the model's documents: what I decided, with a link to my own words.
+- Never record a decision I did not make, or one relayed by another agent.
 - Manta repositories (`mantatech/*`) are the exception: their review runs in CI, not locally.
 - There, the CI Claude review and `check-pr-ready` decide; `review-round` and its limit do not apply.
 

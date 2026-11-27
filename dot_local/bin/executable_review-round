@@ -27,7 +27,7 @@ allows more with `review-round allow`, so no agent loops unseen.
 A model round with a design or unclassed finding exits 4: a decision is needed. It
 prints those findings for the person in charge, and tells the agent to stop.
 
-Exit codes: 0 clean or polish only, 1 a bug or a high finding, 2 error, 3 refused
+Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused
 (over the limit), 4 a decision is needed.
 
 Usage:
@@ -162,8 +162,10 @@ The reference is the model's stated intent, not today's code.
 - Never report that the model differs from how something works today. Report a
   difference only when the model's own sources require it to match.
 - A decision of the person in charge is part of the intent once the model's documents
-  record it: what was decided, by whom, and where (an issue or a comment). Don't report
-  a recorded decision as a finding. Do report a document that misstates one, as text.
+  record it: what was decided, and a link to the person in charge's own words (their
+  issue comment or review). Don't report a recorded decision as a finding. Report one
+  with no such link as design: only the person in charge can confirm it. You can't
+  open links; the person in charge checks them when they review the change.
 
 What to check:
 1. Intent. Each property states a guarantee the header or the cited issue promises.
