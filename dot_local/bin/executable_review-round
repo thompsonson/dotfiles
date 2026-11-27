@@ -180,8 +180,7 @@ Give each finding a class.
   undecided. For example: a counterexample under a setting the world allows, or a
   guarantee that rests on an assumption the world does not give. It goes to the person
   in charge as an issue. The author does not change the design to make it go away.
-- When unsure, use design. Every finding needs a class: one with none blocks the
-  branch until someone classes it.
+- When unsure, use design. Every finding needs a class.
 
 The fields:
 - kind: bug when a claim in the files is false, or a guarantee fails; polish when
@@ -603,11 +602,6 @@ def bugs(rows: list[dict]) -> int:
     return sum(1 for r in rows if r.get("kind", "bug") == "bug")
 
 
-def on_branch(rows: list[dict]) -> list[dict]:
-    """The findings fixed on the branch. A model round's design findings go to the
-    person in charge instead, so they don't decide the round's result."""
-    return [r for r in rows if r.get("class") != "design"]
-
 
 def summary_line(run: dict) -> str:
     c = run["counts"]
@@ -813,7 +807,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                 }
             )
             if run["review"] == "model":
-                # an unclassed finding blocks like a text one until someone classes it
+                # a finding the reviewer didn't class is kept as such, for someone to class
                 c = str(f.get("class", "")).strip().lower()
                 rows[-1]["class"] = c if c in CLASSES else "unclassed"
     except BaseException as e:  # the run is still recorded, and its round freed
@@ -830,15 +824,13 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
             print(f"review-round: {e}", file=sys.stderr)
         return 2
     c = counts(rows)
-    fixed = on_branch(rows)
-    cf = counts(fixed)
     run.update(meta)
     run.update(
         ended=now(),
         seconds=round(time.monotonic() - start, 1),
-        result="findings" if bugs(fixed) or any(cf[s][o] for s in ("high", "medium") for o in ORIGINS)
+        result="findings" if bugs(rows) or any(c[s][o] for s in ("high", "medium") for o in ORIGINS)
         else "clean",
-        bugs=bugs(fixed),
+        bugs=bugs(rows),
         counts=c,
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
@@ -862,7 +854,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
-    return 1 if run["bugs"] or sum(cf["high"].values()) else 0
+    return 1 if run["bugs"] or sum(c["high"].values()) else 0
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────

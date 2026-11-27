@@ -346,8 +346,8 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
-    # A model round: the model method and a schema with a class; an unclassed finding
-    # blocks, and design findings alone leave the round clean. Its own log, so the totals
+    # A model round: the model method and a schema with a class; an unclassed finding is
+    # logged so, and design findings count towards the result. Its own log, so the totals
     # checked further down stay as they are.
     local rrm=("${rr[@]/#REVIEW_ROUND_HOME=*/REVIEW_ROUND_HOME=$t/log-model}")
     rrm=("${rrm[@]/#REVIEW_ROUND_LIMIT=*/REVIEW_ROUND_LIMIT=9}")
@@ -360,7 +360,7 @@ PY
         && grep -q "| id | severity | kind | class | origin |" "$t/comment.md" \
         && tail -1 "$t/log-model/runs.jsonl" | grep -q '"review": "model"' \
         && tail -1 "$t/log-model/runs.jsonl" | grep -q '"method": "built-in model"'; then
-        pass "review-round runs a model round: model method, classes, unclassed blocks"
+        pass "review-round runs a model round: model method, classes, unclassed kept"
     else
         fail "review-round model round (rc=$rc): $out"; failed=1
     fi
@@ -374,8 +374,8 @@ PY
     fi
     printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"x"}]}' > "$t/design.json"
     out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
-    if [[ $rc -eq 0 ]] && grep -q "clean — 1 high.*1 design for the person in charge" <<<"$out"; then
-        pass "review-round leaves a round of design findings alone clean"
+    if [[ $rc -eq 1 ]] && grep -q "findings — 1 high.*1 design for the person in charge" <<<"$out"; then
+        pass "review-round counts a design finding towards the result"
     else
         fail "review-round design-only round (rc=$rc): $out"; failed=1
     fi
