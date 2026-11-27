@@ -180,7 +180,8 @@ Give each finding a class.
   undecided. For example: a counterexample under a setting the world allows, or a
   guarantee that rests on an assumption the world does not give. It goes to the person
   in charge as an issue. The author does not change the design to make it go away.
-- When unsure, use design.
+- When unsure, use design. Every finding needs a class: one with none blocks the
+  branch until someone classes it.
 
 The fields:
 - kind: bug when a claim in the files is false, or a guarantee fails; polish when
@@ -456,14 +457,15 @@ MAX_DIFF = 200_000  # characters of diff put in the prompt; past it, the reviewe
 
 def earlier_findings(info: dict, review: str = "code") -> list[dict]:
     """Findings from this branch's earlier rounds of the same review, each with its id
-    (r<round>.<n>). A row logged before reviews had kinds is a code round's."""
+    (r<round>.<n>)."""
     found, seen = [], {}
     for f in read_rows("findings"):
         if f.get("repo") != info["repo"] or f.get("branch") != info["branch"]:
             continue
         # Numbered over every row of the run, so an id stays the one first given
         n = seen[f.get("run_id")] = seen.get(f.get("run_id"), 0) + 1
-        if (f.get("review") or "code") != review:
+        # A row from before rows carried their review: a class means a model round's
+        if (f.get("review") or ("model" if f.get("class") else "code")) != review:
             continue
         # Rows logged before ids existed get theirs from round and order in the run
         found.append({**f, "id": f.get("id") or f"r{f.get('round')}.{n}"})
@@ -618,6 +620,8 @@ def summary_line(run: dict) -> str:
         tail += f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})"
     if run.get("design"):
         tail += f"; {run['design']} design for the person in charge"
+    if run.get("unclassed"):
+        tail += f"; {run['unclassed']} unclassed"
     if run.get("repeats"):
         tail += f"; {run['repeats']} repeat earlier findings"
     if run.get("disagree"):
@@ -809,9 +813,9 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                 }
             )
             if run["review"] == "model":
-                # an unclassed model finding goes to the person in charge
+                # an unclassed finding blocks like a text one until someone classes it
                 c = str(f.get("class", "")).strip().lower()
-                rows[-1]["class"] = c if c in CLASSES else "design"
+                rows[-1]["class"] = c if c in CLASSES else "unclassed"
     except BaseException as e:  # the run is still recorded, and its round freed
         reason = f"exit {e.code}" if isinstance(e, SystemExit) else str(e) or type(e).__name__
         run.update(result="error", error=reason[:500], ended=now(), counts=counts([]), fix_rounds=[])
@@ -842,6 +846,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     )
     if run["review"] == "model":
         run["design"] = sum(1 for r in rows if r.get("class") == "design")
+        run["unclassed"] = sum(1 for r in rows if r.get("class") == "unclassed")
     post(args, run, rows)
     with locked():
         append(RUNS, [run])

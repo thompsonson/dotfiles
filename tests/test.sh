@@ -346,21 +346,21 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
-    # A model round: the model method and a schema with a class; an unclassed finding is
-    # design, and design findings alone leave the round clean. Its own log, so the totals
+    # A model round: the model method and a schema with a class; an unclassed finding
+    # blocks, and design findings alone leave the round clean. Its own log, so the totals
     # checked further down stay as they are.
     local rrm=("${rr[@]/#REVIEW_ROUND_HOME=*/REVIEW_ROUND_HOME=$t/log-model}")
     rrm=("${rrm[@]/#REVIEW_ROUND_LIMIT=*/REVIEW_ROUND_LIMIT=9}")
     "${g[@]}" -C "$t/repo" checkout -q -b model
     (cd "$t/repo" && "${rrm[@]}" run --pr 7 >/dev/null 2>&1)
     out=$(cd "$t/repo" && "${rrm[@]}" run --review model --pr 7 2>&1); rc=$?
-    if [[ $rc -eq 0 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
+    if [[ $rc -eq 1 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
         && grep -A1 -x "## Earlier findings" "$t/claude-prompt" | tail -1 | grep -qx "(none)" \
-        && grep -q '"class"' "$t/claude-args" && grep -q "clean — .*3 design for the person in charge" <<<"$out" \
+        && grep -q '"class"' "$t/claude-args" && grep -q "findings — .*3 unclassed" <<<"$out" \
         && grep -q "| id | severity | kind | class | origin |" "$t/comment.md" \
         && tail -1 "$t/log-model/runs.jsonl" | grep -q '"review": "model"' \
         && tail -1 "$t/log-model/runs.jsonl" | grep -q '"method": "built-in model"'; then
-        pass "review-round runs a model round: model method, classes, design alone is clean"
+        pass "review-round runs a model round: model method, classes, unclassed blocks"
     else
         fail "review-round model round (rc=$rc): $out"; failed=1
     fi
@@ -372,6 +372,13 @@ PY
     else
         fail "review-round model record (rc=$rc): $out"; failed=1
     fi
+    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"x"}]}' > "$t/design.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 0 ]] && grep -q "clean — 1 high.*1 design for the person in charge" <<<"$out"; then
+        pass "review-round leaves a round of design findings alone clean"
+    else
+        fail "review-round design-only round (rc=$rc): $out"; failed=1
+    fi
     out=$(cd "$t/repo" && "${rrm[@]}" record --findings "$t/model.json" --pr 7 2>&1); rc=$?
     if [[ $rc -eq 2 ]] && grep -q "use --review model" <<<"$out"; then
         pass "review-round refuses classed findings in a code round"
@@ -380,7 +387,8 @@ PY
     fi
     (cd "$t/repo" && "${rrm[@]}" run --review model --pr 7 >/dev/null 2>&1)
     if grep -q -- "- r3.1 \[low bug text\] -: t" "$t/claude-prompt" \
-        && grep -q -- "- r2.1 \[low bug design\]" "$t/claude-prompt" \
+        && grep -q -- "- r4.1 \[high bug design\] -: d" "$t/claude-prompt" \
+        && grep -q -- "- r2.1 \[low bug unclassed\]" "$t/claude-prompt" \
         && ! grep -q -- "- r1.1 " "$t/claude-prompt"; then
         pass "review-round shows a model round only earlier model findings, with their class"
     else
