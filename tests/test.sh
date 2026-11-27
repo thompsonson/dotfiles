@@ -346,6 +346,68 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
+    # A model round: the model method and a schema with a class; an unclassed finding is
+    # logged so, and design findings count towards the result. Its own log, so the totals
+    # checked further down stay as they are.
+    local rrm=("${rr[@]/#REVIEW_ROUND_HOME=*/REVIEW_ROUND_HOME=$t/log-model}")
+    rrm=("${rrm[@]/#REVIEW_ROUND_LIMIT=*/REVIEW_ROUND_LIMIT=9}")
+    "${g[@]}" -C "$t/repo" checkout -q -b model
+    (cd "$t/repo" && "${rrm[@]}" run --pr 7 >/dev/null 2>&1)
+    out=$(cd "$t/repo" && "${rrm[@]}" run --review model --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 4 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
+        && grep -A1 -x "## Earlier findings" "$t/claude-prompt" | tail -1 | grep -qx "(none)" \
+        && grep -q '"class"' "$t/claude-args" && grep -q "findings — .*3 unclassed" <<<"$out" \
+        && grep -q "| id | severity | kind | class | origin |" "$t/comment.md" \
+        && tail -1 "$t/log-model/runs.jsonl" | grep -q '"review": "model"' \
+        && tail -1 "$t/log-model/runs.jsonl" | grep -q '"method": "built-in model"'; then
+        pass "review-round runs a model round: model method, classes, unclassed kept"
+    else
+        fail "review-round model round (rc=$rc): $out"; failed=1
+    fi
+    printf '{"findings":[{"severity":"low","kind":"bug","class":"text","summary":"t","scenario":"x"}]}' > "$t/model.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/model.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && tail -1 "$t/log-model/findings.jsonl" | grep -q '"class": "text"' \
+        && ! grep -q "design for" <<<"$out"; then
+        pass "review-round records a model finding's class, and a text bug is not clean"
+    else
+        fail "review-round model record (rc=$rc): $out"; failed=1
+    fi
+    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"s1","fix":"q1"},{"severity":"low","kind":"polish","class":"design","file":"f.txt","summary":"p","scenario":"s2"}]}' > "$t/design.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 4 ]] && grep -q "findings — 1 high, 0 medium, 1 low.*2 design for the person in charge" <<<"$out" \
+        && grep -q "r4.2 \[low polish, design\] f.txt$" <<<"$out" \
+        && ! grep -q "None" <<<"$out" && ! grep -q "None" "$t/comment.md" \
+        && grep -q "## For the person in charge: a decision is needed" <<<"$out" \
+        && grep -q "Scenario: s1" <<<"$out" && grep -q "Open question: q1" <<<"$out" \
+        && tail -1 <<<"$out" | grep -q "Fix nothing on this branch until they decide"; then
+        pass "review-round exits 4 on a design finding, with a block for the person in charge"
+    else
+        fail "review-round design-only round (rc=$rc): $out"; failed=1
+    fi
+    printf '{"findings":[{"severity":"low","kind":"polish","class":"design","summary":"p","scenario":"x"}]}' > "$t/polish.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/polish.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 4 ]] && grep -q "round 5/9: findings — 0 high, 0 medium, 1 low" <<<"$out"; then
+        pass "review-round never logs a round with a finding to decide as clean"
+    else
+        fail "review-round polish design round (rc=$rc): $out"; failed=1
+    fi
+    out=$(cd "$t/repo" && "${rrm[@]}" record --findings "$t/model.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 2 ]] && grep -q "use --review model" <<<"$out"; then
+        pass "review-round refuses classed findings in a code round"
+    else
+        fail "review-round classed code record (rc=$rc): $out"; failed=1
+    fi
+    (cd "$t/repo" && "${rrm[@]}" run --review model --pr 7 >/dev/null 2>&1)
+    if grep -q -- "- r3.1 \[low bug text\] -: t" "$t/claude-prompt" \
+        && grep -q -- "- r4.1 \[high bug design\] -: d" "$t/claude-prompt" \
+        && grep -q -- "- r2.1 \[low bug unclassed\]" "$t/claude-prompt" \
+        && ! grep -q -- "- r1.1 " "$t/claude-prompt"; then
+        pass "review-round shows a model round only earlier model findings, with their class"
+    else
+        fail "review-round model earlier findings: $(sed -n '/## Earlier findings/,/## Commits/p' "$t/claude-prompt")"; failed=1
+    fi
+    "${g[@]}" -C "$t/repo" checkout -q feat
+
     # With no --pr, the round finds the branch's open pull request and posts on it.
     # Only a GitHub origin is asked, so these name one, and put the real one back after.
     "${g[@]}" -C "$t/repo" remote set-url origin https://github.com/o/r.git

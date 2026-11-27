@@ -1,6 +1,6 @@
 # review-round
 
-Runs one code-review round on a branch, and keeps a record of every run.
+Runs one review round on a branch, of its code or of a model, and keeps a record of every run.
 
 ## Why
 
@@ -13,8 +13,8 @@ Runs one code-review round on a branch, and keeps a record of every run.
 
 | Command | What it does |
 |---|---|
-| `review-round run [--pr N]` | Reviews this branch's diff against its base with `claude -p` |
-| `review-round record --findings FILE [--round N]` | Records findings from a review done elsewhere, such as a subagent |
+| `review-round run [--review code\|model] [--pr N]` | Reviews this branch's diff against its base with `claude -p`; `--review model` reviews a model |
+| `review-round record --findings FILE [--review code\|model] [--round N]` | Records findings from a review done elsewhere, such as a subagent |
 | `review-round status [--all]` | Rounds per branch, newest first, with the last round's findings |
 | `review-round stats [--repo owner/name]` | Running totals by severity and origin |
 | `review-round allow BRANCH N [--by NAME]` | Lets a branch run N more rounds |
@@ -41,7 +41,7 @@ The comment holds:
 The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).
 `--no-post` skips the comment.
 
-Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused (over the limit).
+Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused (over the limit), 4 a decision is needed (a model round's design or unclassed finding).
 
 ## Bugs and polish
 
@@ -55,6 +55,29 @@ Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 
 
 Why: severity alone let "low" mean both "rare bug" and "polish".
 A rule of "fix highs and mediums" then merged real bugs, such as a search that hangs on a FIFO.
+
+## Model rounds
+
+- `--review model` reviews a model: a formal specification, its check script and records, its modelling choices and diagrams.
+- A model often changes how things work, so the reference is the model's own intent and sources, never today's code.
+- Each finding also has a class:
+  - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
+  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge. Once they decide, the author fixes it on the branch.
+- A finding with no class is logged `unclassed`, for someone to class.
+- Every class counts towards the result, as in a code round. A design or unclassed finding of any severity also makes the round `findings`, since the round stops for it.
+- The reviewer sees earlier model findings with their class. A design finding still open is reported again in each round, and marked as a repeat.
+- A design finding is closed by the decision, recorded in the model's own documents: what was decided, and a link to the person in charge's own words. The method treats a recorded decision as part of the intent, so later rounds don't report it again.
+- A recorded decision with no such link is reported as design, so it comes back to the person in charge.
+- The reviewer can't open links, so nothing in the round checks that a link holds the decision. The person in charge checks it in the diff, before they merge.
+- A round with any design or unclassed finding exits 4, after it logs the run and posts the comment.
+  - It prints a block for the person in charge: each such finding's summary, scenario and open question.
+  - It ends by telling the agent to stop, take the whole round to the person in charge, and fix nothing until they decide.
+  - Why: review-round runs inside an interactive session, and only the person in charge can decide a design question.
+- The summary line counts design and unclassed findings: `N design for the person in charge`, `N unclassed`.
+- The comment gains a class column, and the run's log line records `"review": "model"`.
+- Code rounds and model rounds on one branch share its round limit.
+- Each round's prompt lists only earlier findings of the same review.
+- `record` refuses findings that carry a class unless it is given `--review model`.
 
 ## Repeats
 
@@ -112,8 +135,9 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 ## The review
 
 - `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` on the base branch, then in `~/.claude`.
+- A model round looks for the `review-model` skill in the same two places: `.claude/skills/review-model/SKILL.md`.
 - The repo's copy is read from the base branch, so a branch can't rewrite its own review rules.
-- Otherwise it uses a short built-in method. `--method FILE` names another.
+- Otherwise it uses a built-in method, one for code and one for models. `--method FILE` names another.
 - The script puts the commits and the diff in the prompt (past 200,000 characters, the `--stat` and a note to read the files).
 - The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob`, `--permission-mode dontAsk` and `--strict-mcp-config`. It has no shell, since git's own options can read and write any file.
 - It loads no settings files (`--setting-sources ""`). A branch's own `.claude/settings.json` could hold hooks, and hooks run commands; tested: a branch hook runs with the default sources and not with none. This also keeps the user's CLAUDE.md out of its context.
