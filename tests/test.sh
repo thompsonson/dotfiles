@@ -346,6 +346,30 @@ PY
         fail "review-round post failure (rc=$rc): $out"; failed=1
     fi
 
+    # A model round: the model method and a schema with a class; an unclassed finding is design.
+    # Its own log, so the totals checked further down stay as they are.
+    local rrm=("${rr[@]/#REVIEW_ROUND_HOME=*/REVIEW_ROUND_HOME=$t/log-model}")
+    "${g[@]}" -C "$t/repo" checkout -q -b model
+    out=$(cd "$t/repo" && "${rrm[@]}" run --kind model --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 1 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
+        && grep -q '"class"' "$t/claude-args" && grep -q "3 design for the person in charge" <<<"$out" \
+        && grep -q "| id | severity | kind | class | origin |" "$t/comment.md" \
+        && tail -1 "$t/log-model/runs.jsonl" | grep -q '"review": "model"' \
+        && tail -1 "$t/log-model/runs.jsonl" | grep -q '"method": "built-in model"'; then
+        pass "review-round runs a model round with the model method and classes"
+    else
+        fail "review-round model round (rc=$rc): $out"; failed=1
+    fi
+    printf '{"findings":[{"severity":"low","kind":"polish","class":"text","summary":"t","scenario":"x"}]}' > "$t/model.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --kind model --findings "$t/model.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 0 ]] && tail -1 "$t/log-model/findings.jsonl" | grep -q '"class": "text"' \
+        && ! grep -q "design for" <<<"$out"; then
+        pass "review-round records a model finding's class"
+    else
+        fail "review-round model record (rc=$rc): $out"; failed=1
+    fi
+    "${g[@]}" -C "$t/repo" checkout -q feat
+
     # With no --pr, the round finds the branch's open pull request and posts on it.
     # Only a GitHub origin is asked, so these name one, and put the real one back after.
     "${g[@]}" -C "$t/repo" remote set-url origin https://github.com/o/r.git

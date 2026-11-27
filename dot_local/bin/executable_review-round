@@ -13,6 +13,10 @@ Each round:
   - appends one line per run to runs.jsonl, and one per finding to findings.jsonl;
   - marks each finding a bug (some input or state gives a wrong result) or polish
     (nothing behaves wrongly); a round with any bug, of any severity, is not clean;
+  - reviews code by default; with --kind model, reviews a model (a specification and
+    its records) against its own intent and sources, never against today's code, and
+    marks each finding text (fix it in the pull request) or design (take it to the
+    person in charge as an issue);
   - prints a one-line summary for the person in charge, and puts it, with one line per
     finding, in a comment on the branch's open pull request (found with gh, or given with
     --pr; --no-post to skip).
@@ -21,8 +25,8 @@ After a set number of rounds on one branch (default 3) it stops until a person
 allows more with `review-round allow`, so no agent loops unseen.
 
 Usage:
-  review-round run    [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
-  review-round record --findings FILE [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
+  review-round run    [--kind code|model] [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
+  review-round record --findings FILE [--kind code|model] [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
   review-round status [--all]
   review-round stats  [--repo NAME]
   review-round allow  BRANCH N [--repo NAME] [--by NAME]
@@ -59,7 +63,7 @@ import urllib.parse
 import uuid
 from pathlib import Path
 
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 HOME = Path(os.environ.get("REVIEW_ROUND_HOME", Path.home() / ".local/share/review-round"))
 RUNS = HOME / "runs.jsonl"
 FINDINGS = HOME / "findings.jsonl"
@@ -71,6 +75,8 @@ LIMIT = int(os.environ.get("REVIEW_ROUND_LIMIT", "3"))
 MAX_BYTES = float(os.environ.get("REVIEW_ROUND_MAX_MB", "5")) * 1024 * 1024
 SEVERITIES = ("high", "medium", "low")
 KINDS = ("bug", "polish")
+REVIEWS = ("code", "model")  # what a round reviews: --kind
+CLASSES = ("text", "design")  # a model finding: fixed in the PR, or taken to a person
 ORIGINS = ("pre-existing", "original", "fix", "unknown")
 FIX_SUBJECT = re.compile(r"review round (\d+)", re.IGNORECASE)
 
@@ -110,6 +116,15 @@ FINDINGS_SCHEMA = {
     "required": ["findings"],
 }
 
+# A model round's findings also carry a class.
+MODEL_SCHEMA = json.loads(json.dumps(FINDINGS_SCHEMA))
+MODEL_SCHEMA["properties"]["findings"]["items"]["properties"]["class"] = {
+    "enum": list(CLASSES),
+    "description": "text: the files misstate what the model does, or leave something out; "
+    "design: the model shows the mechanism fails a claim, or leaves a case undecided",
+}
+MODEL_SCHEMA["properties"]["findings"]["items"]["required"].append("class")
+
 DEFAULT_METHOD = """\
 Review the diff for correctness and security bugs.
 - Read what the change is for first (commit messages, linked issue), then the diff.
@@ -125,6 +140,58 @@ Review the diff for correctness and security bugs.
 - Merge findings that share one cause. Name the fix.
 - Say where each defect came from: pre-existing (already on the base branch), original
   (the branch's first build), or fix (an earlier review round's fix commit).
+- Do not edit files.
+"""
+
+MODEL_METHOD = """\
+Review a model: a formal specification of a mechanism, with its configuration, the
+script that checks it, the record of each check run, its modelling choices and its
+diagrams. Read the folder's own README, or the repository's, for what each file holds.
+
+The reference is the model's stated intent, not today's code.
+- A model says how a mechanism should work. It often changes how things work now.
+- The reference is the model's stated intent and its sources: the specification's
+  header, its README entry, and the issues, notes and documents it cites.
+- Code, configuration and documents elsewhere are examples, never constraints.
+- Never report that the model differs from how something works today. Report a
+  difference only when the model's own sources require it to match.
+
+What to check:
+1. Intent. Each property states a guarantee the header or the cited issue promises.
+   No promised guarantee goes unchecked.
+2. Constants. Each constant stands for a real choice, or a real fact about the world.
+   Its comment matches the actions that read it.
+3. Actions. Each action can happen in the world the model describes. No possible step
+   is missing: a crash, a kill, a restart, a reuse, a reordering, a dishonest actor.
+4. Sources. Each fact about the world is cited: a manual page, a standard, a
+   measurement. A claim nobody measured is marked unmeasured.
+5. Cases. Each case expected to fail shows that the switch it turns off matters. Each
+   case expected to hold proves what the run record says it proves.
+6. Records. Each recorded run names its commit, tool, configuration and outcome.
+   Every claim in the folder's documents matches a recorded run.
+7. Diagrams. Each diagram shows only what the specification does.
+8. Choices. Each choice that no source makes is written down, with its reason.
+
+Give each finding a class.
+- text: the files misstate what the model does, or leave something out. For example:
+  a wrong comment, an unpinned run, a claim no run supports, a diagram that disagrees,
+  a specification error. The author fixes it in the pull request.
+- design: the model, as intended, shows the mechanism fails a claim, or leaves a case
+  undecided. For example: a counterexample under a setting the world allows, or a
+  guarantee that rests on an assumption the world does not give. It goes to the person
+  in charge as an issue. The author does not change the design to make it go away.
+- When unsure, use design.
+
+The fields:
+- kind: bug when a claim in the files is false, or a guarantee fails; polish when
+  nothing is false, such as wording.
+- severity: high when a claimed guarantee is false or unchecked; medium when it holds
+  only in part; low when the harm is small.
+- scenario: the constants set, the steps in order, and the state reached.
+- origin: pre-existing (already on the base branch), original (the branch's first
+  build), or fix (an earlier review round's fix commit).
+- Merge findings that share one cause. Name the fix for text; name the open question
+  for design.
 - Do not edit files.
 """
 
@@ -362,20 +429,23 @@ def agent_name(arg: str | None) -> str:
 # ── Reviewing ─────────────────────────────────────────────────────────────────
 
 
-def find_method(info: dict, arg: str | None) -> tuple[str, str]:
+def find_method(info: dict, arg: str | None, review: str = "code") -> tuple[str, str]:
     """The review method. The repo's copy is read from the base branch, so the branch
-    under review can't rewrite its own review rules."""
+    under review can't rewrite its own review rules. A code round looks for the
+    pr-review skill, a model round for the review-model skill."""
     if arg:
         if not Path(arg).is_file():
             die(f"no method file at {arg}")
         return Path(arg).read_text(), arg
-    skill = ".claude/skills/pr-review/SKILL.md"
+    skill = ".claude/skills/review-model/SKILL.md" if review == "model" else ".claude/skills/pr-review/SKILL.md"
     res = subprocess.run(["git", "show", f"{info['merge_base']}:{skill}"], capture_output=True, text=True)
     if res.returncode == 0 and res.stdout.strip():
         return res.stdout, f"{info['base']}:{skill}"
     home = Path.home() / skill
     if home.is_file():
         return home.read_text(), str(home)
+    if review == "model":
+        return MODEL_METHOD, "built-in model"
     return DEFAULT_METHOD, "built-in"
 
 
@@ -422,7 +492,8 @@ def snapshot(root: str):
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[dict], dict]:
+def review(info: dict, rnd: int, method: str, model: str | None,
+           schema: dict = FINDINGS_SCHEMA) -> tuple[list[dict], dict]:
     span = f"{info['merge_base']}..HEAD"
     log = git("log", "--format=%h %s%n%b", span)
     diff = git("diff", span)
@@ -465,7 +536,7 @@ def review(info: dict, rnd: int, method: str, model: str | None) -> tuple[list[d
             "--output-format",
             "json",
             "--json-schema",
-            json.dumps(FINDINGS_SCHEMA),
+            json.dumps(schema),
             # Read-only, whatever the user's settings: no shell (git's own options can
             # write files), only these tools exist, reads stay inside the copy (the
             # findings go to a PR comment), nothing else runs, no MCP servers load
@@ -531,6 +602,8 @@ def summary_line(run: dict) -> str:
     tail = f"; {n} bug{'' if n == 1 else 's'}" if n else ""
     if intro:
         tail += f"; {intro} introduced by fixes (rounds {', '.join(map(str, fixes))})"
+    if run.get("design"):
+        tail += f"; {run['design']} design for the person in charge"
     if run.get("repeats"):
         tail += f"; {run['repeats']} repeat earlier findings"
     if run.get("disagree"):
@@ -546,16 +619,19 @@ def comment_body(run: dict, rows: list[dict]) -> str:
     lines = [f"**review-round** · {summary_line(run).split(': ', 1)[1]}"]
     if run.get("error"):
         lines += ["", f"Error: {run['error'][:300]}"]
+    model = run.get("review") == "model"
     if rows:
-        lines += ["", "| id | severity | kind | origin | repeat of | where | finding |",
-                  "|---|---|---|---|---|---|---|"]
+        head = "| id | severity | kind |" + (" class |" if model else "")
+        lines += ["", head + " origin | repeat of | where | finding |",
+                  "|---|---|---|" + ("---|" if model else "") + "---|---|---|---|"]
         for r in rows:
             tag = f"fix (round {r['fix_round']})" if r["origin"] == "fix" else r["origin"]
             if r.get("claimed_origin") and r["claimed_origin"] != r["origin"]:
                 tag += f" (reviewer: {r['claimed_origin']})"
             where = f"`{r['file']}:{r['line']}`" if r.get("file") else "-"
             text = " ".join(str(r.get("summary", "")).split()).replace("|", "\\|")
-            lines.append(f"| {r.get('id', '')} | {r['severity']} | {r.get('kind', 'bug')} | {tag}"
+            cls = f" {r.get('class') or ''} |" if model else ""
+            lines.append(f"| {r.get('id', '')} | {r['severity']} | {r.get('kind', 'bug')} |{cls} {tag}"
                          f" | {r.get('repeat_of') or ''}"
                          f" | {where} | {text[:300]} |")
     bits = [f"run `{run['run_id']}`", f"head `{run['head'][:7]}`", f"by {run.get('agent')}"]
@@ -660,6 +736,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         "head": info["head"],
         "round": rnd,
         "allowed": limit,
+        "review": getattr(args, "kind", None) or "code",
     }
     if pr_error:
         run["post_error"] = pr_error
@@ -683,8 +760,9 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     start = time.monotonic()
     try:
         if findings_in is None:
-            method, method_src = find_method(info, getattr(args, "method", None))
-            findings_in, extra = review(info, rnd, method, getattr(args, "model", None))
+            method, method_src = find_method(info, getattr(args, "method", None), run["review"])
+            findings_in, extra = review(info, rnd, method, getattr(args, "model", None),
+                                        MODEL_SCHEMA if run["review"] == "model" else FINDINGS_SCHEMA)
             meta = {**meta, **extra, "method": method_src}
         rows = []
         for f in findings_in:
@@ -716,6 +794,10 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
                     "fix": f.get("fix", ""),
                 }
             )
+            if run["review"] == "model":
+                # an unclassed model finding goes to the person in charge
+                c = str(f.get("class", "")).strip().lower()
+                rows[-1]["class"] = c if c in CLASSES else "design"
     except BaseException as e:  # the run is still recorded, and its round freed
         reason = f"exit {e.code}" if isinstance(e, SystemExit) else str(e) or type(e).__name__
         run.update(result="error", error=reason[:500], ended=now(), counts=counts([]), fix_rounds=[])
@@ -742,6 +824,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         disagree=sum(1 for r in rows if r["claimed_origin"] and r["claimed_origin"] != r["origin"]),
         repeats=sum(1 for r in rows if r["repeat_of"]),
     )
+    if run["review"] == "model":
+        run["design"] = sum(1 for r in rows if r.get("class") == "design")
     post(args, run, rows)
     with locked():
         append(RUNS, [run])
@@ -752,7 +836,8 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
         if r["claimed_origin"] and r["claimed_origin"] != r["origin"]:
             tag += f" [reviewer: {r['claimed_origin']}]"
         again = f" (repeat of {r['repeat_of']})" if r.get("repeat_of") else ""
-        print(f"  {r['id']:<6} {r['severity']:<6} {r['kind']:<6} {tag:<16} {where}  {r['summary']}{again}")
+        cls = f"{r['class']:<7}" if r.get("class") else ""
+        print(f"  {r['id']:<6} {r['severity']:<6} {r['kind']:<6} {cls}{tag:<16} {where}  {r['summary']}{again}")
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
@@ -877,10 +962,13 @@ def main() -> int:
         sp.add_argument("--pr", type=int, help="pull request number (default: the branch's open one)")
         sp.add_argument("--agent", help="who is running the round")
         sp.add_argument("--no-post", action="store_true", help="don't comment on the pull request")
+        sp.add_argument("--kind", choices=REVIEWS, default="code",
+                        help="what the round reviews: code (default) or a model")
 
     r = sub.add_parser("run", help="review the current branch with claude -p")
     common(r)
-    r.add_argument("--method", help="review method file (default: the pr-review skill)")
+    r.add_argument("--method", help="review method file (default: the pr-review skill, or "
+                   "review-model with --kind model)")
     r.add_argument("--model")
     r.set_defaults(func=cmd_run)
 

@@ -1,6 +1,6 @@
 # review-round
 
-Runs one code-review round on a branch, and keeps a record of every run.
+Runs one review round on a branch, of its code or of a model, and keeps a record of every run.
 
 ## Why
 
@@ -13,8 +13,8 @@ Runs one code-review round on a branch, and keeps a record of every run.
 
 | Command | What it does |
 |---|---|
-| `review-round run [--pr N]` | Reviews this branch's diff against its base with `claude -p` |
-| `review-round record --findings FILE [--round N]` | Records findings from a review done elsewhere, such as a subagent |
+| `review-round run [--kind code\|model] [--pr N]` | Reviews this branch's diff against its base with `claude -p`; `--kind model` reviews a model |
+| `review-round record --findings FILE [--kind code\|model] [--round N]` | Records findings from a review done elsewhere, such as a subagent |
 | `review-round status [--all]` | Rounds per branch, newest first, with the last round's findings |
 | `review-round stats [--repo owner/name]` | Running totals by severity and origin |
 | `review-round allow BRANCH N [--by NAME]` | Lets a branch run N more rounds |
@@ -48,6 +48,18 @@ Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 
 - Each finding has a kind as well as a severity.
 - **bug**: some input or state gives a wrong result — a crash, a hang, a wrong answer, lost data, a leak, a security hole.
 - **polish**: nothing behaves wrongly — wording, naming, docs, a weak test, style.
+
+## Model rounds
+
+- `--kind model` reviews a model: a formal specification, its check script and records, its modelling choices and diagrams.
+- A model often changes how things work, so the reference is the model's own intent and sources, never today's code.
+- Each finding also has a class:
+  - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
+  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge as an issue.
+- A finding with no class counts as design.
+- The summary line counts design findings: `N design for the person in charge`.
+- The comment gains a class column, and the run's log line records `"review": "model"`.
+- Code rounds and model rounds on one branch share its round limit.
 - Severity says how much harm; kind says whether there is any. An unlikely bug is a low bug, not polish.
 - A round is `clean` only when it has no bugs and no high or medium findings.
 - The summary line counts the bugs: `clean — 0 high, 0 medium, 1 low` is polish only.
@@ -112,8 +124,9 @@ In `~/.local/share/review-round/` (`REVIEW_ROUND_HOME`):
 ## The review
 
 - `run` gives `claude -p` the `pr-review` skill as its method when one exists: `.claude/skills/pr-review/SKILL.md` on the base branch, then in `~/.claude`.
+- A model round looks for the `review-model` skill in the same two places: `.claude/skills/review-model/SKILL.md`.
 - The repo's copy is read from the base branch, so a branch can't rewrite its own review rules.
-- Otherwise it uses a short built-in method. `--method FILE` names another.
+- Otherwise it uses a built-in method, one for code and one for models. `--method FILE` names another.
 - The script puts the commits and the diff in the prompt (past 200,000 characters, the `--stat` and a note to read the files).
 - The reviewer is read-only, whatever the user's settings: `--tools Read,Grep,Glob`, `--permission-mode dontAsk` and `--strict-mcp-config`. It has no shell, since git's own options can read and write any file.
 - It loads no settings files (`--setting-sources ""`). A branch's own `.claude/settings.json` could hold hooks, and hooks run commands; tested: a branch hook runs with the default sources and not with none. This also keeps the user's CLAUDE.md out of its context.
