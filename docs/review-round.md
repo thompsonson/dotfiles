@@ -66,6 +66,7 @@ A rule of "fix highs and mediums" then merged real bugs, such as a search that h
 - A finding with no class is logged `unclassed`, for someone to class.
 - Every class counts towards the result, as in a code round: a design bug, or a high or medium design finding, makes the round `findings`.
 - The reviewer sees earlier model findings with their class. A design finding still open is reported again in each round, and marked as a repeat.
+- A design finding is closed by the decision, recorded in the model's own documents: what was decided, by whom, and where. The method treats a recorded decision as part of the intent, so later rounds don't report it again.
 - A round with any design or unclassed finding exits 4, after it logs the run and posts the comment.
   - It prints a block for the person in charge: each such finding's summary, scenario and open question.
   - It ends by telling the agent to stop, take the whole round to the person in charge, and fix nothing until they decide.

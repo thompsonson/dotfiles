@@ -161,6 +161,9 @@ The reference is the model's stated intent, not today's code.
 - Code, configuration and documents elsewhere are examples, never constraints.
 - Never report that the model differs from how something works today. Report a
   difference only when the model's own sources require it to match.
+- A decision of the person in charge is part of the intent once the model's documents
+  record it: what was decided, by whom, and where (an issue or a comment). Don't report
+  a recorded decision as a finding. Do report a document that misstates one, as text.
 
 What to check:
 1. Intent. Each property states a guarantee the header or the cited issue promises.
