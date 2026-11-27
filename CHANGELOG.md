@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.3.0](https://github.com/thompsonson/dotfiles/compare/v1.2.0...v1.3.0) (2026-11-27)
+
+
+### Features
+
+* **claude-tmp-clean:** remove idle Cargo build folders from the folders it keeps ([#107](https://github.com/thompsonson/dotfiles/issues/107)) ([fa395dd](https://github.com/thompsonson/dotfiles/commit/fa395dddfb04314c5332e64a85bbc688a666b286))
+* **claude-tmp-clean:** remove idle Claude Code session temp folders ([#90](https://github.com/thompsonson/dotfiles/issues/90)) ([fee0b0b](https://github.com/thompsonson/dotfiles/commit/fee0b0b1164234676b127688276e7cc5cb233418))
+* **claude:** manage the global Claude Code instructions ([#86](https://github.com/thompsonson/dotfiles/issues/86)) ([608aad8](https://github.com/thompsonson/dotfiles/commit/608aad81a54b0e3cc640a61eaa83359073cbb202))
+* **claude:** search for an existing tool before writing one ([#88](https://github.com/thompsonson/dotfiles/issues/88)) ([fe31109](https://github.com/thompsonson/dotfiles/commit/fe31109644b395f7fe4d9c44fcdb6d4fe48d023b))
+* **claude:** the search-first rule applies to agents too, not just to you ([#89](https://github.com/thompsonson/dotfiles/issues/89)) ([2e663b4](https://github.com/thompsonson/dotfiles/commit/2e663b449fb1d366287ff7a63bb2f7f8e1827abf))
+* **review-round:** a model round, reviewed against the model's intent ([#112](https://github.com/thompsonson/dotfiles/issues/112)) ([9bf0b6a](https://github.com/thompsonson/dotfiles/commit/9bf0b6a1a99b89828482def22c19fd634362e059))
+* **review-round:** mark each finding a bug or polish; fix every bug ([#103](https://github.com/thompsonson/dotfiles/issues/103)) ([6458e95](https://github.com/thompsonson/dotfiles/commit/6458e95ba30afa25526fdd1e0122985f6fa2d248))
+* **review-round:** post on the branch's open pull request by default ([#101](https://github.com/thompsonson/dotfiles/issues/101)) ([2fa761f](https://github.com/thompsonson/dotfiles/commit/2fa761f4eb24ac694fb19736e2e6378167d57073))
+* **review-round:** review rounds with a run log, finding origins and a round limit ([#96](https://github.com/thompsonson/dotfiles/issues/96)) ([bdcabe9](https://github.com/thompsonson/dotfiles/commit/bdcabe9ccdf78822feb609fae450f552966d0452))
+
+
+### Bug Fixes
+
+* **gnupg:** point brew's gpg-agent at the distro pinentry ([#84](https://github.com/thompsonson/dotfiles/issues/84)) ([cda139a](https://github.com/thompsonson/dotfiles/commit/cda139ad2f632e9ca66ba77f619b5c971bbe3154))
+* **gnupg:** point gpg-agent.service at brew's gpg-agent, not apt's ([#81](https://github.com/thompsonson/dotfiles/issues/81)) ([5a38776](https://github.com/thompsonson/dotfiles/commit/5a38776933480180a7b548121ed5777ef077cdf3))
+* **gnupg:** translate --supervised for GnuPG's dev-branch gpg-agent ([#82](https://github.com/thompsonson/dotfiles/issues/82)) ([fff89b4](https://github.com/thompsonson/dotfiles/commit/fff89b4edee03b6e972eb084cc7a60cd1d33c427))
+* **sysbak:** doctor compares the config with rsnapshot.conf ([#106](https://github.com/thompsonson/dotfiles/issues/106)) ([400a7be](https://github.com/thompsonson/dotfiles/commit/400a7bef4715761d773d7365ecf5c05964e10f4d))
+* **sysbak:** exclude cargo target/ and keep .git/objects/ in backups ([#91](https://github.com/thompsonson/dotfiles/issues/91)) ([4e5fb92](https://github.com/thompsonson/dotfiles/commit/4e5fb927a1b2d9caf13a8ff2a779f579222707ac))
+* **sysbak:** find snapshot versions by direct path ([#95](https://github.com/thompsonson/dotfiles/issues/95)) ([a6f8a4e](https://github.com/thompsonson/dotfiles/commit/a6f8a4ec145dd9fe7f276b127efecd18050290ef))
+* **zsh:** make `h` search full history, not just the last 16 ([#76](https://github.com/thompsonson/dotfiles/issues/76)) ([5547e24](https://github.com/thompsonson/dotfiles/commit/5547e24f3e0e7ef654aa0d1412eb97746594332b))
+* **zsh:** put ~/.opencode/bin on PATH ([#77](https://github.com/thompsonson/dotfiles/issues/77)) ([ad21b7a](https://github.com/thompsonson/dotfiles/commit/ad21b7a09874a5288dce1fac1eff7f4e3a23515f))
+
+
+### Performance
+
+* **shell,tmux:** faster prompt startup + fewer render triggers ([#75](https://github.com/thompsonson/dotfiles/issues/75)) ([8266e6f](https://github.com/thompsonson/dotfiles/commit/8266e6fb85afb97885fc69f80d2925f0da1242bf))
+
+
+### Refactoring
+
+* **telemetry:** remove the OTel collector pipeline ([#110](https://github.com/thompsonson/dotfiles/issues/110)) ([a99291e](https://github.com/thompsonson/dotfiles/commit/a99291edfa3429c0ab6d62806b85d9e7786775a9))
+
+
+### Documentation
+
+* **claude:** Manta projects are excluded from review-round ([#100](https://github.com/thompsonson/dotfiles/issues/100)) ([25e4940](https://github.com/thompsonson/dotfiles/commit/25e4940ba8cecdab64782a6e5c57886b9a1ba953))
+* **claude:** Manta repos follow the CI review, not review-round ([#99](https://github.com/thompsonson/dotfiles/issues/99)) ([7429b43](https://github.com/thompsonson/dotfiles/commit/7429b433779184d736b01bdddef0bfae24c2670f))
+
 ## [1.2.0](https://github.com/thompsonson/dotfiles/compare/v1.1.0...v1.2.0) (2026-08-26)
 
 
