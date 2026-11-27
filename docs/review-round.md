@@ -64,7 +64,7 @@ A rule of "fix highs and mediums" then merged real bugs, such as a search that h
   - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
   - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge. Once they decide, the author fixes it on the branch.
 - A finding with no class is logged `unclassed`, for someone to class.
-- Every class counts towards the result, as in a code round: a design bug, or a high or medium design finding, makes the round `findings`.
+- Every class counts towards the result, as in a code round. A design or unclassed finding of any severity also makes the round `findings`, since the round stops for it.
 - The reviewer sees earlier model findings with their class. A design finding still open is reported again in each round, and marked as a repeat.
 - A design finding is closed by the decision, recorded in the model's own documents: what was decided, and a link to the person in charge's own words. The method treats a recorded decision as part of the intent, so later rounds don't report it again.
 - A recorded decision with no such link is reported as design, so it comes back to the person in charge.

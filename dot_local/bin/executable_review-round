@@ -611,6 +611,10 @@ def bugs(rows: list[dict]) -> int:
     return sum(1 for r in rows if r.get("kind", "bug") == "bug")
 
 
+def to_decide(rows: list[dict]) -> list[dict]:
+    """A model round's findings that need the person in charge: design or unclassed."""
+    return [r for r in rows if r.get("class") in ("design", "unclassed")]
+
 
 def summary_line(run: dict) -> str:
     c = run["counts"]
@@ -837,8 +841,9 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     run.update(
         ended=now(),
         seconds=round(time.monotonic() - start, 1),
-        result="findings" if bugs(rows) or any(c[s][o] for s in ("high", "medium") for o in ORIGINS)
-        else "clean",
+        # A finding to decide, of any severity, is never clean: the round stops for it
+        result="findings" if bugs(rows) or to_decide(rows)
+        or any(c[s][o] for s in ("high", "medium") for o in ORIGINS) else "clean",
         bugs=bugs(rows),
         counts=c,
         fix_rounds=sorted({r["fix_round"] for r in rows if r["fix_round"]}),
@@ -863,7 +868,7 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
-    decide = [r for r in rows if r.get("class") in ("design", "unclassed")]
+    decide = to_decide(rows)
     if decide:
         print(decision_block(decide))
         return 4
@@ -874,7 +879,7 @@ def decision_block(rows: list[dict]) -> str:
     """What the person in charge needs to decide, for the agent to hand over as it is."""
     lines = ["", "## For the person in charge: a decision is needed", ""]
     for r in rows:
-        where = f"{r['file']}:{r['line']}" if r.get("file") else "-"
+        where = (f"{r['file']}:{r['line']}" if r.get("line") else r["file"]) if r.get("file") else "-"
         what = "design" if r["class"] == "design" else "unclassed: design or text?"
         lines.append(f"- {r['id']} [{r['severity']} {r['kind']}, {what}] {where}")
         for label, key in (("Finding", "summary"), ("Scenario", "scenario"), ("Open question", "fix")):

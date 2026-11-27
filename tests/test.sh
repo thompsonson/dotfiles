@@ -372,15 +372,23 @@ PY
     else
         fail "review-round model record (rc=$rc): $out"; failed=1
     fi
-    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"s1","fix":"q1"}]}' > "$t/design.json"
+    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"s1","fix":"q1"},{"severity":"low","kind":"polish","class":"design","file":"f.txt","summary":"p","scenario":"s2"}]}' > "$t/design.json"
     out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
-    if [[ $rc -eq 4 ]] && grep -q "findings — 1 high.*1 design for the person in charge" <<<"$out" \
+    if [[ $rc -eq 4 ]] && grep -q "findings — 1 high, 0 medium, 1 low.*2 design for the person in charge" <<<"$out" \
+        && grep -q "r4.2 \[low polish, design\] f.txt$" <<<"$out" \
         && grep -q "## For the person in charge: a decision is needed" <<<"$out" \
         && grep -q "Scenario: s1" <<<"$out" && grep -q "Open question: q1" <<<"$out" \
         && tail -1 <<<"$out" | grep -q "Fix nothing on this branch until they decide"; then
         pass "review-round exits 4 on a design finding, with a block for the person in charge"
     else
         fail "review-round design-only round (rc=$rc): $out"; failed=1
+    fi
+    printf '{"findings":[{"severity":"low","kind":"polish","class":"design","summary":"p","scenario":"x"}]}' > "$t/polish.json"
+    out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/polish.json" --pr 7 2>&1); rc=$?
+    if [[ $rc -eq 4 ]] && grep -q "round 5/9: findings — 0 high, 0 medium, 1 low" <<<"$out"; then
+        pass "review-round never logs a round with a finding to decide as clean"
+    else
+        fail "review-round polish design round (rc=$rc): $out"; failed=1
     fi
     out=$(cd "$t/repo" && "${rrm[@]}" record --findings "$t/model.json" --pr 7 2>&1); rc=$?
     if [[ $rc -eq 2 ]] && grep -q "use --review model" <<<"$out"; then
