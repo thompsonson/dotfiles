@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""review-round - run one code-review round on a branch, and keep a record of every run.
+"""review-round - run one review round on a branch, of its code or of a model, and keep a record of every run.
 
 Each round:
   - reviews the branch's diff against its base with `claude -p`, or records findings
