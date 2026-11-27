@@ -41,7 +41,7 @@ The comment holds:
 The comment's address goes in the run's log line (`posted`), or the failure (`post_error`).
 `--no-post` skips the comment.
 
-Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused (over the limit).
+Exit codes: 0 no bugs and no high findings, 1 a bug or a high finding, 2 error, 3 refused (over the limit), 4 a decision is needed (a model round's design or unclassed finding).
 
 ## Bugs and polish
 
@@ -62,10 +62,14 @@ A rule of "fix highs and mediums" then merged real bugs, such as a search that h
 - A model often changes how things work, so the reference is the model's own intent and sources, never today's code.
 - Each finding also has a class:
   - **text**: the files misstate what the model does, or leave something out. The author fixes it in the pull request.
-  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge as an issue.
+  - **design**: the model shows the mechanism fails a claim, or leaves a case undecided. It goes to the person in charge. Once they decide, the author fixes it on the branch.
 - A finding with no class is logged `unclassed`, for someone to class.
 - Every class counts towards the result, as in a code round: a design bug, or a high or medium design finding, makes the round `findings`.
-- The reviewer sees earlier model findings with their class, and doesn't report a design finding again unless the change made it worse.
+- The reviewer sees earlier model findings with their class. A design finding still open is reported again in each round, and marked as a repeat.
+- A round with any design or unclassed finding exits 4, after it logs the run and posts the comment.
+  - It prints a block for the person in charge: each such finding's summary, scenario and open question.
+  - It ends by telling the agent to stop, take the whole round to the person in charge, and fix nothing until they decide.
+  - Why: review-round runs inside an interactive session, and only the person in charge can decide a design question.
 - The summary line counts design and unclassed findings: `N design for the person in charge`, `N unclassed`.
 - The comment gains a class column, and the run's log line records `"review": "model"`.
 - Code rounds and model rounds on one branch share its round limit.

@@ -354,7 +354,7 @@ PY
     "${g[@]}" -C "$t/repo" checkout -q -b model
     (cd "$t/repo" && "${rrm[@]}" run --pr 7 >/dev/null 2>&1)
     out=$(cd "$t/repo" && "${rrm[@]}" run --review model --pr 7 2>&1); rc=$?
-    if [[ $rc -eq 1 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
+    if [[ $rc -eq 4 ]] && grep -q "The reference is the model's stated intent" "$t/claude-prompt" \
         && grep -A1 -x "## Earlier findings" "$t/claude-prompt" | tail -1 | grep -qx "(none)" \
         && grep -q '"class"' "$t/claude-args" && grep -q "findings — .*3 unclassed" <<<"$out" \
         && grep -q "| id | severity | kind | class | origin |" "$t/comment.md" \
@@ -372,10 +372,13 @@ PY
     else
         fail "review-round model record (rc=$rc): $out"; failed=1
     fi
-    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"x"}]}' > "$t/design.json"
+    printf '{"findings":[{"severity":"high","kind":"bug","class":"design","summary":"d","scenario":"s1","fix":"q1"}]}' > "$t/design.json"
     out=$(cd "$t/repo" && "${rrm[@]}" record --review model --findings "$t/design.json" --pr 7 2>&1); rc=$?
-    if [[ $rc -eq 1 ]] && grep -q "findings — 1 high.*1 design for the person in charge" <<<"$out"; then
-        pass "review-round counts a design finding towards the result"
+    if [[ $rc -eq 4 ]] && grep -q "findings — 1 high.*1 design for the person in charge" <<<"$out" \
+        && grep -q "## For the person in charge: a decision is needed" <<<"$out" \
+        && grep -q "Scenario: s1" <<<"$out" && grep -q "Open question: q1" <<<"$out" \
+        && tail -1 <<<"$out" | grep -q "Fix nothing on this branch until they decide"; then
+        pass "review-round exits 4 on a design finding, with a block for the person in charge"
     else
         fail "review-round design-only round (rc=$rc): $out"; failed=1
     fi

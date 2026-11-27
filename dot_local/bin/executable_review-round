@@ -24,6 +24,12 @@ Each round:
 After a set number of rounds on one branch (default 3) it stops until a person
 allows more with `review-round allow`, so no agent loops unseen.
 
+A model round with a design or unclassed finding exits 4: a decision is needed. It
+prints those findings for the person in charge, and tells the agent to stop.
+
+Exit codes: 0 clean or polish only, 1 a bug or a high finding, 2 error, 3 refused
+(over the limit), 4 a decision is needed.
+
 Usage:
   review-round run    [--review code|model] [--base REF] [--pr N] [--agent NAME] [--method FILE] [--model M]
   review-round record --findings FILE [--review code|model] [--base REF] [--pr N] [--agent NAME] [--reviewer NAME]
@@ -179,7 +185,7 @@ Give each finding a class.
 - design: the model, as intended, shows the mechanism fails a claim, or leaves a case
   undecided. For example: a counterexample under a setting the world allows, or a
   guarantee that rests on an assumption the world does not give. It goes to the person
-  in charge as an issue. The author does not change the design to make it go away.
+  in charge. Once they decide, the author fixes it on the branch.
 - When unsure, use design. Every finding needs a class.
 
 The fields:
@@ -192,8 +198,6 @@ The fields:
   build), or fix (an earlier review round's fix commit).
 - Merge findings that share one cause. Name the fix for text; name the open question
   for design.
-- A design finding already listed under earlier findings has been handed on. Don't
-  report it again, unless this change made it worse.
 - Do not edit files.
 """
 
@@ -854,7 +858,27 @@ def do_round(args, findings_in: list[dict] | None, meta: dict) -> int:
     print(summary_line(run))
     if run.get("posted"):
         print(f"review-round: posted {run['posted']}")
+    decide = [r for r in rows if r.get("class") in ("design", "unclassed")]
+    if decide:
+        print(decision_block(decide))
+        return 4
     return 1 if run["bugs"] or sum(c["high"].values()) else 0
+
+
+def decision_block(rows: list[dict]) -> str:
+    """What the person in charge needs to decide, for the agent to hand over as it is."""
+    lines = ["", "## For the person in charge: a decision is needed", ""]
+    for r in rows:
+        where = f"{r['file']}:{r['line']}" if r.get("file") else "-"
+        what = "design" if r["class"] == "design" else "unclassed: design or text?"
+        lines.append(f"- {r['id']} [{r['severity']} {r['kind']}, {what}] {where}")
+        for label, key in (("Finding", "summary"), ("Scenario", "scenario"), ("Open question", "fix")):
+            text = " ".join(str(r.get(key) or "").split())
+            if text:
+                lines.append(f"  {label}: {text}")
+    lines += ["", "review-round: stop. Take these findings, and the rest of this round, to the "
+              "person in charge. Fix nothing on this branch until they decide."]
+    return "\n".join(lines)
 
 
 # ── Commands ──────────────────────────────────────────────────────────────────
